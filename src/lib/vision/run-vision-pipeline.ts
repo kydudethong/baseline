@@ -1,0 +1,153 @@
+import { getPhase2VisionProvider } from "./provider-v2";
+import { analyzeMovementWithCalibration } from "./provider-v2";
+import { detectUnknownShotEvents, detectFootworkFoundation } from "./events";
+import type {
+  AnalysisEvent,
+  CourtCalibration,
+  FrameDetectionSet,
+  PlayerMovementMetrics,
+  PlayerPoseFrame,
+  PlayerTrack,
+  QualityDiagnostics,
+} from "./phase2-types";
+
+export interface VisionPipelineInput {
+  videoPath: string;
+  frames: Array<{ path: string; timestampSeconds: number }>;
+  frameWidthPx: number;
+  frameHeightPx: number;
+  visionFps: number;
+  videoDurationSeconds: number;
+}
+
+export interface VisionPipelineOutput {
+  providerName: string;
+  courtCalibration: CourtCalibration;
+  perFrameDetections: FrameDetectionSet[];
+  tracks: PlayerTrack[];
+  poses: PlayerPoseFrame[];
+  movement: PlayerMovementMetrics[];
+  footwork: ReturnType<typeof detectFootworkFoundation>[];
+  events: AnalysisEvent[];
+  quality: QualityDiagnostics;
+}
+
+/**
+ * The real Phase 2 CV pipeline, independent of how it's invoked (the Next.js
+ * background job in pipeline-v2.ts, or the standalone benchmark harness in
+ * scripts/run-benchmark.mjs both call this). Deliberately has no knowledge
+ * of Supabase/DB — it just does the CV work and returns structured data,
+ * which keeps it testable without a live database connection (relevant
+ * here: this dev environment has no network path to Supabase either — see
+ * the deliverables report).
+ */
+export async function runVisionPipeline(input: VisionPipelineInput): Promise<VisionPipelineOutput> {
+  const provider = getPhase2VisionProvider(input.frameWidthPx, input.frameHeightPx);
+  const knownLimitations: string[] = [];
+
+  // Court geometry doesn't change within a single fixed-camera clip, so
+  // calibration only needs to run once — but which single frame it runs on
+  // matters a lot in practice: a player briefly occluding the court paint,
+  // motion blur, or a moment where the color mask catches a neighboring
+  // court can drop confidence to 0 on one frame while a frame a few
+  // seconds away calibrates fine. Try several evenly-spaced candidates and
+  // keep the highest-confidence result, rather than gambling on one frame.
+  const candidateIndices = [0.1, 0.3, 0.5, 0.7, 0.9].map((f) => Math.floor(input.frames.length * f));
+  let courtCalibration: Awaited<ReturnType<typeof provider.detectCourt>> | null = null;
+  for (const idx of candidateIndices) {
+    const frame = input.frames[idx];
+    if (!frame) continue;
+    const candidate = await provider.detectCourt(frame);
+    if (!courtCalibration || candidate.confidence > courtCalibration.confidence) {
+      courtCalibration = candidate;
+    }
+    if (courtCalibration.confidence >= 0.7) break; // good enough, stop spending calls
+  }
+  courtCalibration ??= await provider.detectCourt(input.frames[0]);
+  if (courtCalibration.confidence === 0) {
+    knownLimitations.push("Court calibration failed on every candidate frame tried — movement metrics will be null for every player.");
+  }
+
+  // Player detection, one Roboflow call per sampled frame. Sequential
+  // (not Promise.all) on purpose — a free-tier hosted API can rate-limit
+  // bursts, and this keeps VISION_FPS the actual throttle on call volume.
+  const perFrameDetections: FrameDetectionSet[] = [];
+  for (const frame of input.frames) {
+    const players = await provider.detectPlayers(frame);
+    perFrameDetections.push({ timestampSeconds: frame.timestampSeconds, framePath: frame.path, players });
+  }
+
+  const tracks = await provider.trackPlayers(perFrameDetections);
+  if (tracks.length === 0) {
+    knownLimitations.push("No player tracks survived (need >=2 sampled detections to count as a track).");
+  } else if (tracks.length < 4) {
+    knownLimitations.push(`Only ${tracks.length} stable player track(s) found; expected up to 4 for doubles.`);
+  }
+
+  // Pose per sampled frame, matched back to tracks by box overlap.
+  let poses: PlayerPoseFrame[] = [];
+  try {
+    const { estimatePosesForFrames } = await import("./pose");
+    poses = await estimatePosesForFrames(input.frames, tracks);
+  } catch (err) {
+    knownLimitations.push(`Pose estimation failed: ${(err as Error).message}`);
+  }
+
+  const movement = tracks.map((t) =>
+    analyzeMovementWithCalibration(t, courtCalibration, input.frameWidthPx, input.frameHeightPx)
+  );
+  const footwork = tracks.map((t) => detectFootworkFoundation(t));
+
+  const events: AnalysisEvent[] = [];
+  let audioEventCount = 0;
+  try {
+    const { events: shotEvents } = await detectUnknownShotEvents(input.videoPath);
+    events.push(...shotEvents);
+    audioEventCount = shotEvents.length;
+  } catch (err) {
+    knownLimitations.push(`Audio event detection failed: ${(err as Error).message}`);
+  }
+  for (const fw of footwork) {
+    for (const candidate of fw.possibleSplitSteps) {
+      events.push({
+        type: "possible_split_step",
+        timestampSeconds: candidate.timestampSeconds,
+        playerId: fw.playerId,
+        confidence: candidate.confidence,
+        source: "movement-heuristic",
+      });
+    }
+  }
+  events.sort((a, b) => a.timestampSeconds - b.timestampSeconds);
+
+  const playerCounts = perFrameDetections.map((f) => f.players.length);
+  const quality: QualityDiagnostics = {
+    videoDurationSeconds: input.videoDurationSeconds,
+    visionFps: input.visionFps,
+    framesSampled: input.frames.length,
+    courtCalibrationConfidence: courtCalibration.confidence,
+    playersDetectedPerFrame: {
+      min: playerCounts.length ? Math.min(...playerCounts) : 0,
+      max: playerCounts.length ? Math.max(...playerCounts) : 0,
+      mean: playerCounts.length ? Math.round((playerCounts.reduce((a, b) => a + b, 0) / playerCounts.length) * 100) / 100 : 0,
+    },
+    tracksProduced: tracks.length,
+    tracksWithStableId: tracks.filter((t) => t.points.length >= input.frames.length * 0.3).length,
+    poseFramesAttempted: input.frames.length,
+    poseFramesSucceeded: new Set(poses.map((p) => p.timestampSeconds)).size,
+    audioEventCount,
+    knownLimitations,
+  };
+
+  return {
+    providerName: provider.name,
+    courtCalibration,
+    perFrameDetections,
+    tracks,
+    poses,
+    movement,
+    footwork,
+    events,
+    quality,
+  };
+}
