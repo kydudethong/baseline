@@ -64,7 +64,7 @@ export default async function AnalysisDetailPage({
 
   return (
     <>
-      <Link href="/dashboard" className="crumb">← All analyses</Link>
+      <Link href="/dashboard/library" className="crumb">← All analyses</Link>
 
       <div className="stack g3">
         <div className="row g3">

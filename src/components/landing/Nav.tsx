@@ -1,45 +1,32 @@
 import Link from "next/link";
+import { Ball } from "@/components/motifs/Motifs";
 
 export function Nav({ isAuthed }: { isAuthed: boolean }) {
   return (
-    <header className="border-b border-slate-200 bg-white/80 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-        <Link href="/" className="text-lg font-bold tracking-tight text-slate-900">
-          Baseline
-        </Link>
-        <nav className="hidden items-center gap-8 text-sm font-medium text-slate-600 sm:flex">
-          <a href="#how-it-works" className="hover:text-slate-900">
-            How it works
-          </a>
-          <a href="#features" className="hover:text-slate-900">
-            What you get
-          </a>
-        </nav>
-        <div className="flex items-center gap-3">
-          {isAuthed ? (
-            <Link
-              href="/dashboard"
-              className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
-            >
-              Dashboard
+    <header className="topbar" style={{ position: "static", borderBottom: "1px solid var(--line)" }}>
+      <Link href="/" className="logo">
+        <Ball size={24} />
+        <span className="wm">Baseline</span>
+      </Link>
+      <nav className="topnav" style={{ marginLeft: "var(--a6)", marginRight: "auto" }}>
+        <a href="#how-it-works">How it works</a>
+        <a href="#features">What you get</a>
+      </nav>
+      <div className="row g3">
+        {isAuthed ? (
+          <Link href="/dashboard" className="btn btn-optic btn-sm">
+            Dashboard
+          </Link>
+        ) : (
+          <>
+            <Link href="/login" className="btn btn-ghost btn-sm">
+              Log in
             </Link>
-          ) : (
-            <>
-              <Link
-                href="/login"
-                className="hidden text-sm font-medium text-slate-600 hover:text-slate-900 sm:block"
-              >
-                Log in
-              </Link>
-              <Link
-                href="/signup"
-                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
-              >
-                Sign up
-              </Link>
-            </>
-          )}
-        </div>
+            <Link href="/signup" className="btn btn-optic btn-sm">
+              Sign up
+            </Link>
+          </>
+        )}
       </div>
     </header>
   );

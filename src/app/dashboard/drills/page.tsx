@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getAllDrills } from "@/lib/coaching/drills";
 import { SKILLS } from "@/lib/coaching/types";
 import type { CoachingDrillRow } from "@/lib/db/types";
+import { Paddle } from "@/components/motifs/Motifs";
 
 export const metadata: Metadata = { title: "Drills — Baseline" };
 export const dynamic = "force-dynamic";
@@ -61,7 +62,10 @@ function DrillCard({ drill }: { drill: CoachingDrillRow }) {
     <div className="card stack g3">
       <div className="stack g1">
         <div className="row g2" style={{ justifyContent: "space-between" }}>
-          <span className="eyebrow">{skillName(drill.skill_key)}</span>
+          <span className="eyebrow row g1" style={{ color: "var(--ink-2)" }}>
+            <Paddle size={13} />
+            {skillName(drill.skill_key)}
+          </span>
           <span className="chip">{drill.difficulty}</span>
         </div>
         <p className="h3">{drill.name}</p>

@@ -49,18 +49,18 @@ export default async function HomePage() {
         <h1 className="h1">Your game, at a glance</h1>
       </div>
 
-      <div className="figs">
-        <div className="fig">
-          <div className="v">{analyses.length}</div>
-          <div className="c">Game{analyses.length === 1 ? "" : "s"} uploaded</div>
+      <div className="scoreboard-row">
+        <div className="cell">
+          <div className="num">{analyses.length}</div>
+          <div className="lbl">Game{analyses.length === 1 ? "" : "s"} uploaded</div>
         </div>
-        <div className="fig">
-          <div className="v">{completedCount}</div>
-          <div className="c">Breakdown{completedCount === 1 ? "" : "s"} ready</div>
+        <div className="cell">
+          <div className="num">{completedCount}</div>
+          <div className="lbl">Ready</div>
         </div>
-        <div className="fig">
-          <div className="v">{inFlightCount}</div>
-          <div className="c">Currently processing</div>
+        <div className="cell">
+          <div className="num">{inFlightCount}</div>
+          <div className="lbl">Processing</div>
         </div>
       </div>
 

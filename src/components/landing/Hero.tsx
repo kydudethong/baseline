@@ -1,60 +1,66 @@
 import Link from "next/link";
+import { CourtWatermark } from "@/components/motifs/Motifs";
 
 export function Hero({ analyzeHref }: { analyzeHref: string }) {
   return (
-    <section className="border-b border-slate-200 bg-slate-50">
-      <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 sm:py-28 lg:grid-cols-2">
-        <div>
-          <p className="mb-4 inline-block rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-800">
+    <section style={{ borderBottom: "1px solid var(--line)", position: "relative", overflow: "hidden" }}>
+      <CourtWatermark opacity={0.05} />
+      <div
+        className="row"
+        style={{
+          position: "relative",
+          maxWidth: 1140,
+          margin: "0 auto",
+          padding: "88px var(--a5) 96px",
+          gap: "var(--a7)",
+          alignItems: "center",
+        }}
+      >
+        <div className="stack g4" style={{ flex: "1 1 420px", minWidth: 0 }}>
+          <span className="eyebrow" style={{ color: "#5C6A16" }}>
             Now in early access
-          </p>
-          <h1 className="text-4xl font-bold leading-tight tracking-tight text-slate-900 sm:text-5xl">
+          </span>
+          <h1 className="d1" style={{ maxWidth: "14ch" }}>
             Turn game footage into a real coaching session.
           </h1>
-          <p className="mt-5 max-w-xl text-lg text-slate-600">
-            Upload a recording of your match. Baseline breaks down your
-            positioning, footwork, and readiness patterns — the way a coach
-            would, without waiting a week for the video review.
+          <p className="body measure" style={{ maxWidth: "42ch" }}>
+            Upload a recording of your match. Baseline breaks down your positioning, footwork, and readiness
+            patterns — the way a coach would, without waiting a week for the video review.
           </p>
-          <div className="mt-8 flex flex-wrap items-center gap-4">
-            <Link
-              href={analyzeHref}
-              className="rounded-lg bg-emerald-700 px-6 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-emerald-800"
-            >
-              Analyze Your Game
+          <div className="row g3" style={{ marginTop: "var(--a2)" }}>
+            <Link href={analyzeHref} className="btn btn-optic">
+              Analyze your game
             </Link>
-            <a
-              href="#how-it-works"
-              className="rounded-lg border border-slate-300 bg-white px-6 py-3 text-base font-semibold text-slate-700 transition hover:border-slate-400"
-            >
-              See How It Works
+            <a href="#how-it-works" className="btn btn-soft">
+              See how it works
             </a>
           </div>
-          <p className="mt-4 text-sm text-slate-500">
-            Free while in early access. No credit card required.
-          </p>
+          <span className="xs">Free while in early access. No credit card required.</span>
         </div>
 
-        <div className="relative">
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
-            <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3">
-              <span className="h-2.5 w-2.5 rounded-full bg-red-400" />
-              <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-              <span className="ml-2 text-xs font-medium text-slate-400">
+        <div style={{ flex: "1 1 380px", minWidth: 0 }}>
+          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            <div className="row g2" style={{ padding: "var(--a3) var(--a4)", borderBottom: "1px solid var(--line)" }}>
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--bad)" }} />
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--warn)" }} />
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--good)" }} />
+              <span className="xs" style={{ marginLeft: "var(--a2)" }}>
                 match_09-14.mp4 — processing
               </span>
             </div>
-            <div className="space-y-3 p-5">
-              <div className="aspect-video rounded-lg bg-slate-900" />
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-medium text-slate-700">Status</span>
-                <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+            <div className="stack g3" style={{ padding: "var(--a4)" }}>
+              <div style={{ aspectRatio: "16 / 9", borderRadius: "var(--r2)", background: "var(--night)" }} />
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="sm" style={{ fontWeight: 600, color: "var(--ink)" }}>
+                  Status
+                </span>
+                <span className="pill p-live">
+                  <span className="dot" />
                   Processing
                 </span>
               </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                <div className="h-full w-2/3 rounded-full bg-emerald-600" />
+              <div className="track">
+                <div className="fill" style={{ width: "66%" }} />
               </div>
             </div>
           </div>

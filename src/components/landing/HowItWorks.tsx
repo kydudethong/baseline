@@ -23,23 +23,22 @@ const STEPS = [
 
 export function HowItWorks() {
   return (
-    <section id="how-it-works" className="border-b border-slate-200 bg-white">
-      <div className="mx-auto max-w-6xl px-6 py-20">
-        <div className="mb-12 max-w-2xl">
-          <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-            How it works
-          </h2>
-          <p className="mt-3 text-slate-600">
-            Four steps between raw footage and something you can actually use
-            at your next practice.
-          </p>
+    <section id="how-it-works" style={{ borderBottom: "1px solid var(--line)", background: "var(--card)" }}>
+      <div style={{ maxWidth: 1140, margin: "0 auto", padding: "var(--a7) var(--a5)" }}>
+        <div className="stack g2" style={{ maxWidth: "44ch", marginBottom: "var(--a6)" }}>
+          <h2 className="d2">How it works</h2>
+          <p className="body">Four steps between raw footage and something you can actually use at your next practice.</p>
         </div>
-        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid2" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
           {STEPS.map((s) => (
-            <div key={s.step}>
-              <span className="text-sm font-semibold text-emerald-700">{s.step}</span>
-              <h3 className="mt-2 text-lg font-semibold text-slate-900">{s.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-slate-600">{s.body}</p>
+            <div key={s.step} className="stack g1">
+              <span className="eyebrow" style={{ color: "var(--blue-deep)" }}>
+                {s.step}
+              </span>
+              <h3 className="h3" style={{ marginTop: "4px", color: "var(--ink)" }}>
+                {s.title}
+              </h3>
+              <p className="sm">{s.body}</p>
             </div>
           ))}
         </div>
