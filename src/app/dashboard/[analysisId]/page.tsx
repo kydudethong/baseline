@@ -14,10 +14,21 @@ import { MovementMetricsPanel } from "@/components/dashboard/MovementMetricsPane
 import { PlayerTagPicker, type TagPickerFrame } from "@/components/dashboard/PlayerTagPicker";
 import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
 import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
+import Player, { type RallyMark } from "@/components/breakdown/Player";
+import { SkillMeter } from "@/components/breakdown/SkillMeter";
+import { skillName } from "@/lib/coaching/types";
 import { formatBytes } from "@/lib/video/validation";
-import type { PlayerTrackRow } from "@/lib/db/types";
+import type { CoachingObservationRow, PlayerTrackRow } from "@/lib/db/types";
 
 export const dynamic = "force-dynamic";
+
+const TABS = [
+  { key: "summary", label: "Summary" },
+  { key: "movement", label: "Movement" },
+  { key: "rallies", label: "Rallies" },
+  { key: "skills", label: "Skills" },
+  { key: "plan", label: "Plan" },
+];
 
 export async function generateMetadata({
   params,
@@ -30,10 +41,15 @@ export async function generateMetadata({
 
 export default async function AnalysisDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ analysisId: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const { analysisId } = await params;
+  const { tab: tabParam } = await searchParams;
+  const tab = TABS.some((t) => t.key === tabParam) ? tabParam! : "summary";
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -46,85 +62,46 @@ export default async function AnalysisDetailPage({
   const video = analysis.video;
 
   return (
-    <div>
-      <Link href="/dashboard" className="text-sm font-medium text-slate-500 hover:text-slate-700">
-        ← All analyses
-      </Link>
+    <>
+      <Link href="/dashboard" className="crumb">← All analyses</Link>
 
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-slate-900">{analysis.title}</h1>
-        <StatusBadge status={analysis.status} />
+      <div className="stack g3">
+        <div className="row g3">
+          <h1 className="d2">{analysis.title}</h1>
+          <StatusBadge status={analysis.status} />
+        </div>
+
+        {video ? (
+          <div className="card figs">
+            <Fig label="File" value={video.original_filename} />
+            <Fig label="Size" value={formatBytes(video.size_bytes)} />
+            <Fig label="Duration" value={video.duration_seconds ? formatDuration(video.duration_seconds) : "—"} />
+            <Fig label="Resolution" value={video.width && video.height ? `${video.width}×${video.height}` : "—"} />
+          </div>
+        ) : null}
       </div>
-
-      {video ? (
-        <dl className="mt-6 grid grid-cols-2 gap-4 rounded-xl border border-slate-200 bg-white p-5 sm:grid-cols-4">
-          <MetaItem label="File" value={video.original_filename} />
-          <MetaItem label="Size" value={formatBytes(video.size_bytes)} />
-          <MetaItem
-            label="Duration"
-            value={video.duration_seconds ? formatDuration(video.duration_seconds) : "—"}
-          />
-          <MetaItem
-            label="Resolution"
-            value={video.width && video.height ? `${video.width}×${video.height}` : "—"}
-          />
-        </dl>
-      ) : null}
 
       {analysis.status === "failed" && analysis.error_message ? (
-        <p className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {analysis.error_message}
-        </p>
+        <div className="error">{analysis.error_message}</div>
       ) : null}
 
-      <div className="mt-6">
-        <ProcessingControls analysisId={analysis.id} status={analysis.status} />
-      </div>
+      <ProcessingControls analysisId={analysis.id} status={analysis.status} />
 
       {analysis.status === "completed" && analysis.result ? (
-        <div className="mt-8 space-y-8">
-          <AnalysisResultPanel result={analysis.result} />
-          <Phase2MovementSection supabase={supabase} analysisId={analysis.id} />
-          <CoachingSection supabase={supabase} analysis={analysis} />
-          <Link
-            href={`/dashboard/${analysis.id}/debug`}
-            className="inline-block text-sm font-medium text-indigo-600 hover:text-indigo-800"
-          >
-            Open developer debug view (raw detections, court overlay, per-frame QC) →
-          </Link>
-        </div>
+        <AnalysisBreakdown supabase={supabase} analysis={analysis} tab={tab} />
       ) : null}
-    </div>
+    </>
   );
 }
 
-async function Phase2MovementSection({
-  supabase,
-  analysisId,
-}: {
-  supabase: Awaited<ReturnType<typeof createClient>>;
-  analysisId: string;
-}) {
-  const phase2 = await getPhase2Data(supabase, analysisId);
-  return <MovementMetricsPanel calibration={phase2.calibration} movement={phase2.movement} />;
-}
-
-const REFERENCE_FRAME_COUNT = 3;
-
-/**
- * Player self-tagging + the resulting coaching read, if one exists yet —
- * see PlayerTagPicker.tsx and CoachingReadPanel.tsx. A separate
- * getPhase2Data() call from Phase2MovementSection's, same tradeoff that
- * component already makes: one extra round trip of parallel queries in
- * exchange for each section owning its own data and staying independently
- * movable/removable.
- */
-async function CoachingSection({
+async function AnalysisBreakdown({
   supabase,
   analysis,
+  tab,
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   analysis: AnalysisWithVideo;
+  tab: string;
 }) {
   const [phase2, profile, coachingData, blueprints] = await Promise.all([
     getPhase2Data(supabase, analysis.id),
@@ -134,9 +111,164 @@ async function CoachingSection({
   ]);
   const skillKeysWithBlueprint = new Set(blueprints.map((b) => b.blueprint.skill_key));
 
-  if (phase2.tracks.length === 0) return null; // nothing to tag yet
+  const video = analysis.video;
+  let videoUrl: string | null = null;
+  if (video) {
+    const { data } = await supabase.storage.from(video.storage_bucket).createSignedUrl(video.storage_path, 3600);
+    videoUrl = data?.signedUrl ?? null;
+  }
 
-  const players = [...phase2.tracks].map((t) => t.player_label).sort();
+  const rallies: RallyMark[] = coachingData.rallies.map((r) => ({
+    idx: r.idx,
+    start_s: r.start_s,
+    end_s: r.end_s,
+    shots: r.shots,
+    note: noteForRally(coachingData.observations, r.idx),
+  }));
+
+  return (
+    <div className="stack g6">
+      {videoUrl ? (
+        <Player videoUrl={videoUrl} rallies={rallies} durationS={video?.duration_seconds ?? 0} />
+      ) : null}
+
+      <div className="tabs">
+        {TABS.map((t) => (
+          <Link key={t.key} href={`/dashboard/${analysis.id}?tab=${t.key}`} className={t.key === tab ? "on" : ""}>
+            {t.label}
+          </Link>
+        ))}
+      </div>
+
+      {tab === "summary" ? (
+        <div className="stack g6">
+          {rallies.length > 0 ? (
+            <div className="card figs">
+              <Fig label="Rallies detected" value={String(rallies.length)} />
+              <Fig
+                label="Paddle contacts counted"
+                value={rallies.some((r) => r.shots > 0) ? String(rallies.reduce((sum, r) => sum + r.shots, 0)) : "—"}
+              />
+              <Fig label="Median contacts / rally" value={String(median(rallies.map((r) => r.shots))) || "—"} />
+            </div>
+          ) : null}
+          {coachingData.read ? (
+            <CoachingReadPanel
+              read={coachingData.read}
+              observations={coachingData.observations}
+              skills={coachingData.skills}
+              analysisId={analysis.id}
+              skillKeysWithBlueprint={skillKeysWithBlueprint}
+            />
+          ) : (
+            <div className="empty">
+              <h3 className="h2">No coaching read yet</h3>
+              <p className="body measure">Tag which player is you below to get one.</p>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {tab === "movement" ? (
+        <div className="card stack g5">
+          <AnalysisResultPanel result={analysis.result!} />
+          <MovementMetricsPanel calibration={phase2.calibration} movement={phase2.movement} />
+          <Link href={`/dashboard/${analysis.id}/debug`} className="crumb">
+            Open developer debug view (raw detections, court overlay, per-frame QC) →
+          </Link>
+        </div>
+      ) : null}
+
+      {tab === "rallies" ? (
+        <div className="card" style={{ overflowX: "auto" }}>
+          {rallies.length > 0 ? (
+            <table className="tbl" style={{ minWidth: 560 }}>
+              <thead>
+                <tr><th>Rally</th><th>Start</th><th>Length</th><th>Contacts</th><th>Note</th></tr>
+              </thead>
+              <tbody>
+                {rallies.map((r) => (
+                  <tr key={r.idx}>
+                    <td className="n"><a href={`#t=${r.start_s.toFixed(1)}`}>R{r.idx}</a></td>
+                    <td className="n">{mmss(r.start_s)}</td>
+                    <td className="n">{(r.end_s - r.start_s).toFixed(1)}s</td>
+                    <td className="n">{r.shots}</td>
+                    <td style={{ minWidth: 260 }}>{r.note ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="sm">No rallies were detected from the audio for this clip.</p>
+          )}
+        </div>
+      ) : null}
+
+      {tab === "skills" ? (
+        <div className="stack g4">
+          {coachingData.skills.length > 0 ? (
+            <div className="grid2">
+              {coachingData.skills.map((s) => (
+                <div key={s.id} className="card">
+                  <SkillMeter name={skillName(s.skill_key)} raw={s.raw} basis={s.basis} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="empty">
+              <h3 className="h2">No skill ratings yet</h3>
+              <p className="body measure">These appear once a coaching read has been generated.</p>
+            </div>
+          )}
+          <p className="note">
+            These are the coach&rsquo;s read of what this one clip shows, not a running average across
+            your matches — cross-analysis tracking isn&rsquo;t built yet.
+          </p>
+        </div>
+      ) : null}
+
+      {tab === "plan" ? (
+        <div className="stack g4">
+          {blueprints.length > 0 ? (
+            blueprints.map(({ blueprint, steps }) => (
+              <BlueprintPanel key={blueprint.id} analysisId={analysis.id} blueprint={blueprint} steps={steps} />
+            ))
+          ) : (
+            <div className="empty">
+              <h3 className="h2">No practice plan yet</h3>
+              <p className="body measure">
+                Build one from a tagged weakness on the Summary tab, once a coaching read exists.
+              </p>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      <TagSection supabase={supabase} analysis={analysis} phase2Tracks={phase2.tracks} profile={profile} hasExistingRead={coachingData.read !== null} />
+    </div>
+  );
+}
+
+const REFERENCE_FRAME_COUNT = 3;
+
+/** Player self-tagging — see PlayerTagPicker.tsx. Kept as its own section below the tabs since it drives (re)generating the read itself, not one tab's content. */
+async function TagSection({
+  supabase,
+  analysis,
+  phase2Tracks,
+  profile,
+  hasExistingRead,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  analysis: AnalysisWithVideo;
+  phase2Tracks: PlayerTrackRow[];
+  profile: Awaited<ReturnType<typeof getProfile>>;
+  hasExistingRead: boolean;
+}) {
+  if (phase2Tracks.length === 0) return null; // nothing to tag yet
+
+  const phase2 = await getPhase2Data(supabase, analysis.id);
+  const players = [...phase2Tracks].map((t) => t.player_label).sort();
   const width = analysis.video?.width ?? 1920;
   const height = analysis.video?.height ?? 1080;
 
@@ -147,7 +279,7 @@ async function CoachingSection({
       const f = debugFrames[i];
       const { data } = await supabase.storage.from("videos").createSignedUrl(f.debug_storage_path!, 3600);
       if (!data?.signedUrl) return null;
-      const boxes = boxesAtTimestamp(phase2.tracks, f.timestamp_s);
+      const boxes = boxesAtTimestamp(phase2Tracks, f.timestamp_s);
       return { url: data.signedUrl, timestampSeconds: f.timestamp_s, boxes } satisfies TagPickerFrame;
     })
   );
@@ -158,45 +290,43 @@ async function CoachingSection({
     .filter(Boolean);
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-xl font-bold text-slate-900">Coaching</h2>
-      {coachingData.read ? (
-        <CoachingReadPanel
-          read={coachingData.read}
-          observations={coachingData.observations}
-          skills={coachingData.skills}
-          analysisId={analysis.id}
-          skillKeysWithBlueprint={skillKeysWithBlueprint}
-        />
-      ) : null}
-      {blueprints.length > 0 ? (
-        <section>
-          <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Practice plans
-          </h3>
-          <div className="space-y-3">
-            {blueprints.map(({ blueprint, steps }) => (
-              <BlueprintPanel key={blueprint.id} blueprint={blueprint} steps={steps} />
-            ))}
-          </div>
-        </section>
-      ) : null}
-      <PlayerTagPicker
-        analysisId={analysis.id}
-        players={players}
-        frames={referenceFrames.filter((f): f is TagPickerFrame => f !== null)}
-        width={width}
-        height={height}
-        initialSelfLabels={initialSelfLabels}
-        initialSkillLevel={profile?.skill_level ?? null}
-        initialPaddleHand={profile?.paddle_hand ?? null}
-        initialCoachingKind={analysis.coaching_kind}
-        initialNotes={analysis.coaching_notes}
-        hasExistingRead={coachingData.read !== null}
-      />
+    <PlayerTagPicker
+      analysisId={analysis.id}
+      players={players}
+      frames={referenceFrames.filter((f): f is TagPickerFrame => f !== null)}
+      width={width}
+      height={height}
+      initialSelfLabels={initialSelfLabels}
+      initialSkillLevel={profile?.skill_level ?? null}
+      initialPaddleHand={profile?.paddle_hand ?? null}
+      initialCoachingKind={analysis.coaching_kind}
+      initialNotes={analysis.coaching_notes}
+      hasExistingRead={hasExistingRead}
+    />
+  );
+}
+
+function noteForRally(observations: CoachingObservationRow[], rallyIdx: number): string | null {
+  const match = observations.find((o) => o.rally_idx === rallyIdx);
+  return match ? match.title : null;
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+function Fig({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="fig">
+      <span className="v">{value}</span>
+      <span className="c">{label}</span>
     </div>
   );
 }
+
 
 /** `count` roughly-evenly-spaced indices into [0, length) — first and last included when length allows. */
 function pickSpreadIndices(length: number, count: number): number[] {
@@ -225,13 +355,8 @@ function boxesAtTimestamp(
   return boxes;
 }
 
-function MetaItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-xs text-slate-500">{label}</dt>
-      <dd className="mt-0.5 truncate text-sm font-medium text-slate-900">{value}</dd>
-    </div>
-  );
+function mmss(s: number): string {
+  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 }
 
 function formatDuration(seconds: number): string {

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { logout } from "@/app/actions/auth";
+import { Ball } from "@/components/motifs/Motifs";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -15,23 +16,22 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!user) redirect("/login?next=/dashboard");
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-          <Link href="/dashboard" className="text-lg font-bold tracking-tight text-slate-900">
-            Baseline
-          </Link>
-          <div className="flex items-center gap-4 text-sm">
-            <span className="text-slate-500">{user.email}</span>
-            <form action={logout}>
-              <button type="submit" className="font-medium text-slate-600 hover:text-slate-900">
-                Log out
-              </button>
-            </form>
-          </div>
-        </div>
+    <div className="min-h-screen" style={{ background: "var(--paper)" }}>
+      <header className="topbar">
+        <Link href="/dashboard" className="logo">
+          <Ball size={26} />
+          <span className="wm">Baseline</span>
+        </Link>
+        <nav className="topnav">
+          <span className="xs">{user.email}</span>
+          <form action={logout}>
+            <button type="submit" className="btn btn-ghost btn-sm">
+              Log out
+            </button>
+          </form>
+        </nav>
       </header>
-      <main className="mx-auto max-w-5xl px-6 py-10">{children}</main>
+      <main className="page">{children}</main>
     </div>
   );
 }

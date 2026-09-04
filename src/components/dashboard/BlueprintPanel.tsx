@@ -1,43 +1,53 @@
 import type { CoachingBlueprintRow, CoachingBlueprintStepRow } from "@/lib/db/types";
 import { skillName } from "@/lib/coaching/types";
+import { StepToggle } from "@/components/breakdown/StepToggle";
 
 export function BlueprintPanel({
+  analysisId,
   blueprint,
   steps,
 }: {
+  analysisId: string;
   blueprint: CoachingBlueprintRow;
   steps: CoachingBlueprintStepRow[];
 }) {
+  const doneCount = steps.filter((s) => s.done_at).length;
+  const nextStep = steps.filter((s) => !s.done_at)[0];
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-semibold text-slate-900">{blueprint.title}</p>
-        <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-          {skillName(blueprint.skill_key)}
+    <div className="card stack g3">
+      <div className="row g3">
+        <p className="h3">{blueprint.title}</p>
+        <span className="pill p-neutral mla">{skillName(blueprint.skill_key)}</span>
+        <span className="pill p-warn">
+          <span className="dot" />
+          {doneCount} of {steps.length} done
         </span>
       </div>
-      <p className="mt-1 text-sm text-slate-700">{blueprint.goal}</p>
-      <p className="mt-1 text-xs text-slate-500">Target: {blueprint.target}</p>
+      <p className="sm">{blueprint.goal}</p>
+      <p className="xs">
+        <strong style={{ color: "var(--ink)" }}>Target:</strong> {blueprint.target}
+      </p>
 
-      <ol className="mt-3 space-y-2">
-        {steps.map((s) => (
-          <li key={s.id} className="flex items-start gap-3 rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-sm">
-            <span
-              className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
-                s.done_at ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-600"
-              }`}
-            >
-              {s.idx + 1}
-            </span>
-            <div>
-              <p className="font-medium text-slate-900">
-                {s.focus} — <span className="font-normal text-slate-700">{s.drill_name}</span>
-              </p>
-              <p className="text-xs text-slate-500">{s.target}</p>
+      <div className="bp">
+        {steps.map((s) => {
+          const done = Boolean(s.done_at);
+          const isNext = !done && nextStep?.id === s.id;
+          return (
+            <div key={s.id} className={`bp-step${done ? " done" : ""}${isNext ? " next" : ""}`}>
+              <StepToggle analysisId={analysisId} stepId={s.id} done={done} idx={s.idx} />
+              <div className="bp-body">
+                <span className="focus">{s.focus}</span>
+                <span className="dn">{s.drill_name}</span>
+                <span className="sm">{s.target}</span>
+              </div>
             </div>
-          </li>
-        ))}
-      </ol>
+          );
+        })}
+      </div>
+      <p className="note">
+        The order is the point — each session builds on the one before it.
+      </p>
     </div>
   );
 }

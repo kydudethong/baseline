@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-/** Small inline trigger next to one weakness observation — see blueprint.ts. Rendered from CoachingReadPanel.tsx, a server component; this is the client-interactive slice of it. */
+/** Small inline trigger next to one weakness observation — see blueprint.ts. Rendered from CoachingReadPanel.tsx inside an .evid row, a server component; this is the client-interactive slice of it. */
 export function BuildBlueprintButton({ analysisId, observationId }: { analysisId: string; observationId: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -28,16 +28,11 @@ export function BuildBlueprintButton({ analysisId, observationId }: { analysisId
   }
 
   return (
-    <div className="mt-2">
-      <button
-        type="button"
-        onClick={build}
-        disabled={busy}
-        className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 disabled:opacity-60"
-      >
-        {busy ? "Building practice plan…" : "Build a 5-session practice plan →"}
+    <>
+      <button type="button" onClick={() => void build()} disabled={busy}>
+        {busy ? "Building plan…" : "Build a 5-session plan"}
       </button>
-      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
-    </div>
+      {error ? <span className="xs" style={{ color: "var(--bad)" }}>{error}</span> : null}
+    </>
   );
 }
