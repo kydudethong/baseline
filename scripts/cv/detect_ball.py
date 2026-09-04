@@ -45,6 +45,7 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import numpy as np
@@ -59,6 +60,9 @@ def is_ball_class(name: str) -> bool:
 
 class RoboflowLocal:
     """Roboflow model run on this machine via the `inference` package."""
+
+    parallel = 1
+    failed_frames = 0
 
     def __init__(self, model_id: str, api_key: str, confidence: float):
         try:
@@ -93,6 +97,10 @@ class RoboflowHosted:
         self.confidence = confidence
         self.host = host.rstrip("/")
 
+    # Hosted calls are independent per frame, so several can be in flight.
+    parallel = 4
+    failed_frames = 0
+
     def predict(self, frame_bgr):
         import urllib.request
 
@@ -101,9 +109,22 @@ class RoboflowHosted:
             return []
         body = base64.b64encode(buf.tobytes())
         url = f"{self.host}/{self.model_id}?api_key={self.api_key}&confidence={int(self.confidence * 100)}&overlap=30"
-        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/x-www-form-urlencoded"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        data = None
+        # A single dropped connection must not cost the whole pass: retry
+        # with backoff, then give up on THIS frame only (counted in
+        # diagnostics.failedFrames) rather than raising.
+        for attempt in range(4):
+            try:
+                req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/x-www-form-urlencoded"})
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                break
+            except Exception as exc:  # noqa: BLE001 — network errors of every flavour
+                if attempt == 3:
+                    self.failed_frames += 1
+                    print(f"[ball] frame skipped after 4 attempts: {type(exc).__name__}: {str(exc)[:80]}", file=sys.stderr, flush=True)
+                    return []
+                time.sleep(1.5 * (2 ** attempt))
         out = []
         for p in data.get("predictions", []):
             if not is_ball_class(p.get("class", "")):
@@ -113,6 +134,9 @@ class RoboflowHosted:
 
 
 class UltralyticsLocal:
+    parallel = 1
+    failed_frames = 0
+
     def __init__(self, weights: str, confidence: float, imgsz: int):
         try:
             from ultralytics import YOLO  # type: ignore
@@ -188,39 +212,58 @@ def main():
     frames_with_ball = 0
     t0 = time.time()
     total_to_process = sum(int((e - s) * fps / step) for s, e in windows)
-    print(f"[ball] {source} · {len(windows)} window(s) · ~{total_to_process} frames at {fps / step:.0f} fps", file=sys.stderr, flush=True)
+    parallel = max(1, int(getattr(model, "parallel", 1)))
+    print(f"[ball] {source} · {len(windows)} window(s) · ~{total_to_process} frames at {fps / step:.0f} fps · {parallel} in flight", file=sys.stderr, flush=True)
+
+    def record(f, preds):
+        nonlocal frames_processed, frames_with_ball
+        preds = sorted(preds, key=lambda p: -p[4])
+        frames_processed += 1
+        if preds:
+            frames_with_ball += 1
+        for (cx, cy, w, h, conf) in preds[: args.top_k]:
+            detections.append(
+                {
+                    "t": round(f / fps, 4),
+                    "frame": f,
+                    "x": round(cx / width, 5),
+                    "y": round(cy / height, 5),
+                    "w": round(w / width, 5),
+                    "h": round(h / height, 5),
+                    "conf": round(conf, 4),
+                }
+            )
+        if frames_processed % 150 == 0:
+            rate = frames_processed / max(1e-6, time.time() - t0)
+            remaining = (total_to_process - frames_processed) / max(rate, 1e-6)
+            print(f"[ball] {frames_processed}/{total_to_process} frames · seen in {frames_with_ball} · ~{remaining / 60:.1f} min left", file=sys.stderr, flush=True)
+
+    pool = ThreadPoolExecutor(max_workers=parallel) if parallel > 1 else None
     for start_s, end_s in windows:
         start_f = int(start_s * fps)
         end_f = int(end_s * fps)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_f)
         f = start_f
+        batch = []  # (frame_index, image) waiting for prediction
         while f <= end_f:
             ok, frame = cap.read()
             if not ok:
                 break
             if (f - start_f) % step == 0:
-                preds = model.predict(frame)
-                preds.sort(key=lambda p: -p[4])
-                frames_processed += 1
-                if frames_processed % 150 == 0:
-                    rate = frames_processed / max(1e-6, time.time() - t0)
-                    remaining = (total_to_process - frames_processed) / max(rate, 1e-6)
-                    print(f"[ball] {frames_processed}/{total_to_process} frames · seen in {frames_with_ball} · ~{remaining / 60:.1f} min left", file=sys.stderr, flush=True)
-                if preds:
-                    frames_with_ball += 1
-                for (cx, cy, w, h, conf) in preds[: args.top_k]:
-                    detections.append(
-                        {
-                            "t": round(f / fps, 4),
-                            "frame": f,
-                            "x": round(cx / width, 5),
-                            "y": round(cy / height, 5),
-                            "w": round(w / width, 5),
-                            "h": round(h / height, 5),
-                            "conf": round(conf, 4),
-                        }
-                    )
+                if pool is None:
+                    record(f, model.predict(frame))
+                else:
+                    batch.append((f, frame))
+                    if len(batch) >= parallel * 2:
+                        for (bf, preds) in zip([b[0] for b in batch], pool.map(model.predict, [b[1] for b in batch])):
+                            record(bf, preds)
+                        batch = []
             f += 1
+        if pool is not None and batch:
+            for (bf, preds) in zip([b[0] for b in batch], pool.map(model.predict, [b[1] for b in batch])):
+                record(bf, preds)
+    if pool is not None:
+        pool.shutdown(wait=True)
     cap.release()
 
     result = {
@@ -237,6 +280,7 @@ def main():
             "frameStep": step,
             "framesWithBall": frames_with_ball,
             "ballHitRate": round(frames_with_ball / frames_processed, 3) if frames_processed else 0.0,
+            "failedFrames": int(getattr(model, "failed_frames", 0)),
             "elapsedSeconds": round(time.time() - t0, 1),
         },
     }
