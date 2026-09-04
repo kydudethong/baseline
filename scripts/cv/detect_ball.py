@@ -143,7 +143,7 @@ def main():
     ap.add_argument("--hosted", action="store_true", default=os.environ.get("BALL_INFERENCE", "local") == "hosted")
     ap.add_argument("--host", default=os.environ.get("ROBOFLOW_HOST", "https://detect.roboflow.com"))
     ap.add_argument("--confidence", type=float, default=float(os.environ.get("BALL_CONFIDENCE", "0.25")))
-    ap.add_argument("--fps-cap", type=float, default=float(os.environ.get("BALL_FPS_CAP", "30")))
+    ap.add_argument("--fps-cap", type=float, default=float(os.environ.get("BALL_FPS_CAP", "15")))
     ap.add_argument("--top-k", type=int, default=3)
     ap.add_argument("--imgsz", type=int, default=int(os.environ.get("BALL_IMGSZ", "1280")))
     ap.add_argument("--out", default=None)
@@ -185,6 +185,8 @@ def main():
     frames_processed = 0
     frames_with_ball = 0
     t0 = time.time()
+    total_to_process = sum(int((e - s) * fps / step) for s, e in windows)
+    print(f"[ball] {source} · {len(windows)} window(s) · ~{total_to_process} frames at {fps / step:.0f} fps", file=sys.stderr, flush=True)
     for start_s, end_s in windows:
         start_f = int(start_s * fps)
         end_f = int(end_s * fps)
@@ -198,6 +200,10 @@ def main():
                 preds = model.predict(frame)
                 preds.sort(key=lambda p: -p[4])
                 frames_processed += 1
+                if frames_processed % 150 == 0:
+                    rate = frames_processed / max(1e-6, time.time() - t0)
+                    remaining = (total_to_process - frames_processed) / max(rate, 1e-6)
+                    print(f"[ball] {frames_processed}/{total_to_process} frames · seen in {frames_with_ball} · ~{remaining / 60:.1f} min left", file=sys.stderr, flush=True)
                 if preds:
                     frames_with_ball += 1
                 for (cx, cy, w, h, conf) in preds[: args.top_k]:

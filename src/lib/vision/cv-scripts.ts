@@ -10,12 +10,16 @@ const POSE_MODEL_PATH = path.join(process.cwd(), "models", "yolov8n-pose.pt");
 
 export class PythonCvError extends Error {}
 
-async function runPython(scriptName: string, args: string[], opts: { maxBuffer?: number } = {}): Promise<string> {
+async function runPython(scriptName: string, args: string[], opts: { maxBuffer?: number; streamStderr?: boolean } = {}): Promise<string> {
   const scriptPath = path.join(SCRIPTS_DIR, scriptName);
   try {
-    const { stdout } = await execFileAsync("python3", [scriptPath, ...args], {
+    const child = execFileAsync("python3", [scriptPath, ...args], {
       maxBuffer: opts.maxBuffer ?? 20 * 1024 * 1024,
     });
+    // Long-running scripts report progress on stderr; forward it live so a
+    // ten-minute ball pass doesn't look like a hang.
+    if (opts.streamStderr) child.child.stderr?.on("data", (chunk: Buffer) => process.stderr.write(chunk));
+    const { stdout } = await child;
     return stdout;
   } catch (err) {
     const stderr = (err as { stderr?: string })?.stderr ?? "";
@@ -127,6 +131,7 @@ export async function detectBallViaPython(
   if (!ballModelConfigured()) throw new BallModelNotConfiguredError("No ball model configured (BALL_MODEL_ID / BALL_MODEL_PATH).");
   const stdout = await runPython("detect_ball.py", [videoPath, "--windows", JSON.stringify(windows)], {
     maxBuffer: 200 * 1024 * 1024,
+    streamStderr: true,
   });
   return JSON.parse(stdout) as RawBallDetections;
 }

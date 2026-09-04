@@ -48,9 +48,16 @@ export interface VisionPipelineOutput {
  * here: this dev environment has no network path to Supabase either — see
  * the deliverables report).
  */
+/** Stage progress on stderr — the pipeline can run for many minutes and silence reads as "stuck". */
+function log(msg: string) {
+  console.error(`[vision ${new Date().toISOString().slice(11, 19)}] ${msg}`);
+}
+
 export async function runVisionPipeline(input: VisionPipelineInput): Promise<VisionPipelineOutput> {
   const provider = getPhase2VisionProvider(input.frameWidthPx, input.frameHeightPx);
   const knownLimitations: string[] = [];
+  const t0 = Date.now();
+  log(`provider=${provider.name} · ${input.frames.length} frames at ${input.visionFps} fps · ${input.frameWidthPx}x${input.frameHeightPx}`);
 
   // Court geometry doesn't change within a single fixed-camera clip, so
   // calibration only needs to run once — but which single frame it runs on
@@ -71,6 +78,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     if (courtCalibration.confidence >= 0.7) break; // good enough, stop spending calls
   }
   courtCalibration ??= await provider.detectCourt(input.frames[0]);
+  log(`court calibration confidence ${courtCalibration.confidence}`);
   if (courtCalibration.confidence === 0) {
     knownLimitations.push("Court calibration failed on every candidate frame tried — movement metrics will be null for every player.");
   }
@@ -80,7 +88,9 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // bursts, and this keeps VISION_FPS the actual throttle on call volume.
   const perFrameDetections: FrameDetectionSet[] = [];
   let appearanceSignatureFailures = 0;
-  for (const frame of input.frames) {
+  log(`detecting players (${input.frames.length} frames, one call each)…`);
+  for (const [fi, frame] of input.frames.entries()) {
+    if (fi > 0 && fi % 100 === 0) log(`  players: ${fi}/${input.frames.length} frames`);
     const players = await provider.detectPlayers(frame);
 
     // Best-effort: a color signature per box, used only so the tracker can
@@ -112,6 +122,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   }
 
   const tracks = await provider.trackPlayers(perFrameDetections);
+  log(`tracking: ${tracks.length} player track(s)`);
   if (tracks.length === 0) {
     knownLimitations.push("No player tracks survived (need >=2 sampled detections to count as a track).");
   } else if (tracks.length < 4) {
@@ -120,6 +131,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
 
   // Pose per sampled frame, matched back to tracks by box overlap.
   let poses: PlayerPoseFrame[] = [];
+  log("estimating pose…");
   try {
     const { estimatePosesForFrames } = await import("./pose");
     poses = await estimatePosesForFrames(input.frames, tracks);
@@ -134,6 +146,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
 
   const events: AnalysisEvent[] = [];
   let audioEventCount = 0;
+  log("detecting paddle contacts from audio…");
   try {
     const { events: shotEvents } = await detectUnknownShotEvents(input.videoPath);
     events.push(...shotEvents);
@@ -169,8 +182,11 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   } else {
     try {
       const windows = rallies.map((r) => [Math.max(0, r.startS - 0.3), r.endS + 0.3] as [number, number]);
+      const rallySeconds = windows.reduce((a, [s, e]) => a + (e - s), 0);
+      log(`detecting the ball in ${rallies.length} rallies (${rallySeconds.toFixed(0)}s of play) — first run downloads the model…`);
       const raw = await detectBallViaPython(input.videoPath, windows);
       const built = buildBallTrack(raw.detections, raw.fps);
+      log(`ball: seen in ${Math.round(built.stats.coverage * 100)}% of ${built.stats.framesProcessed} frames (${JSON.stringify(raw.diagnostics.modelSource)})`);
       ballTrack = { points: built.points, stats: built.stats, diagnostics: raw.diagnostics };
       if (built.stats.coverage < 0.15) {
         knownLimitations.push(
@@ -219,6 +235,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     }
   }
 
+  log(`shots: ${shots.length} classified · done in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
   const playerCounts = perFrameDetections.map((f) => f.players.length);
   const quality: QualityDiagnostics = {
     videoDurationSeconds: input.videoDurationSeconds,
