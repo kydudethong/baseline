@@ -131,7 +131,7 @@ export function PlayerTagPicker({
               style={
                 isOn
                   ? { borderColor: color, backgroundColor: `${color}1a`, color }
-                  : { borderColor: "#e2e8f0", color: "#475569" }
+                  : { borderColor: "var(--line-strong)", color: "var(--ink-2)" }
               }
             >
               <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />

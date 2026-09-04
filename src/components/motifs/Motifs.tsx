@@ -11,7 +11,7 @@ export function Ball({ size = 24, spin = false }: { size?: number; spin?: boolea
       style={{ display: "inline-block", verticalAlign: "middle", flex: "none" }}
     >
       <circle cx="16" cy="16" r="15" fill="var(--optic)" />
-      <g fill="var(--ink)" opacity=".55">
+      <g fill="var(--optic-ink)" opacity=".55">
         <circle cx="16" cy="7.5" r="2.1" /><circle cx="23.5" cy="12" r="2.1" />
         <circle cx="23.5" cy="20.5" r="2.1" /><circle cx="16" cy="24.5" r="2.1" />
         <circle cx="8.5" cy="20.5" r="2.1" /><circle cx="8.5" cy="12" r="2.1" />

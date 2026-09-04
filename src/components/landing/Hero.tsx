@@ -17,7 +17,7 @@ export function Hero({ analyzeHref }: { analyzeHref: string }) {
         }}
       >
         <div className="stack g4" style={{ flex: "1 1 420px", minWidth: 0 }}>
-          <span className="eyebrow" style={{ color: "#5C6A16" }}>
+          <span className="eyebrow" style={{ color: "var(--optic)" }}>
             Now in early access
           </span>
           <h1 className="d1" style={{ maxWidth: "14ch" }}>

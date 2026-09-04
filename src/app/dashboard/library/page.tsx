@@ -1,11 +1,30 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
-import { listAnalysesForUser } from "@/lib/db/analyses";
+import { listAnalysesForUser, type AnalysisWithVideo } from "@/lib/db/analyses";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 
 export const metadata: Metadata = { title: "Library — Baseline" };
 export const dynamic = "force-dynamic";
+
+/** A signed URL per video, so the library can show an actual frame from
+ * the footage instead of just a filename. Same signing pattern the
+ * analysis detail page already uses for its player -- 1hr expiry is
+ * plenty for a page view. */
+async function withVideoUrls(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  analyses: AnalysisWithVideo[]
+) {
+  return Promise.all(
+    analyses.map(async (analysis) => {
+      if (!analysis.video) return { analysis, videoUrl: null };
+      const { data } = await supabase.storage
+        .from(analysis.video.storage_bucket)
+        .createSignedUrl(analysis.video.storage_path, 3600);
+      return { analysis, videoUrl: data?.signedUrl ?? null };
+    })
+  );
+}
 
 export default async function LibraryPage() {
   const supabase = await createClient();
@@ -13,6 +32,7 @@ export default async function LibraryPage() {
     data: { user },
   } = await supabase.auth.getUser();
   const analyses = user ? await listAnalysesForUser(supabase, user.id) : [];
+  const rows = await withVideoUrls(supabase, analyses);
 
   return (
     <div className="sec">
@@ -41,21 +61,42 @@ export default async function LibraryPage() {
         </div>
       ) : (
         <div className="stack g2">
-          {analyses.map((analysis) => {
-            const video = analysis.video;
-            return (
-              <Link
-                key={analysis.id}
-                href={`/dashboard/${analysis.id}`}
-                className="card row g4"
-                style={{ justifyContent: "space-between", textDecoration: "none", color: "inherit" }}
-              >
+          {rows.map(({ analysis, videoUrl }) => (
+            <Link
+              key={analysis.id}
+              href={`/dashboard/${analysis.id}`}
+              className="card row g4"
+              style={{ justifyContent: "space-between", textDecoration: "none", color: "inherit" }}
+            >
+              <div className="row g4" style={{ minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    width: 96,
+                    height: 60,
+                    borderRadius: "var(--r2)",
+                    overflow: "hidden",
+                    background: "var(--night)",
+                    flex: "none",
+                    border: "1px solid var(--line)",
+                  }}
+                >
+                  {videoUrl ? (
+                    <video
+                      src={`${videoUrl}#t=0.5`}
+                      preload="metadata"
+                      muted
+                      playsInline
+                      aria-hidden="true"
+                      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                    />
+                  ) : null}
+                </div>
                 <div className="stack g1" style={{ minWidth: 0 }}>
                   <p className="h3" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {analysis.title}
                   </p>
                   <p className="xs">
-                    {video?.original_filename ?? "No video attached"} ·{" "}
+                    {analysis.video?.original_filename ?? "No video attached"} ·{" "}
                     {new Date(analysis.created_at).toLocaleDateString(undefined, {
                       month: "short",
                       day: "numeric",
@@ -63,10 +104,10 @@ export default async function LibraryPage() {
                     })}
                   </p>
                 </div>
-                <StatusBadge status={analysis.status} />
-              </Link>
-            );
-          })}
+              </div>
+              <StatusBadge status={analysis.status} />
+            </Link>
+          ))}
         </div>
       )}
     </div>
