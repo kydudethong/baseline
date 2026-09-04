@@ -2,10 +2,10 @@
 
 /* Baseline — Night Court. Near-black court-shadow ground, the ball's
    optic yellow-green (#E4F03F) as the whole accent identity, generous
-   rounded corners. Tailwind utility classes (used across auth/landing/
-   upload pages) keep working alongside these hand-written component
-   classes — nothing here redefines a Tailwind utility name, so the two
-   coexist without conflict.
+   rounded corners. Tailwind is still imported for layout utilities, but
+   every color, radius and type decision lives in these hand-written
+   component classes — no Tailwind color utilities anywhere in src/, so a
+   theme change is a token change and nothing else.
 
    Token roles, since this is a dark theme: --ink is now light text on a
    dark ground (it used to be the reverse), so two extra roles exist
@@ -64,11 +64,17 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:var(--a5);height:62px;padding:0 var(--a5);background:rgba(10,21,18,.85);backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line)}
 .logo{display:flex;align-items:center;gap:9px;text-decoration:none;color:inherit}
 .logo .wm{font-family:var(--display);font-weight:800;font-size:19px;letter-spacing:-.03em}
-.topnav{display:flex;gap:2px;margin-left:auto;align-items:center}
+.topnav{display:flex;gap:2px;margin-left:auto;align-items:center;min-width:0}
+.topbar-actions{display:flex;align-items:center;gap:var(--a2);flex:none}
+.topbar-actions .topbar-email{margin-left:var(--a2)}
+.topbar .cta-short{display:none}
+.btn{white-space:nowrap}
 .topnav a{font-size:14px;font-weight:500;color:var(--ink-2);text-decoration:none;padding:7px 13px;border-radius:var(--rf)}
 .topnav a:hover{color:var(--ink);background:var(--sunk)}
 .topnav a[data-active="true"]{color:var(--ink);background:var(--sunk)}
 .topnav .div{width:1px;height:22px;background:var(--line);margin:0 var(--a2)}
+.topnav a.btn-optic,.topnav a.btn-optic:hover{color:var(--optic-ink)}
+.topnav a.btn-optic:hover{background:#EDF75C}
 .page{max-width:1140px;margin:0 auto;padding:var(--a6) var(--a5) var(--a8);display:flex;flex-direction:column;gap:var(--a6)}
 .spin-ball{animation:spin 2.4s linear infinite;transform-origin:center}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -196,7 +202,15 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);display:flex;align-items:center;gap:12px;background:var(--deep);color:var(--ink);border-radius:var(--rf);padding:13px 22px;box-shadow:var(--lift-2);z-index:80;font-size:14px;max-width:calc(100vw - 32px);border:1px solid var(--line)}
 
 @media(max-width:880px){
-  .topbar{height:56px;padding:0 var(--a4)}
+  .topbar{height:56px;padding:0 var(--a3);gap:var(--a2)}
+  .topbar .topbar-email{display:none}
+  .topbar .logo .wm{display:none}
+  .topnav{overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;flex:1 1 auto;margin-left:var(--a1)}
+  .topnav::-webkit-scrollbar{display:none}
+  .topnav a{padding:7px 9px;font-size:13px}
+  .topbar-actions .btn-sm{padding:0 11px}
+  .topbar .cta-long{display:none}
+  .topbar .cta-short{display:inline-flex}
   .page{padding:var(--a5) var(--a4) 64px;gap:var(--a5)}
   .card{padding:var(--a4)}
   .fig .v{font-size:30px}
@@ -208,3 +222,55 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .chip{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;color:var(--ink-2);background:var(--card);border:1px solid var(--line);padding:7px 14px;border-radius:var(--rf);cursor:pointer;text-decoration:none}
 .chip:hover{border-color:var(--line-strong);color:var(--ink)}
 .chip.on{background:var(--blue-wash);border-color:var(--blue-deep);color:var(--blue-deep)}
+
+/* ---- Form controls ------------------------------------------------ */
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>span,.field>label{font-size:13px;font-weight:600;color:var(--ink)}
+.field .hint{font-size:12px;font-weight:400;color:var(--ink-3)}
+.input,.select,.textarea{width:100%;font:inherit;font-size:14px;color:var(--ink);background:var(--sunk);border:1px solid var(--line-strong);border-radius:var(--r2);padding:0 12px;height:42px;outline:none;transition:border-color .12s ease,box-shadow .12s ease}
+.textarea{height:auto;min-height:74px;padding:10px 12px;resize:vertical;line-height:1.45}
+.select{appearance:none;-webkit-appearance:none;padding-right:34px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23A9BBAE' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+.input::placeholder,.textarea::placeholder{color:var(--ink-3)}
+.input:focus,.select:focus,.textarea:focus{border-color:var(--optic);box-shadow:0 0 0 3px rgba(228,240,63,.18)}
+.input:disabled,.select:disabled,.textarea:disabled{opacity:.5;cursor:not-allowed}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--a4)}
+:where(.btn,.ctl,.chip,.tabs a,.evid a,.evid button,.bp-mk,.crumb):focus-visible{outline:2px solid var(--optic);outline-offset:2px}
+
+/* ---- Upload ---------------------------------------------------------- */
+.dropzone{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--a2);text-align:center;padding:var(--a7) var(--a5);border:2px dashed var(--line-strong);border-radius:var(--r3);background:var(--sunk);cursor:pointer;transition:border-color .12s ease,background .12s ease}
+.dropzone:hover,.dropzone.over{border-color:var(--optic);background:#1A2D24}
+.dropzone.disabled{cursor:not-allowed;opacity:.6}
+.dropzone .ttl{font-family:var(--display);font-size:18px;font-weight:700;color:var(--ink);letter-spacing:-.015em}
+.filecard{display:flex;align-items:center;gap:var(--a3);background:var(--sunk);border:1px solid var(--line);border-radius:var(--r2);padding:var(--a3) var(--a4)}
+.filecard .nm{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.filecard .x{margin-left:auto;background:none;border:0;color:var(--ink-3);cursor:pointer;font-size:16px;line-height:1;padding:4px 6px;border-radius:var(--rf)}
+.filecard .x:hover{color:var(--ink);background:var(--card)}
+.progress{height:8px;background:var(--sunk);border-radius:var(--rf);overflow:hidden}
+.progress .bar{height:100%;background:linear-gradient(90deg,var(--optic-deep),var(--optic));border-radius:var(--rf);transition:width .2s ease}
+.progress.indet .bar{width:38%;animation:slide 1.2s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(280%)}}
+.status-line{display:flex;align-items:center;gap:9px;font-size:14px;color:var(--ink-2)}
+.status-line .dot{width:7px;height:7px;border-radius:50%;background:var(--optic);animation:pulse 1.5s ease-in-out infinite;flex:none}
+
+/* ---- Process / step panels ------------------------------------------ */
+.stepbar{display:flex;gap:var(--a2);flex-wrap:wrap}
+.step{display:inline-flex;align-items:center;gap:8px;font-family:var(--data);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.step .n{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:var(--sunk);color:var(--ink-3);font-size:11px;font-weight:600;letter-spacing:0}
+.step.done .n{background:var(--good);color:#fff}
+.step.cur{color:var(--ink)}
+.step.cur .n{background:var(--optic);color:var(--optic-ink)}
+.step .sep{width:18px;height:1px;background:var(--line-strong)}
+.panel-live{display:grid;grid-template-columns:auto 1fr;gap:var(--a4);align-items:start;background:var(--card);border:1px solid var(--line);border-radius:var(--r3);padding:var(--a5);box-shadow:var(--lift)}
+.panel-live .ic{width:44px;height:44px;border-radius:50%;background:var(--sunk);display:grid;place-items:center}
+.dev-note{font-size:12px;color:var(--ink-3)}
+.dev-note a{color:var(--ink-3);text-decoration:underline;text-underline-offset:2px}
+.dev-note a:hover{color:var(--ink-2)}
+
+/* Player chip in the self-tag picker — color comes from the track. */
+.pchip{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:600;padding:8px 14px;border-radius:var(--rf);border:1.5px solid var(--line-strong);background:transparent;color:var(--ink-2);cursor:pointer;transition:background .12s ease,border-color .12s ease}
+.pchip:hover{border-color:var(--ink-3);color:var(--ink)}
+.pchip .sw{width:10px;height:10px;border-radius:50%;flex:none}
+.frame{position:relative;border-radius:var(--r2);overflow:hidden;background:#000;border:1px solid var(--line)}
+.frame img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
+.frame svg{position:absolute;inset:0;width:100%;height:100%}
+.frame .ts{position:absolute;left:8px;bottom:8px;font-family:var(--data);font-size:11px;color:#fff;background:rgba(7,13,11,.72);padding:2px 7px;border-radius:var(--r1)}

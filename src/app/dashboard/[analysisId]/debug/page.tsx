@@ -55,13 +55,13 @@ export default async function DebugPage({ params }: { params: Promise<{ analysis
     <div>
       <Link
         href={`/dashboard/${analysisId}`}
-        className="text-sm font-medium text-slate-500 hover:text-slate-700"
+        className="crumb"
       >
         ← Back to analysis
       </Link>
 
-      <h1 className="mt-3 text-2xl font-bold text-slate-900">Developer debug view</h1>
-      <p className="mt-1 max-w-2xl text-sm text-slate-600">
+      <h1 className="h1" style={{ marginTop: "var(--a3)" }}>Developer debug view</h1>
+      <p className="sm measure" style={{ marginTop: "var(--a2)" }}>
         Raw pipeline output, not a coaching UI. Yellow outline = detected court quadrilateral;
         colored boxes = tracked players at that exact timestamp; dots = pose keypoints
         (confidence ≥ 0.3 only). If these look wrong, the numbers on the analysis page are wrong
@@ -71,12 +71,12 @@ export default async function DebugPage({ params }: { params: Promise<{ analysis
       <QualitySummary phase2={phase2} />
 
       {framesWithUrls.length === 0 ? (
-        <p className="mt-8 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
+        <p className="note" style={{ marginTop: "var(--a6)" }}>
           No debug frames were persisted for this analysis (mock provider run, or the CV pipeline
           hasn&apos;t completed yet).
         </p>
       ) : (
-        <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2">
+        <div className="grid2" style={{ marginTop: "var(--a6)" }}>
           {framesWithUrls.map(({ frame, url }) =>
             url ? (
               <FrameOverlay
@@ -95,29 +95,27 @@ export default async function DebugPage({ params }: { params: Promise<{ analysis
         </div>
       )}
 
-      <section className="mt-10">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Events (raw)
-        </h2>
-        <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-200 bg-white">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-slate-50">
-              <tr className="text-left text-xs uppercase text-slate-500">
-                <th className="px-4 py-2">Time</th>
-                <th className="px-4 py-2">Type</th>
-                <th className="px-4 py-2">Player</th>
-                <th className="px-4 py-2">Confidence</th>
-                <th className="px-4 py-2">Source</th>
+      <section className="sec" style={{ marginTop: "var(--a7)" }}>
+        <h2 className="eyebrow">Events (raw)</h2>
+        <div className="card" style={{ maxHeight: 384, overflowY: "auto", padding: "0 var(--a4)" }}>
+          <table className="tbl">
+            <thead style={{ position: "sticky", top: 0, background: "var(--card)" }}>
+              <tr>
+                <th style={{ paddingTop: "var(--a3)" }}>Time</th>
+                <th style={{ paddingTop: "var(--a3)" }}>Type</th>
+                <th style={{ paddingTop: "var(--a3)" }}>Player</th>
+                <th style={{ paddingTop: "var(--a3)" }}>Confidence</th>
+                <th style={{ paddingTop: "var(--a3)" }}>Source</th>
               </tr>
             </thead>
             <tbody>
               {phase2.events.map((e) => (
-                <tr key={e.id} className="border-t border-slate-100">
-                  <td className="px-4 py-2 font-mono text-xs">{e.timestamp_s.toFixed(2)}s</td>
-                  <td className="px-4 py-2">{e.event_type}</td>
-                  <td className="px-4 py-2">{e.player_label ?? "—"}</td>
-                  <td className="px-4 py-2">{e.confidence.toFixed(2)}</td>
-                  <td className="px-4 py-2 text-slate-500">{e.source}</td>
+                <tr key={e.id}>
+                  <td className="n">{e.timestamp_s.toFixed(2)}s</td>
+                  <td>{e.event_type}</td>
+                  <td>{e.player_label ?? "—"}</td>
+                  <td className="n">{e.confidence.toFixed(2)}</td>
+                  <td className="xs">{e.source}</td>
                 </tr>
               ))}
             </tbody>
@@ -145,11 +143,11 @@ function QualitySummary({ phase2 }: { phase2: Awaited<ReturnType<typeof getPhase
   ];
 
   return (
-    <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
+    <div className="grid2" style={{ marginTop: "var(--a5)", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "var(--a3)" }}>
       {items.map(([label, value]) => (
-        <div key={label} className="rounded-lg border border-slate-200 bg-white p-3">
-          <div className="text-xs text-slate-500">{label}</div>
-          <div className="mt-1 text-lg font-semibold text-slate-900">{value}</div>
+        <div key={label} className="card fig" style={{ padding: "var(--a3) var(--a4)" }}>
+          <span className="c">{label}</span>
+          <span className="v" style={{ fontSize: 22 }}>{value}</span>
         </div>
       ))}
     </div>
@@ -181,15 +179,11 @@ function FrameOverlay({
     | undefined;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-black">
-      <div className="relative" style={{ aspectRatio: `${width} / ${height}` }}>
+    <div className="frame" style={{ aspectRatio: `${width} / ${height}` }}>
+      <div style={{ position: "absolute", inset: 0 }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={imageUrl} alt={`Frame at ${timestampSeconds}s`} className="absolute inset-0 h-full w-full object-contain" />
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          className="absolute inset-0 h-full w-full"
-          preserveAspectRatio="xMidYMid meet"
-        >
+        <img src={imageUrl} alt={`Frame at ${timestampSeconds}s`} />
+        <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet">
           {corners ? (
             <polygon
               points={[corners.topLeft, corners.topRight, corners.bottomRight, corners.bottomLeft]
@@ -235,9 +229,7 @@ function FrameOverlay({
               ));
           })}
         </svg>
-        <div className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-1 font-mono text-xs text-white">
-          {timestampSeconds.toFixed(2)}s
-        </div>
+        <span className="ts">{timestampSeconds.toFixed(2)}s</span>
       </div>
     </div>
   );

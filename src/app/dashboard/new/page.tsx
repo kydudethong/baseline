@@ -5,14 +5,22 @@ export const metadata: Metadata = { title: "Analyze Your Game — Baseline" };
 
 export default function NewAnalysisPage() {
   return (
-    <div className="mx-auto max-w-xl">
-      <h1 className="text-2xl font-bold text-slate-900">Analyze your game</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        Upload a recording of your match. We&apos;ll process it and let you know when it&apos;s ready.
-      </p>
-      <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6">
+    <div className="sec" style={{ maxWidth: 640, margin: "0 auto", width: "100%" }}>
+      <div className="stack g1">
+        <span className="eyebrow">New analysis</span>
+        <h1 className="h1">Analyze a game</h1>
+        <p className="sm measure">
+          Upload a recording of your match. Baseline tracks the court and every player, then you tag which
+          one is you and get your coaching read.
+        </p>
+      </div>
+      <div className="card">
         <VideoUploader />
       </div>
+      <p className="xs measure">
+        Best results: a fixed camera behind or above the baseline, the whole court in frame, one game per
+        clip. Phone footage is fine.
+      </p>
     </div>
   );
 }

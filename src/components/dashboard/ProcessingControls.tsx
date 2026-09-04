@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AnalysisStatus } from "@/lib/db/types";
+import { Ball } from "@/components/motifs/Motifs";
 
 /**
  * Drives the state machine from the client side: starts/retries processing,
@@ -51,26 +52,32 @@ export function ProcessingControls({
 
   if (inFlight) {
     return (
-      <p className="flex items-center gap-2 text-sm text-slate-600">
-        <span className="h-2 w-2 animate-pulse rounded-full bg-amber-600" />
-        {status === "queued" ? "Queued for processing…" : "Processing…"} This page updates
-        automatically.
-      </p>
+      <div className="panel-live" role="status" aria-live="polite">
+        <span className="ic">
+          <Ball size={24} spin />
+        </span>
+        <div className="stack g2" style={{ minWidth: 0 }}>
+          <p className="h3">{status === "queued" ? "Queued — starting shortly" : "Tracking the court and every player"}</p>
+          <p className="sm measure">
+            Baseline is finding the court lines, following each player through the clip, and picking out the
+            rallies from the paddle contacts. Longer clips take longer; this page updates by itself when it&apos;s
+            done, so you can leave and come back.
+          </p>
+          <div className="progress indet" style={{ maxWidth: 320 }}>
+            <div className="bar" />
+          </div>
+        </div>
+      </div>
     );
   }
 
   if (status === "uploaded" || status === "failed") {
     return (
-      <div className="space-y-2">
-        <button
-          type="button"
-          onClick={start}
-          disabled={busy}
-          className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
-        >
-          {busy ? "Starting…" : status === "failed" ? "Retry processing" : "Start processing"}
+      <div className="stack g3" style={{ alignItems: "flex-start" }}>
+        <button type="button" onClick={start} disabled={busy} className="btn btn-optic">
+          {busy ? "Starting…" : status === "failed" ? "Try processing again" : "Start processing"}
         </button>
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        {error ? <div className="error">{error}</div> : null}
       </div>
     );
   }

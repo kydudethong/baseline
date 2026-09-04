@@ -18,7 +18,6 @@ import Player, { type RallyMark } from "@/components/breakdown/Player";
 import { SkillMeter } from "@/components/breakdown/SkillMeter";
 import { SkillRadar } from "@/components/breakdown/SkillRadar";
 import { skillName } from "@/lib/coaching/types";
-import { formatBytes } from "@/lib/video/validation";
 import type { AnalysisFrameRow, CoachingObservationRow, PlayerTrackRow } from "@/lib/db/types";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +36,9 @@ export async function generateMetadata({
   params: Promise<{ analysisId: string }>;
 }): Promise<Metadata> {
   const { analysisId } = await params;
-  return { title: `Analysis ${analysisId.slice(0, 8)} — Baseline` };
+  const supabase = await createClient();
+  const { data } = await supabase.from("analyses").select("title").eq("id", analysisId).maybeSingle();
+  return { title: `${data?.title ?? "Analysis"} — Baseline` };
 }
 
 export default async function AnalysisDetailPage({
@@ -66,24 +67,28 @@ export default async function AnalysisDetailPage({
     <>
       <Link href="/dashboard/library" className="crumb">← All analyses</Link>
 
-      <div className="stack g3">
+      <div className="stack g2">
         <div className="row g3">
           <h1 className="d2">{analysis.title}</h1>
           <StatusBadge status={analysis.status} />
         </div>
-
-        {video ? (
-          <div className="card figs">
-            <Fig label="File" value={video.original_filename} />
-            <Fig label="Size" value={formatBytes(video.size_bytes)} />
-            <Fig label="Duration" value={video.duration_seconds ? formatDuration(video.duration_seconds) : "—"} />
-            <Fig label="Resolution" value={video.width && video.height ? `${video.width}×${video.height}` : "—"} />
-          </div>
-        ) : null}
+        <p className="xs">
+          {[
+            new Date(analysis.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
+            video?.duration_seconds ? formatDuration(video.duration_seconds) : null,
+            video?.width && video?.height ? `${video.width}×${video.height}` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
       </div>
 
-      {analysis.status === "failed" && analysis.error_message ? (
-        <div className="error">{analysis.error_message}</div>
+      {analysis.status === "failed" ? (
+        <div className="error">
+          <strong>Processing didn&apos;t finish.</strong>{" "}
+          {analysis.error_message ?? "Something went wrong on our side."} You can try again below — if it keeps
+          failing, a clip with the whole court in frame from a fixed camera usually fixes it.
+        </div>
       ) : null}
 
       <ProcessingControls analysisId={analysis.id} status={analysis.status} />
@@ -127,10 +132,45 @@ async function AnalysisBreakdown({
     note: noteForRally(coachingData.observations, r.idx),
   }));
 
+  const hasRead = coachingData.read !== null;
+  const selfLabels = (analysis.self_player_label ?? "")
+    .split(",")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const tagSection = (
+    <TagSection
+      supabase={supabase}
+      analysis={analysis}
+      phase2Tracks={phase2.tracks}
+      phase2Frames={phase2.frames}
+      profile={profile}
+      hasExistingRead={hasRead}
+    />
+  );
+
   return (
     <div className="stack g6">
       {videoUrl ? (
         <Player videoUrl={videoUrl} rallies={rallies} durationS={video?.duration_seconds ?? 0} />
+      ) : null}
+
+      {!hasRead ? (
+        <div className="stack g4">
+          <div className="stepbar">
+            <span className="step done">
+              <span className="n">✓</span>Tracked
+            </span>
+            <span className="step cur">
+              <span className="sep" />
+              <span className="n">2</span>Tag yourself
+            </span>
+            <span className="step">
+              <span className="sep" />
+              <span className="n">3</span>Coaching read
+            </span>
+          </div>
+          {tagSection}
+        </div>
       ) : null}
 
       <div className="tabs">
@@ -144,13 +184,25 @@ async function AnalysisBreakdown({
       {tab === "summary" ? (
         <div className="stack g6">
           {rallies.length > 0 ? (
-            <div className="card figs">
-              <Fig label="Rallies detected" value={String(rallies.length)} />
-              <Fig
-                label="Paddle contacts counted"
-                value={rallies.some((r) => r.shots > 0) ? String(rallies.reduce((sum, r) => sum + r.shots, 0)) : "—"}
-              />
-              <Fig label="Median contacts / rally" value={String(median(rallies.map((r) => r.shots))) || "—"} />
+            <div className="scoreboard-row">
+              <div className="cell">
+                <div className="num">{rallies.length}</div>
+                <div className="lbl">Rallies</div>
+              </div>
+              <div className="cell">
+                <div className="num">
+                  {rallies.some((r) => r.shots > 0) ? rallies.reduce((sum, r) => sum + r.shots, 0) : "—"}
+                </div>
+                <div className="lbl">Paddle contacts</div>
+              </div>
+              <div className="cell">
+                <div className="num">{median(rallies.map((r) => r.shots)) || "—"}</div>
+                <div className="lbl">Contacts / rally</div>
+              </div>
+              <div className="cell">
+                <div className="num">{longestRally(rallies)}</div>
+                <div className="lbl">Longest rally</div>
+              </div>
             </div>
           ) : null}
           {coachingData.read ? (
@@ -163,20 +215,24 @@ async function AnalysisBreakdown({
             />
           ) : (
             <div className="empty">
-              <h3 className="h2">No coaching read yet</h3>
-              <p className="body measure">Tag which player is you below to get one.</p>
+              <h3 className="h2">Your coaching read goes here</h3>
+              <p className="body measure">
+                Tag which player is you above and Baseline will write it — strengths, the one fix that matters
+                most, and a drill to start with.
+              </p>
             </div>
           )}
         </div>
       ) : null}
 
       {tab === "movement" ? (
-        <div className="card stack g5">
+        <div className="stack g5">
           <AnalysisResultPanel result={analysis.result!} />
-          <MovementMetricsPanel calibration={phase2.calibration} movement={phase2.movement} />
-          <Link href={`/dashboard/${analysis.id}/debug`} className="crumb">
-            Open developer debug view (raw detections, court overlay, per-frame QC) →
-          </Link>
+          <MovementMetricsPanel calibration={phase2.calibration} movement={phase2.movement} selfLabels={selfLabels} />
+          <p className="dev-note">
+            Want to see what the tracker actually detected?{" "}
+            <Link href={`/dashboard/${analysis.id}/debug`}>Open the raw detections view</Link>.
+          </p>
         </div>
       ) : null}
 
@@ -223,8 +279,10 @@ async function AnalysisBreakdown({
                 </div>
               </section>
               <p className="note">
-                These are the coach&rsquo;s read of what this one clip shows. See the Progress page
-                for how a skill has moved across your matches.
+                These are the coach&rsquo;s read of what this one clip shows.{" "}
+                <Link href="/dashboard/practice" className="crumb" style={{ color: "var(--blue)" }}>
+                  See how each skill is trending across your games →
+                </Link>
               </p>
             </>
           ) : (
@@ -253,14 +311,7 @@ async function AnalysisBreakdown({
         </div>
       ) : null}
 
-      <TagSection
-        supabase={supabase}
-        analysis={analysis}
-        phase2Tracks={phase2.tracks}
-        phase2Frames={phase2.frames}
-        profile={profile}
-        hasExistingRead={coachingData.read !== null}
-      />
+      {hasRead ? tagSection : null}
     </div>
   );
 }
@@ -333,22 +384,18 @@ function noteForRally(observations: CoachingObservationRow[], rallyIdx: number):
   return match ? match.title : null;
 }
 
+function longestRally(rallies: RallyMark[]): string {
+  if (rallies.length === 0) return "—";
+  const longest = Math.max(...rallies.map((r) => r.end_s - r.start_s));
+  return `${longest.toFixed(1)}s`;
+}
+
 function median(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
 }
-
-function Fig({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="fig">
-      <span className="v">{value}</span>
-      <span className="c">{label}</span>
-    </div>
-  );
-}
-
 
 /** `count` roughly-evenly-spaced indices into [0, length) — first and last included when length allows. */
 function pickSpreadIndices(length: number, count: number): number[] {

@@ -27,6 +27,7 @@ export function VideoUploader() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const uploadRef = useRef<tus.Upload | null>(null);
   // Lets `cancel()` settle the in-flight upload promise — tus's `abort()`
   // stops the request but does not itself reject/resolve anything.
@@ -142,16 +143,33 @@ export function VideoUploader() {
 
   const busy = phase !== "idle" && phase !== "error";
 
+  const STEP_LABEL: Partial<Record<Phase, string>> = {
+    creating: "Starting your analysis…",
+    attaching: "Finishing upload…",
+    processing: "Handing off to the court tracker…",
+    done: "Opening your analysis…",
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="stack g4">
       <label
         htmlFor="video-file"
-        className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center transition hover:border-emerald-400"
+        className={`dropzone${dragOver ? " over" : ""}${busy ? " disabled" : ""}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!busy) setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          if (busy) return;
+          onFileChange(e.dataTransfer.files?.[0] ?? null);
+        }}
       >
-        <span className="text-sm font-medium text-slate-700">
-          {file ? "Choose a different file" : "Click to choose a video"}
-        </span>
-        <span className="mt-1 text-xs text-slate-500">MP4, MOV, WebM, AVI, or MKV — up to 2 GB</span>
+        <span className="ttl">{file ? "Choose a different video" : "Drop your game video here"}</span>
+        <span className="sm">or click to browse</span>
+        <span className="xs">MP4, MOV, WebM, AVI or MKV · up to 2 GB</span>
         <input
           id="video-file"
           type="file"
@@ -163,68 +181,61 @@ export function VideoUploader() {
       </label>
 
       {file ? (
-        <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
-          <div className="min-w-0">
-            <p className="truncate font-medium text-slate-900">{file.name}</p>
-            <p className="text-slate-500">{formatBytes(file.size)}</p>
+        <div className="filecard">
+          <div className="stack" style={{ minWidth: 0, gap: 2 }}>
+            <span className="nm">{file.name}</span>
+            <span className="xs">{formatBytes(file.size)}</span>
           </div>
           {!busy ? (
-            <button
-              type="button"
-              onClick={() => onFileChange(null)}
-              className="ml-4 shrink-0 text-slate-400 hover:text-slate-600"
-              aria-label="Remove file"
-            >
+            <button type="button" onClick={() => onFileChange(null)} className="x" aria-label="Remove file">
               ✕
             </button>
           ) : null}
         </div>
       ) : null}
 
-      {validationError ? (
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{validationError}</p>
-      ) : null}
+      {validationError ? <div className="error">{validationError}</div> : null}
 
       {phase === "uploading" ? (
-        <div className="space-y-2">
-          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-            <div
-              className="h-full rounded-full bg-emerald-600 transition-all"
-              style={{ width: `${progress}%` }}
-            />
+        <div className="stack g2">
+          <div className="progress">
+            <div className="bar" style={{ width: `${progress}%` }} />
           </div>
-          <div className="flex items-center justify-between text-sm text-slate-600">
-            <span>Uploading — {progress}%</span>
-            <button type="button" onClick={cancel} className="font-medium text-red-600 hover:underline">
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <span className="status-line">
+              <span className="dot" />
+              Uploading — {progress}%
+            </span>
+            <button type="button" onClick={cancel} className="crumb" style={{ color: "var(--bad)" }}>
               Cancel
             </button>
           </div>
         </div>
       ) : null}
 
-      {phase === "creating" ? <StatusLine text="Starting analysis…" /> : null}
-      {phase === "attaching" ? <StatusLine text="Finishing upload…" /> : null}
-      {phase === "processing" ? <StatusLine text="Kicking off processing…" /> : null}
+      {STEP_LABEL[phase] ? (
+        <div className="stack g2">
+          <div className="progress indet">
+            <div className="bar" />
+          </div>
+          <span className="status-line">
+            <span className="dot" />
+            {STEP_LABEL[phase]}
+          </span>
+        </div>
+      ) : null}
 
-      {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+      {error ? <div className="error">{error}</div> : null}
 
       <button
         type="button"
         onClick={startUpload}
         disabled={!file || Boolean(validationError) || busy}
-        className="w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+        className="btn btn-optic"
+        style={{ width: "100%" }}
       >
         {busy ? "Please wait…" : "Upload and analyze"}
       </button>
     </div>
-  );
-}
-
-function StatusLine({ text }: { text: string }) {
-  return (
-    <p className="flex items-center gap-2 text-sm text-slate-600">
-      <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-600" />
-      {text}
-    </p>
   );
 }

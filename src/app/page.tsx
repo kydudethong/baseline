@@ -14,7 +14,7 @@ export default async function LandingPage() {
   const analyzeHref = user ? "/dashboard/new" : "/signup";
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen" style={{ background: "var(--paper)" }}>
       <Nav isAuthed={Boolean(user)} />
       <Hero analyzeHref={analyzeHref} />
       <HowItWorks />

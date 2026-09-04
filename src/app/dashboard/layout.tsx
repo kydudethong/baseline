@@ -25,19 +25,19 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </Link>
         <nav className="topnav">
           <DashboardNav />
-          <span className="div" />
+        </nav>
+        <div className="topbar-actions">
           <Link href="/dashboard/new" className="btn btn-optic btn-sm">
-            + Analyze a game
+            <span className="cta-long">+ Analyze a game</span>
+            <span className="cta-short">+ Analyze</span>
           </Link>
-          <span className="xs" style={{ marginLeft: "var(--a3)" }}>
-            {user.email}
-          </span>
+          <span className="xs topbar-email">{user.email}</span>
           <form action={logout}>
             <button type="submit" className="btn btn-ghost btn-sm">
               Log out
             </button>
           </form>
-        </nav>
+        </div>
       </header>
       <main className="page">{children}</main>
     </div>

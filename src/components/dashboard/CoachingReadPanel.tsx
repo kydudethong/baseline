@@ -33,9 +33,9 @@ export function CoachingReadPanel({
     <div className="stack g6">
       <div className="sec">
         <div className="row g3">
-          <h2 className="d2 measure">{read.headline ?? "Coaching read"}</h2>
-          {read.model ? <span className="pill p-neutral mono">{read.model}</span> : null}
+          <span className="eyebrow">Your coaching read</span>
         </div>
+        <h2 className="d2 measure">{read.headline ?? "Coaching read"}</h2>
         {read.summary ? <p className="body measure">{read.summary}</p> : null}
       </div>
 
@@ -99,7 +99,7 @@ export function CoachingReadPanel({
             </div>
           </section>
 
-          {coaching.data_gaps ? <p className="xs" style={{ fontStyle: "italic" }}>Data gaps: {coaching.data_gaps}</p> : null}
+          {coaching.data_gaps ? <p className="xs measure">What the footage couldn&apos;t show: {coaching.data_gaps}</p> : null}
         </>
       ) : null}
 
@@ -118,7 +118,7 @@ export function CoachingReadPanel({
 
       {observations.length > 0 ? (
         <section className="sec">
-          <h3 className="eyebrow">Tagged observations</h3>
+          <h3 className="eyebrow">What the coach saw, rally by rally</h3>
           <div className="stack g4">
             {observations.map((o) => (
               <div key={o.id} className={`weak${o.severity <= 3 ? " med" : ""}${o.valence === "strength" ? " strength" : ""}`}>

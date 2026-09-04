@@ -16,3 +16,10 @@ const FALLBACK_COLORS = ["#a855f7", "#06b6d4", "#f97316", "#ec4899", "#14b8a6", 
 export function colorForPlayer(playerId: string, index: number): string {
   return PLAYER_COLORS[playerId] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length];
 }
+
+/** "player_3" -> "Player 3". Track ids are stable identifiers (see phase2-types.ts);
+ * this is the only thing a player should ever see on screen. */
+export function playerDisplayName(playerId: string): string {
+  const m = /^player_(\d+)$/.exec(playerId);
+  return m ? `Player ${m[1]}` : playerId;
+}

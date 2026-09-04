@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { colorForPlayer } from "@/lib/vision/player-colors";
+import { colorForPlayer, playerDisplayName } from "@/lib/vision/player-colors";
 
 export interface TagPickerFrame {
   url: string;
@@ -73,7 +73,7 @@ export function PlayerTagPicker({
 
   async function submit() {
     if (selected.size === 0) {
-      setError("Pick at least one colored player below — that's who the coaching read will be about.");
+      setError("Pick at least one player above — that's who the coaching read will be about.");
       return;
     }
     setBusy(true);
@@ -100,25 +100,28 @@ export function PlayerTagPicker({
   }
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5">
-      <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-        {hasExistingRead ? "Re-tag & regenerate" : "Which player is you?"}
-      </h3>
-      <p className="mt-1 text-sm text-slate-600">
-        Pick every colored box below that&apos;s you — if the tracker lost and re-found you during the
-        clip, that can show up as more than one color, so select all of them. Shown across a few
-        different moments in the clip since you won&apos;t be the same color in every frame.
-      </p>
+    <section className="card stack g5" id="tag">
+      <div className="stack g2">
+        <div className="row g3">
+          <span className="eyebrow">{hasExistingRead ? "Re-tag & regenerate" : "Step 2 of 2"}</span>
+        </div>
+        <h2 className="h2">{hasExistingRead ? "Change who you are in this clip" : "Which player is you?"}</h2>
+        <p className="sm measure">
+          Tap every box that&apos;s you. The tracker can lose you behind another player and pick you back up
+          under a new color, so you may be more than one — that&apos;s expected. The frames below are spread
+          across the clip so you can check.
+        </p>
+      </div>
 
       {frames.length > 0 ? (
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--a3)" }}>
           {frames.map((f, i) => (
             <ReferenceFrame key={i} frame={f} width={width} height={height} colorIndex={colorIndex} />
           ))}
         </div>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="row g2">
         {players.map((label, i) => {
           const isOn = selected.has(label);
           const color = colorForPlayer(label, colorIndex.get(label) ?? i);
@@ -127,51 +130,47 @@ export function PlayerTagPicker({
               key={label}
               type="button"
               onClick={() => toggle(label)}
-              className="flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition"
-              style={
-                isOn
-                  ? { borderColor: color, backgroundColor: `${color}1a`, color }
-                  : { borderColor: "var(--line-strong)", color: "var(--ink-2)" }
-              }
+              className="pchip"
+              aria-pressed={isOn}
+              style={isOn ? { borderColor: color, backgroundColor: `${color}22`, color } : undefined}
             >
-              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
-              {label}
+              <span className="sw" style={{ backgroundColor: color }} />
+              {playerDisplayName(label)}
               {isOn ? " ✓" : ""}
             </button>
           );
         })}
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <label className="block text-sm">
-          <span className="text-xs font-medium text-slate-500">Skill level (optional)</span>
+      <div className="dashline" />
+
+      <div className="form-grid">
+        <label className="field">
+          <span>
+            Skill level <span className="hint">optional</span>
+          </span>
           <input
             type="text"
             value={skillLevel}
             onChange={(e) => setSkillLevel(e.target.value)}
-            placeholder="e.g. 3.5, or “beginner”"
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+            placeholder="3.5, or “beginner”"
+            className="input"
+            disabled={busy}
           />
         </label>
-        <label className="block text-sm">
-          <span className="text-xs font-medium text-slate-500">Paddle hand (optional)</span>
-          <select
-            value={paddleHand}
-            onChange={(e) => setPaddleHand(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-          >
-            <option value="">Not stated</option>
+        <label className="field">
+          <span>
+            Paddle hand <span className="hint">optional</span>
+          </span>
+          <select value={paddleHand} onChange={(e) => setPaddleHand(e.target.value)} className="select" disabled={busy}>
+            <option value="">Not sure</option>
             <option value="right">Right</option>
             <option value="left">Left</option>
           </select>
         </label>
-        <label className="block text-sm">
-          <span className="text-xs font-medium text-slate-500">Session type</span>
-          <select
-            value={coachingKind}
-            onChange={(e) => setCoachingKind(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-          >
+        <label className="field">
+          <span>Session type</span>
+          <select value={coachingKind} onChange={(e) => setCoachingKind(e.target.value)} className="select" disabled={busy}>
             {COACHING_KINDS.map((k) => (
               <option key={k.value} value={k.value}>
                 {k.label}
@@ -181,27 +180,36 @@ export function PlayerTagPicker({
         </label>
       </div>
 
-      <label className="mt-4 block text-sm">
-        <span className="text-xs font-medium text-slate-500">Anything you want the coach to focus on? (optional)</span>
+      <label className="field">
+        <span>
+          Anything you want the coach to look at? <span className="hint">optional</span>
+        </span>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={2}
           placeholder="e.g. I was working on my split step"
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+          className="textarea"
+          disabled={busy}
         />
       </label>
 
-      <div className="mt-5 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={submit}
-          disabled={busy}
-          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
-        >
-          {busy ? "Analyzing…" : hasExistingRead ? "Regenerate coaching read" : "Get my coaching read"}
+      <div className="stack g3" style={{ alignItems: "flex-start" }}>
+        <button type="button" onClick={submit} disabled={busy} className="btn btn-optic">
+          {busy ? "Writing your read…" : hasExistingRead ? "Regenerate coaching read" : "Get my coaching read"}
         </button>
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        {busy ? (
+          <div className="stack g2" style={{ width: "100%", maxWidth: 420 }}>
+            <div className="progress indet">
+              <div className="bar" />
+            </div>
+            <span className="status-line">
+              <span className="dot" />
+              Reading your rallies and positioning — usually under a minute.
+            </span>
+          </div>
+        ) : null}
+        {error ? <div className="error">{error}</div> : null}
       </div>
     </section>
   );
@@ -219,39 +227,39 @@ function ReferenceFrame({
   colorIndex: Map<string, number>;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-black">
-      <div className="relative" style={{ aspectRatio: `${width} / ${height}` }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={frame.url}
-          alt={`Frame at ${frame.timestampSeconds.toFixed(1)}s`}
-          className="absolute inset-0 h-full w-full object-contain"
-        />
-        <svg viewBox={`0 0 ${width} ${height}`} className="absolute inset-0 h-full w-full" preserveAspectRatio="xMidYMid meet">
-          {frame.boxes.map(({ playerLabel, box }) => {
-            const color = colorForPlayer(playerLabel, colorIndex.get(playerLabel) ?? 0);
-            return (
-              <g key={playerLabel}>
-                <rect
-                  x={box.x * width}
-                  y={box.y * height}
-                  width={box.width * width}
-                  height={box.height * height}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth={3}
-                />
-                <text x={box.x * width} y={box.y * height - 6} fill={color} fontSize={20} fontWeight={600}>
-                  {playerLabel}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-        <div className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white">
-          {frame.timestampSeconds.toFixed(1)}s
-        </div>
-      </div>
+    <div className="frame" style={{ aspectRatio: `${width} / ${height}` }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={frame.url} alt={`Frame at ${frame.timestampSeconds.toFixed(1)}s`} />
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        {frame.boxes.map(({ playerLabel, box }) => {
+          const color = colorForPlayer(playerLabel, colorIndex.get(playerLabel) ?? 0);
+          return (
+            <g key={playerLabel}>
+              <rect
+                x={box.x * width}
+                y={box.y * height}
+                width={box.width * width}
+                height={box.height * height}
+                fill="none"
+                stroke={color}
+                strokeWidth={Math.max(3, width / 480)}
+                rx={4}
+              />
+              <text
+                x={box.x * width + 6}
+                y={box.y * height - 10}
+                fill={color}
+                fontSize={Math.max(20, width / 60)}
+                fontWeight={700}
+                fontFamily="var(--ui)"
+              >
+                {playerDisplayName(playerLabel)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <span className="ts">{frame.timestampSeconds.toFixed(1)}s</span>
     </div>
   );
 }
