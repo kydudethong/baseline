@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
-import { listAnalysesForUser } from "@/lib/db/analyses";
+import { listAnalysisSummariesForUser } from "@/lib/db/analyses";
 import { getRankedWeaknesses } from "@/lib/coaching/stats";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 
@@ -15,7 +15,7 @@ export default async function HomePage() {
   } = await supabase.auth.getUser();
   if (!user) return null; // layout already redirects unauthenticated requests
 
-  const analyses = await listAnalysesForUser(supabase, user.id);
+  const analyses = await listAnalysisSummariesForUser(supabase, user.id);
   const completedCount = analyses.filter((a) => a.status === "completed").length;
   const inFlightCount = analyses.filter((a) => a.status === "queued" || a.status === "processing").length;
   const mostRecent = analyses[0] ?? null;

@@ -17,6 +17,25 @@ export async function listAnalysesForUser(supabase: Client, userId: string) {
   return (data ?? []) as AnalysisWithVideo[];
 }
 
+/** Trimmed projection of listAnalysesForUser for views that only need status/recency (Home's counts and "most recent" card) — skips the video join and the `result` JSON blob neither of them render. */
+export interface AnalysisSummary {
+  id: string;
+  title: string;
+  status: AnalysisStatus;
+  created_at: string;
+}
+
+export async function listAnalysisSummariesForUser(supabase: Client, userId: string): Promise<AnalysisSummary[]> {
+  const { data, error } = await supabase
+    .from("analyses")
+    .select("id, title, status, created_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as AnalysisSummary[];
+}
+
 export async function getAnalysisForUser(
   supabase: Client,
   userId: string,

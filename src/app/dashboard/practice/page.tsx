@@ -1,9 +1,8 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
-import { listAnalysesForUser } from "@/lib/db/analyses";
 import { getActiveBlueprintsForUser } from "@/lib/db/blueprints";
-import { getRankedWeaknesses, getSkillProfiles } from "@/lib/coaching/stats";
+import { completedAnalysisMeta, getRankedWeaknesses, getSkillProfiles } from "@/lib/coaching/stats";
 
 export const metadata: Metadata = { title: "Practice — Baseline" };
 export const dynamic = "force-dynamic";
@@ -23,8 +22,8 @@ export default async function PracticePage() {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const analyses = await listAnalysesForUser(supabase, user.id);
-  const completedCount = analyses.filter((a) => a.status === "completed").length;
+  const metaById = await completedAnalysisMeta(supabase, user.id);
+  const completedCount = metaById.size;
 
   if (completedCount === 0) {
     return (
@@ -48,8 +47,8 @@ export default async function PracticePage() {
   }
 
   const [weaknesses, profiles, blueprints] = await Promise.all([
-    getRankedWeaknesses(supabase, user.id, 8),
-    getSkillProfiles(supabase, user.id),
+    getRankedWeaknesses(supabase, user.id, 8, metaById),
+    getSkillProfiles(supabase, user.id, metaById),
     getActiveBlueprintsForUser(supabase, user.id),
   ]);
 

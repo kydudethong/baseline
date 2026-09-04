@@ -19,7 +19,7 @@ import { SkillMeter } from "@/components/breakdown/SkillMeter";
 import { SkillRadar } from "@/components/breakdown/SkillRadar";
 import { skillName } from "@/lib/coaching/types";
 import { formatBytes } from "@/lib/video/validation";
-import type { CoachingObservationRow, PlayerTrackRow } from "@/lib/db/types";
+import type { AnalysisFrameRow, CoachingObservationRow, PlayerTrackRow } from "@/lib/db/types";
 
 export const dynamic = "force-dynamic";
 
@@ -253,35 +253,48 @@ async function AnalysisBreakdown({
         </div>
       ) : null}
 
-      <TagSection supabase={supabase} analysis={analysis} phase2Tracks={phase2.tracks} profile={profile} hasExistingRead={coachingData.read !== null} />
+      <TagSection
+        supabase={supabase}
+        analysis={analysis}
+        phase2Tracks={phase2.tracks}
+        phase2Frames={phase2.frames}
+        profile={profile}
+        hasExistingRead={coachingData.read !== null}
+      />
     </div>
   );
 }
 
 const REFERENCE_FRAME_COUNT = 3;
 
-/** Player self-tagging — see PlayerTagPicker.tsx. Kept as its own section below the tabs since it drives (re)generating the read itself, not one tab's content. */
+/** Player self-tagging — see PlayerTagPicker.tsx. Kept as its own section below the tabs since it drives (re)generating the read itself, not one tab's content.
+ *
+ * phase2Tracks/phase2Frames are passed in from AnalysisBreakdown's own Phase2Data
+ * fetch rather than re-queried here — this section used to call getPhase2Data a
+ * second time per page load (6 more queries, including the frames and keypoints
+ * tables) just to read the frame list that its caller already has. */
 async function TagSection({
   supabase,
   analysis,
   phase2Tracks,
+  phase2Frames,
   profile,
   hasExistingRead,
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   analysis: AnalysisWithVideo;
   phase2Tracks: PlayerTrackRow[];
+  phase2Frames: AnalysisFrameRow[];
   profile: Awaited<ReturnType<typeof getProfile>>;
   hasExistingRead: boolean;
 }) {
   if (phase2Tracks.length === 0) return null; // nothing to tag yet
 
-  const phase2 = await getPhase2Data(supabase, analysis.id);
   const players = [...phase2Tracks].map((t) => t.player_label).sort();
   const width = analysis.video?.width ?? 1920;
   const height = analysis.video?.height ?? 1080;
 
-  const debugFrames = phase2.frames.filter((f) => f.debug_storage_path);
+  const debugFrames = phase2Frames.filter((f) => f.debug_storage_path);
   const sampleIndices = pickSpreadIndices(debugFrames.length, REFERENCE_FRAME_COUNT);
   const referenceFrames = await Promise.all(
     sampleIndices.map(async (i) => {

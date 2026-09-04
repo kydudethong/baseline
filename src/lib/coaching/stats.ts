@@ -38,7 +38,7 @@ interface AnalysisMeta {
   rank: number;
 }
 
-async function completedAnalysisMeta(supabase: Client, userId: string): Promise<Map<string, AnalysisMeta>> {
+export async function completedAnalysisMeta(supabase: Client, userId: string): Promise<Map<string, AnalysisMeta>> {
   const { data, error } = await supabase
     .from("analyses")
     .select("id, title, created_at")
@@ -66,8 +66,12 @@ export interface SkillProfile {
 }
 
 /** One entry per SKILLS key, always — callers don't need to guard for a missing skill, only for weightedAvg === null. */
-export async function getSkillProfiles(supabase: Client, userId: string): Promise<SkillProfile[]> {
-  const metaById = await completedAnalysisMeta(supabase, userId);
+export async function getSkillProfiles(
+  supabase: Client,
+  userId: string,
+  precomputedMeta?: Map<string, AnalysisMeta>
+): Promise<SkillProfile[]> {
+  const metaById = precomputedMeta ?? (await completedAnalysisMeta(supabase, userId));
   const empty = (): SkillProfile[] =>
     SKILLS.map((s) => ({ skillKey: s.key, name: s.name, group: s.group, weightedAvg: null, analysesRated: 0, trend: null }));
   if (metaById.size === 0) return empty();
@@ -124,9 +128,10 @@ async function rankedObservations(
   supabase: Client,
   userId: string,
   valence: "weakness" | "strength",
-  limit: number
+  limit: number,
+  precomputedMeta?: Map<string, AnalysisMeta>
 ): Promise<RankedObservation[]> {
-  const metaById = await completedAnalysisMeta(supabase, userId);
+  const metaById = precomputedMeta ?? (await completedAnalysisMeta(supabase, userId));
   if (metaById.size === 0) return [];
 
   const { data, error } = await supabase
@@ -186,11 +191,21 @@ async function rankedObservations(
 }
 
 /** Top weaknesses across every completed analysis, most severe/recent/recurring first. */
-export function getRankedWeaknesses(supabase: Client, userId: string, limit = 6): Promise<RankedObservation[]> {
-  return rankedObservations(supabase, userId, "weakness", limit);
+export function getRankedWeaknesses(
+  supabase: Client,
+  userId: string,
+  limit = 6,
+  precomputedMeta?: Map<string, AnalysisMeta>
+): Promise<RankedObservation[]> {
+  return rankedObservations(supabase, userId, "weakness", limit, precomputedMeta);
 }
 
 /** Top strengths across every completed analysis -- same ranking logic, positive framing. */
-export function getTopStrengths(supabase: Client, userId: string, limit = 3): Promise<RankedObservation[]> {
-  return rankedObservations(supabase, userId, "strength", limit);
+export function getTopStrengths(
+  supabase: Client,
+  userId: string,
+  limit = 3,
+  precomputedMeta?: Map<string, AnalysisMeta>
+): Promise<RankedObservation[]> {
+  return rankedObservations(supabase, userId, "strength", limit, precomputedMeta);
 }
