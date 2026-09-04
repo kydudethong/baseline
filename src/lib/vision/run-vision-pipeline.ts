@@ -1,6 +1,7 @@
 import { getPhase2VisionProvider } from "./provider-v2";
 import { analyzeMovementWithCalibration } from "./provider-v2";
 import { detectUnknownShotEvents, detectFootworkFoundation } from "./events";
+import { computeAppearanceSignaturesViaPython } from "./cv-scripts";
 import type {
   AnalysisEvent,
   CourtCalibration,
@@ -72,9 +73,36 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // (not Promise.all) on purpose — a free-tier hosted API can rate-limit
   // bursts, and this keeps VISION_FPS the actual throttle on call volume.
   const perFrameDetections: FrameDetectionSet[] = [];
+  let appearanceSignatureFailures = 0;
   for (const frame of input.frames) {
     const players = await provider.detectPlayers(frame);
+
+    // Best-effort: a color signature per box, used only so the tracker can
+    // try to re-identify a track that goes missing for a while (see
+    // tracker.ts). Never lets a Python/OpenCV failure here fail the whole
+    // pipeline -- the tracker works fine without signatures, just without
+    // re-identification.
+    if (players.length > 0) {
+      try {
+        const signatures = await computeAppearanceSignaturesViaPython(
+          frame.path,
+          players.map((p) => p.boxImageNorm)
+        );
+        for (let i = 0; i < players.length; i++) {
+          players[i] = { ...players[i], appearanceSignature: signatures[i] ?? null };
+        }
+      } catch {
+        appearanceSignatureFailures += 1;
+      }
+    }
+
     perFrameDetections.push({ timestampSeconds: frame.timestampSeconds, framePath: frame.path, players });
+  }
+
+  if (appearanceSignatureFailures > 0) {
+    knownLimitations.push(
+      `Appearance-signature computation failed on ${appearanceSignatureFailures} of ${input.frames.length} sampled frame(s); track re-identification is degraded for those frames.`
+    );
   }
 
   const tracks = await provider.trackPlayers(perFrameDetections);

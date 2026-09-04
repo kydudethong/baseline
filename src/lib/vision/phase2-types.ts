@@ -36,10 +36,27 @@ export interface CourtCalibration {
   diagnostics: Record<string, unknown>;
 }
 
+export interface AppearanceSignature {
+  /** Mean hue of the torso region, degrees 0-360 (circular). */
+  h: number;
+  /** Mean saturation, 0-1. */
+  s: number;
+  /** Mean value/brightness, 0-1. */
+  v: number;
+}
+
 export interface PlayerDetection {
   confidence: number;
   boxImageNorm: BoundingBoxNorm;
   timestampSeconds: number;
+  /**
+   * Optional cheap color cue (mean HSV of the torso region), used only to
+   * help the tracker re-identify a track after a long gap. Absent when the
+   * signature couldn't be computed (e.g. the appearance script failed) —
+   * the tracker falls back to its non-re-id behavior in that case, so this
+   * is always safe to omit.
+   */
+  appearanceSignature?: AppearanceSignature | null;
 }
 
 export interface FrameDetectionSet {

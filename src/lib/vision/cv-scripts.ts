@@ -40,6 +40,31 @@ export async function detectCourtViaPython(imagePath: string): Promise<RawCourtD
   return JSON.parse(stdout) as RawCourtDetection;
 }
 
+export interface RawAppearanceSignature {
+  h: number;
+  s: number;
+  v: number;
+}
+
+/**
+ * Mean HSV color signature per player box, sampled from the torso region.
+ * Used only as a tie-breaker for track re-identification (tracker.ts) after
+ * a track goes missing for too long — never a biometric identifier, never
+ * required for the pipeline to function. Returns one entry per input box,
+ * aligned by index; an entry is null if that box couldn't be sampled.
+ * Callers should fail soft: a Python/OpenCV error here should not fail the
+ * whole vision pipeline, since appearance signatures are an enhancement to
+ * tracking, not a dependency of it.
+ */
+export async function computeAppearanceSignaturesViaPython(
+  imagePath: string,
+  boxes: Array<{ x: number; y: number; width: number; height: number }>
+): Promise<Array<RawAppearanceSignature | null>> {
+  if (boxes.length === 0) return [];
+  const stdout = await runPython("appearance_signature.py", [imagePath, JSON.stringify(boxes)]);
+  return JSON.parse(stdout) as Array<RawAppearanceSignature | null>;
+}
+
 export interface RawPoseResult {
   imagePath: string;
   error?: string;
