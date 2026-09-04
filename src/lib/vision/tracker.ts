@@ -31,6 +31,18 @@ import type { AppearanceSignature, BoundingBoxNorm, FrameDetectionSet, PlayerTra
 
 const MIN_IOU_TO_MATCH = 0.1;
 const MAX_TRACKS = 4;
+// With a court calibration available, identities are also pinned to a side
+// of the net: a player never crosses it mid-rally, so a match that would
+// move a track from the near half to the far half (or back) is a swap, not
+// a match. Doubles = at most two players per side.
+const MAX_TRACKS_PER_SIDE = 2;
+
+export type NetSide = "near" | "far";
+
+export interface TrackerOptions {
+  /** Which side of the net a detection's feet are on; null when unknown (no calibration, or off-court). */
+  sideOf?: (box: BoundingBoxNorm) => NetSide | null;
+}
 // At VISION_FPS=5, 10 missed frames is a 2-second gap — long enough to
 // survive a player briefly leaving the frame edge, a missed low-confidence
 // detection, or occlusion behind the net, without losing the identity.
@@ -122,6 +134,8 @@ interface LiveTrack {
   missedFrames: number;
   /** EMA of appearanceSignature across matched detections; null if none ever carried one. */
   appearance: AppearanceSignature | null;
+  /** Side of the net this identity lives on, once known. */
+  side: NetSide | null;
 }
 
 /** Constant-velocity extrapolation, so a track surviving a short gap (see
@@ -140,7 +154,9 @@ function predictBox(track: LiveTrack, atTimestamp: number): BoundingBoxNorm {
   };
 }
 
-export function trackPlayersByIoU(perFrame: FrameDetectionSet[]): PlayerTrack[] {
+export function trackPlayersByIoU(perFrame: FrameDetectionSet[], opts: TrackerOptions = {}): PlayerTrack[] {
+  const sideOf = opts.sideOf ?? (() => null);
+  const sidesCompatible = (a: NetSide | null, b: NetSide | null) => a === null || b === null || a === b;
   const live: LiveTrack[] = [];
   const finished: LiveTrack[] = [];
   // Tracks that aged out of `live` (see MAX_MISSED_FRAMES_BEFORE_LOST) but
@@ -163,6 +179,7 @@ export function trackPlayersByIoU(perFrame: FrameDetectionSet[]): PlayerTrack[] 
         if (matchedTrackIds.has(live[ti].playerId)) continue;
         const predicted = predictBox(live[ti], frame.timestampSeconds);
         for (let di = 0; di < unmatchedDetections.length; di++) {
+          if (!sidesCompatible(live[ti].side, sideOf(unmatchedDetections[di].boxImageNorm))) continue;
           const score = iou(predicted, unmatchedDetections[di].boxImageNorm);
           if (score >= MIN_IOU_TO_MATCH && (!best || score > best.score)) {
             best = { trackIdx: ti, detIdx: di, score };
@@ -191,6 +208,7 @@ export function trackPlayersByIoU(perFrame: FrameDetectionSet[]): PlayerTrack[] 
       track.lastBox = det.boxImageNorm;
       track.lastTimestamp = frame.timestampSeconds;
       track.missedFrames = 0;
+      track.side = track.side ?? sideOf(det.boxImageNorm);
       if (det.appearanceSignature) {
         track.appearance = emaAppearance(track.appearance, det.appearanceSignature);
       }
@@ -245,6 +263,7 @@ export function trackPlayersByIoU(perFrame: FrameDetectionSet[]): PlayerTrack[] 
         for (let ri = 0; ri < recentlyLost.length; ri++) {
           const candidate = recentlyLost[ri].appearance;
           if (!candidate) continue;
+          if (!sidesCompatible(recentlyLost[ri].side, sideOf(det.boxImageNorm))) continue;
           const distance = appearanceDistance(candidate, det.appearanceSignature);
           if (distance < bestDistance) {
             bestDistance = distance;
@@ -266,6 +285,7 @@ export function trackPlayersByIoU(perFrame: FrameDetectionSet[]): PlayerTrack[] 
         revived.lastTimestamp = frame.timestampSeconds;
         revived.velocity = null; // stale gap -- don't extrapolate from before the loss
         revived.missedFrames = 0;
+        revived.side = revived.side ?? sideOf(det.boxImageNorm);
         revived.appearance = emaAppearance(revived.appearance, det.appearanceSignature);
         live.push(revived);
         unmatchedDetections.splice(di, 1);
@@ -278,6 +298,8 @@ export function trackPlayersByIoU(perFrame: FrameDetectionSet[]): PlayerTrack[] 
     // -- otherwise a brief occlusion could let a 5th "player" get fabricated).
     for (const det of unmatchedDetections) {
       if (live.length + recentlyLost.length >= MAX_TRACKS) break; // don't fabricate a 5th player
+      const side = sideOf(det.boxImageNorm);
+      if (side && [...live, ...recentlyLost].filter((t) => t.side === side).length >= MAX_TRACKS_PER_SIDE) continue; // a 3rd player on one side is a bystander or a swap
       const playerId = `player_${nextTrackNumber++}`;
       live.push({
         playerId,
@@ -292,6 +314,7 @@ export function trackPlayersByIoU(perFrame: FrameDetectionSet[]): PlayerTrack[] 
         velocity: null,
         missedFrames: 0,
         appearance: det.appearanceSignature ?? null,
+        side,
       });
     }
   }

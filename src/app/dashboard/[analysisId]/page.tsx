@@ -13,6 +13,9 @@ import { AnalysisResultPanel } from "@/components/dashboard/AnalysisResultPanel"
 import { MovementMetricsPanel } from "@/components/dashboard/MovementMetricsPanel";
 import { PlayerTagPicker, type TagPickerFrame } from "@/components/dashboard/PlayerTagPicker";
 import { Dialog } from "@/components/ui/Dialog";
+import { CourtCalibrationEditor, type FullCourtCorners } from "@/components/dashboard/CourtCalibrationEditor";
+import { computeHomography, applyHomography } from "@/lib/vision/homography";
+import type { CourtCalibrationRow } from "@/lib/db/types";
 import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
 import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
 import { ShotsPanel } from "@/components/dashboard/ShotsPanel";
@@ -185,20 +188,32 @@ async function AnalysisBreakdown({
             </Link>
           ))}
         </div>
-        {hasRead && phase2.tracks.length > 0 ? (
-          <Dialog
-            trigger={
-              <button type="button" className="btn btn-soft btn-sm">
-                Change who you are
-              </button>
-            }
-            eyebrow="Re-tag & regenerate"
-            title="Change who you are in this clip"
-          >
-            {tagSection}
-          </Dialog>
-        ) : null}
+        <div className="row g2">
+          <CourtDialog supabase={supabase} analysis={analysis} calibration={phase2.calibration} frames={phase2.frames} />
+          {hasRead && phase2.tracks.length > 0 ? (
+            <Dialog
+              trigger={
+                <button type="button" className="btn btn-soft btn-sm">
+                  Change who you are
+                </button>
+              }
+              eyebrow="Re-tag & regenerate"
+              title="Change who you are in this clip"
+            >
+              {tagSection}
+            </Dialog>
+          ) : null}
+        </div>
       </div>
+
+      {phase2.calibration && phase2.calibration.method !== "manual" && (Number(phase2.calibration.confidence) < 0.75 || phase2.calibration.confidence === 0) ? (
+        <div className="note" style={{ borderLeft: "4px solid var(--warn)" }}>
+          <strong style={{ color: "var(--ink)" }}>Check the court lines.</strong>{" "}
+          {Number(phase2.calibration.confidence) === 0
+            ? "Baseline couldn't find the court in this clip, so distances, zones and shot types are missing. Set the four corners and everything recomputes."
+            : "The court was found automatically but not with full confidence. Every distance, zone and shot type is measured against those lines — a 20-second check makes the rest of this page trustworthy."}
+        </div>
+      ) : null}
 
       {tab === "summary" ? (
         <div className="stack g6">
@@ -346,6 +361,88 @@ async function AnalysisBreakdown({
 
     </div>
   );
+}
+
+/**
+ * "Court lines" — opens the manual calibration editor on a stored debug
+ * frame. Starting corners come from the automatic calibration: its quad is
+ * converted to full-court baseline corners through its own homography
+ * (extrapolating the far baseline when the detector only saw the near
+ * half), so the user usually only nudges rather than starts from scratch.
+ */
+async function CourtDialog({
+  supabase,
+  analysis,
+  calibration,
+  frames,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  analysis: AnalysisWithVideo;
+  calibration: CourtCalibrationRow | null;
+  frames: AnalysisFrameRow[];
+}) {
+  const width = analysis.video?.width ?? 1920;
+  const height = analysis.video?.height ?? 1080;
+  const debugFrames = frames.filter((f) => f.debug_storage_path);
+  if (debugFrames.length === 0) return null;
+  const targetT = calibration ? Number(calibration.frame_timestamp_s) : 0;
+  const frame = [...debugFrames].sort((a, b) => Math.abs(Number(a.timestamp_s) - targetT) - Math.abs(Number(b.timestamp_s) - targetT))[0];
+  const { data } = await supabase.storage.from("videos").createSignedUrl(frame.debug_storage_path!, 3600);
+  if (!data?.signedUrl) return null;
+
+  const initial = initialFullCourtCorners(calibration, width, height);
+  const source: "auto" | "manual" | "none" = !calibration || Number(calibration.confidence) === 0 ? "none" : calibration.method === "manual" ? "manual" : "auto";
+
+  return (
+    <Dialog
+      trigger={
+        <button type="button" className="btn btn-soft btn-sm">
+          Court lines
+        </button>
+      }
+      eyebrow="Calibration"
+      title="Put the lines on the court"
+      maxWidth={1100}
+    >
+      <CourtCalibrationEditor analysisId={analysis.id} imageUrl={data.signedUrl} width={width} height={height} initial={initial} source={source} />
+    </Dialog>
+  );
+}
+
+function initialFullCourtCorners(calibration: CourtCalibrationRow | null, width: number, height: number): FullCourtCorners {
+  const fallback: FullCourtCorners = {
+    topLeft: { x: width * 0.35, y: height * 0.45 },
+    topRight: { x: width * 0.65, y: height * 0.45 },
+    bottomLeft: { x: width * 0.15, y: height * 0.9 },
+    bottomRight: { x: width * 0.85, y: height * 0.9 },
+  };
+  const corners = calibration?.corners_image_px as { topLeft: [number, number]; topRight: [number, number]; bottomLeft: [number, number]; bottomRight: [number, number] } | null | undefined;
+  if (!calibration || !corners || Number(calibration.confidence) === 0) return fallback;
+  const kind = ((calibration.diagnostics as { quadKind?: string } | null)?.quadKind ?? "near-half") as string;
+  if (kind === "full") {
+    return {
+      topLeft: { x: corners.topLeft[0], y: corners.topLeft[1] },
+      topRight: { x: corners.topRight[0], y: corners.topRight[1] },
+      bottomLeft: { x: corners.bottomLeft[0], y: corners.bottomLeft[1] },
+      bottomRight: { x: corners.bottomRight[0], y: corners.bottomRight[1] },
+    };
+  }
+  // Project the far baseline through the partial quad's homography.
+  const H = computeHomography(
+    [[0, 0], [1, 0], [0, 1], [1, 1]],
+    [corners.topLeft, corners.topRight, corners.bottomLeft, corners.bottomRight]
+  );
+  if (!H) return fallback;
+  const farY = kind === "near-inplay" ? -29 / 15 : -1; // far baseline in that quad's units
+  const [tlx, tly] = applyHomography(H, [0, farY]);
+  const [trx, try_] = applyHomography(H, [1, farY]);
+  const clamp = (v: number, max: number) => Math.max(0, Math.min(max, Number.isFinite(v) ? v : 0));
+  return {
+    topLeft: { x: clamp(tlx, width), y: clamp(tly, height) },
+    topRight: { x: clamp(trx, width), y: clamp(try_, height) },
+    bottomLeft: { x: corners.bottomLeft[0], y: corners.bottomLeft[1] },
+    bottomRight: { x: corners.bottomRight[0], y: corners.bottomRight[1] },
+  };
 }
 
 const REFERENCE_FRAME_COUNT = 3;

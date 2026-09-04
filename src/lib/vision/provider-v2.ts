@@ -38,8 +38,8 @@ export class RoboflowPhase2VisionProvider implements Phase2VisionProvider {
     });
   }
 
-  async trackPlayers(perFrame: FrameDetectionSet[]): Promise<PlayerTrack[]> {
-    return trackPlayersByIoU(perFrame);
+  async trackPlayers(perFrame: FrameDetectionSet[], opts?: Parameters<typeof trackPlayersByIoU>[1]): Promise<PlayerTrack[]> {
+    return trackPlayersByIoU(perFrame, opts);
   }
 
   async estimatePose(
@@ -93,8 +93,8 @@ export class MockPhase2VisionProvider implements Phase2VisionProvider {
     }));
   }
 
-  async trackPlayers(perFrame: FrameDetectionSet[]): Promise<PlayerTrack[]> {
-    return trackPlayersByIoU(perFrame);
+  async trackPlayers(perFrame: FrameDetectionSet[], opts?: Parameters<typeof trackPlayersByIoU>[1]): Promise<PlayerTrack[]> {
+    return trackPlayersByIoU(perFrame, opts);
   }
 
   async estimatePose(): Promise<PlayerPoseFrame[]> {

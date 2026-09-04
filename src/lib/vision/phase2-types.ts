@@ -27,7 +27,7 @@ export interface CourtCorners {
 
 export interface CourtCalibration {
   /** How this calibration was produced. Never silently swapped for a fake one. */
-  method: "classical-cv-hsv-contour" | "mock";
+  method: "classical-cv-hsv-contour" | "manual" | "mock";
   /** 0 means "could not calibrate" — corners will be null in that case. */
   confidence: number;
   /** Pixel coordinates in the source frame used for calibration. */
@@ -173,7 +173,7 @@ export interface Phase2VisionProvider {
   readonly name: string;
   detectCourt(frame: { path: string; timestampSeconds: number }): Promise<CourtCalibration>;
   detectPlayers(frame: { path: string; timestampSeconds: number }): Promise<PlayerDetection[]>;
-  trackPlayers(perFrame: FrameDetectionSet[]): Promise<PlayerTrack[]>;
+  trackPlayers(perFrame: FrameDetectionSet[], opts?: { sideOf?: (box: BoundingBoxNorm) => "near" | "far" | null }): Promise<PlayerTrack[]>;
   estimatePose(
     frame: { path: string; timestampSeconds: number },
     tracks: PlayerTrack[]

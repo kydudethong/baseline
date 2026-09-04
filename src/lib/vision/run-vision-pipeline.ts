@@ -3,10 +3,12 @@ import { analyzeMovementWithCalibration } from "./provider-v2";
 import { detectUnknownShotEvents, detectFootworkFoundation } from "./events";
 import { computeAppearanceSignaturesViaPython, detectBallViaPython, BallModelNotConfiguredError, ballModelConfigured } from "./cv-scripts";
 import { buildBallTrack, detectBounces, detectHits, sliceTrack, type BallTrackPoint, type BallTrackStats } from "./ball";
-import { classifyRally, courtFrameFor, type Shot } from "./shots";
+import { classifyRally, courtFrameFor, sideOf as courtSideOf, type Shot } from "./shots";
+import { transformToCourtCoordinates } from "./court";
 import { clusterRalliesWithContacts } from "./rallies";
 import type {
   AnalysisEvent,
+  BoundingBoxNorm,
   CourtCalibration,
   FrameDetectionSet,
   PlayerMovementMetrics,
@@ -66,7 +68,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // court can drop confidence to 0 on one frame while a frame a few
   // seconds away calibrates fine. Try several evenly-spaced candidates and
   // keep the highest-confidence result, rather than gambling on one frame.
-  const candidateIndices = [0.1, 0.3, 0.5, 0.7, 0.9].map((f) => Math.floor(input.frames.length * f));
+  const candidateIndices = [0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95].map((f) => Math.floor(input.frames.length * f));
   let courtCalibration: Awaited<ReturnType<typeof provider.detectCourt>> | null = null;
   for (const idx of candidateIndices) {
     const frame = input.frames[idx];
@@ -75,7 +77,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     if (!courtCalibration || candidate.confidence > courtCalibration.confidence) {
       courtCalibration = candidate;
     }
-    if (courtCalibration.confidence >= 0.7) break; // good enough, stop spending calls
+    if (courtCalibration.confidence >= 0.8) break; // good enough, stop spending calls
   }
   courtCalibration ??= await provider.detectCourt(input.frames[0]);
   log(`court calibration confidence ${courtCalibration.confidence}${courtCalibration.quadKind ? ` (${courtCalibration.quadKind})` : ""}`);
@@ -121,7 +123,38 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     );
   }
 
-  const tracks = await provider.trackPlayers(perFrameDetections);
+  // With a calibration, a detection's feet tell us (a) whether it's on the
+  // court at all — spectators, benches and the next court over are the
+  // bulk of "5.6 people per frame" in a real gym — and (b) which side of
+  // the net it's on, which the tracker uses to stop identities swapping
+  // across the net.
+  const courtFrame = courtFrameFor(courtCalibration.quadKind);
+  const feetCourt = (box: BoundingBoxNorm) =>
+    courtCalibration.confidence > 0 ? transformToCourtCoordinates(box, courtCalibration, input.frameWidthPx, input.frameHeightPx) : null;
+  const onCourt = (box: BoundingBoxNorm): boolean => {
+    const c = feetCourt(box);
+    if (!c) return true; // no calibration: keep everyone
+    const farBaseline = courtFrame.netY - courtFrame.halfLength;
+    const nearBaseline = courtFrame.netY + courtFrame.halfLength;
+    const run = 0.6 * courtFrame.halfLength; // generous run-off behind each baseline and beside the court
+    return c.x > -0.45 && c.x < 1.45 && c.y > farBaseline - run * 1.5 && c.y < nearBaseline + run;
+  };
+  const sideOf = (box: BoundingBoxNorm): "near" | "far" | null => {
+    const c = feetCourt(box);
+    return c ? courtSideOf(courtFrame, c.y) : null;
+  };
+  let offCourtDropped = 0;
+  const filteredDetections: FrameDetectionSet[] = perFrameDetections.map((f) => {
+    const players = f.players.filter((p) => {
+      const keep = onCourt(p.boxImageNorm);
+      if (!keep) offCourtDropped += 1;
+      return keep;
+    });
+    return { ...f, players };
+  });
+  if (offCourtDropped > 0) log(`dropped ${offCourtDropped} off-court detections (spectators, other courts)`);
+
+  const tracks = await provider.trackPlayers(filteredDetections, { sideOf });
   log(`tracking: ${tracks.length} player track(s)`);
   if (tracks.length === 0) {
     knownLimitations.push("No player tracks survived (need >=2 sampled detections to count as a track).");
@@ -236,7 +269,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   }
 
   log(`shots: ${shots.length} classified · done in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
-  const playerCounts = perFrameDetections.map((f) => f.players.length);
+  const playerCounts = filteredDetections.map((f) => f.players.length);
   const quality: QualityDiagnostics = {
     videoDurationSeconds: input.videoDurationSeconds,
     visionFps: input.visionFps,

@@ -59,34 +59,40 @@ def order_corners(pts):
     in *image* space (y grows downward), where "bottom" is the court edge
     nearest the camera.
 
-    Sorting by y alone (the classic trick) breaks as soon as the camera sits
-    off the court's centre line — from a corner, the near baseline runs
-    diagonally and one of its endpoints can be higher in the frame than a
-    far-edge corner. Instead: walk the quad in polygon order, take the edge
-    whose midpoint is lowest in the frame as the near edge, and label the
-    other two corners by adjacency.
+    Neither "sort by y" nor "longest edge is the baseline" survives real
+    footage: from an off-centre camera a sideline can be nearly horizontal,
+    and a player standing on the near corner shortens the fitted baseline
+    below the kitchen line. What does hold for a court seen from behind
+    its baseline: the two SIDELINES converge (they meet at a vanishing
+    point), while the baseline and kitchen/net line stay close to parallel.
+    So: of the two pairs of opposite edges, the more parallel pair is the
+    baseline + far line, and of those the lower one is the near baseline.
     """
     pts = np.array(pts, dtype=np.float32)
     centre = pts.mean(axis=0)
     angles = np.arctan2(pts[:, 1] - centre[1], pts[:, 0] - centre[0])
-    order = np.argsort(angles)  # counter-clockwise in image coords
-    p = pts[order]
-    edges = [(i, (i + 1) % 4) for i in range(4)]
-    # The edge nearest the camera is the longest one in the image — true
-    # even from a corner, where "lowest midpoint" would pick a sideline.
-    near = max(edges, key=lambda e: float(np.hypot(*(p[e[0]] - p[e[1]]))))
-    i0, i1 = near
-    a, b = p[i0], p[i1]
-    if a[0] <= b[0]:
-        bottom_left, bottom_right, bl_idx = a, b, i0
-    else:
-        bottom_left, bottom_right, bl_idx = b, a, i1
-    # Walk the polygon from bottomLeft away from bottomRight: the next
-    # vertex is topLeft, the one after that topRight.
-    br_idx = i1 if bl_idx == i0 else i0
-    step = -1 if (bl_idx + 1) % 4 == br_idx else 1
-    top_left = p[(bl_idx + step) % 4]
-    top_right = p[(bl_idx + 2 * step) % 4]
+    p = pts[np.argsort(angles)]  # polygon order
+
+    def direction(i):
+        v = p[(i + 1) % 4] - p[i]
+        n = float(np.hypot(*v))
+        return v / n if n > 0 else v
+
+    def pair_angle(i, j):
+        d1, d2 = direction(i), direction(j)
+        c = abs(float(np.dot(d1, d2)))
+        return float(np.degrees(np.arccos(min(1.0, c))))
+
+    # opposite edge pairs: (0,2) and (1,3)
+    horiz = (0, 2) if pair_angle(0, 2) <= pair_angle(1, 3) else (1, 3)
+    mid_y = lambda i: (p[i][1] + p[(i + 1) % 4][1]) / 2  # noqa: E731
+    near_i = max(horiz, key=mid_y)
+    far_i = min(horiz, key=mid_y)
+
+    a, b = p[near_i], p[(near_i + 1) % 4]
+    bottom_left, bottom_right = (a, b) if a[0] <= b[0] else (b, a)
+    c, d = p[far_i], p[(far_i + 1) % 4]
+    top_left, top_right = (c, d) if c[0] <= d[0] else (d, c)
     return {
         "topLeft": [float(top_left[0]), float(top_left[1])],
         "topRight": [float(top_right[0]), float(top_right[1])],

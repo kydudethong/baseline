@@ -185,6 +185,8 @@ export const THRESHOLDS = {
   lobArc: 0.11,
   /** Minimum ball-track coverage between two hits before speed/arc are trusted. */
   minTrackCoverage: 0.35,
+  /** Faster than any pickleball has ever been hit (~35 m/s = 78 mph) — a geometry error, not a shot. */
+  maxPlausibleSpeed: 35,
 };
 
 /* ------------------------------------------------------------------ */
@@ -219,15 +221,18 @@ function toCourt(h: Homography | null, ctx: ClassifyContext, p: { x: number; y: 
   if (!h || !p) return null;
   const [cx, cy] = applyHomography(h, [p.x * ctx.frameWidthPx, p.y * ctx.frameHeightPx]);
   if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
-  // Far-court extrapolation is legitimate for a planar homography but gets
-  // numerically soft well beyond the calibrated quad — clamp to the court
-  // plus a little run-off behind each baseline.
+  // Far-court extrapolation is legitimate for a planar homography but is
+  // numerically soft: from a low camera behind the baseline the far half
+  // sits near the horizon, so a pixel there is feet of court. Keep the
+  // near side tight; give the far side a wide run-off (positions there are
+  // coarse, and landingZone() treats them as such) and drop only what is
+  // clearly nowhere near the court.
   const f = ctx.frame;
   const farBaselineY = f.netY - f.halfLength;
   const nearBaselineY = f.netY + f.halfLength;
-  const maxY = nearBaselineY + 0.15 * f.halfLength;
-  const minY = farBaselineY - 0.15 * f.halfLength;
-  if (cx < -0.4 || cx > 1.4 || cy < minY || cy > maxY) return null;
+  const maxY = nearBaselineY + 0.25 * f.halfLength;
+  const minY = farBaselineY - 1.5 * f.halfLength;
+  if (cx < -0.6 || cx > 1.6 || cy < minY || cy > maxY) return null;
   return { x: Math.round(cx * 1000) / 1000, y: Math.round(cy * 1000) / 1000 };
 }
 
@@ -242,8 +247,13 @@ function hitZone(frame: CourtFrame, court: { x: number; y: number } | null): Cou
 function landingZone(frame: CourtFrame, court: { x: number; y: number } | null): LandingZone {
   if (!court) return "unknown";
   const d = distanceFromNet(frame, court.y);
-  const t = THRESHOLDS.sideTolerance;
-  if (court.x < -t || court.x > 1 + t || d > THRESHOLDS.landDeep) return "out";
+  // The far half is coarse from a baseline camera (see toCourt): an "out"
+  // call there needs a much bigger margin than on the near side, where
+  // the calibration is measured directly.
+  const far = sideOf(frame, court.y) === "far";
+  const sideTol = far ? 0.25 : THRESHOLDS.sideTolerance;
+  const deepTol = far ? 1.6 : THRESHOLDS.landDeep;
+  if (court.x < -sideTol || court.x > 1 + sideTol || d > deepTol) return "out";
   if (d <= THRESHOLDS.landKitchen) return "kitchen";
   if (d <= THRESHOLDS.landMid) return "mid";
   return "deep";
@@ -326,7 +336,21 @@ export function classifyRally(input: RallyShotInput, ctx: ClassifyContext): Shot
         speedBasis = "hit-to-next-hit";
       }
     }
+    // Two consecutive contacts by the same player can't happen in real
+    // play — it's an attribution error (a track swap, or the ball read
+    // near the wrong player). Keep the type but don't trust a speed that
+    // was measured between "this player" and "this player".
+    const sideConflict = Boolean(prevHit && hit.playerId !== null && prevHit.playerId === hit.playerId);
+    if (sideConflict && speedBasis === "hit-to-next-hit") {
+      speed = null;
+      speedBasis = "none";
+    }
+    if (speed !== null && speed > THRESHOLDS.maxPlausibleSpeed) {
+      speed = null;
+      speedBasis = "none";
+    }
     if (speed !== null) speed = Math.round(speed * 10) / 10;
+    const farLanding = landingCourt ? sideOf(frame, landingCourt.y) === "far" : false;
 
     const prevShot = shots[i - 1] ?? null;
     const underPressure = Boolean(prevShot && prevShot.speedMpsApprox !== null && prevShot.speedMpsApprox >= THRESHOLDS.driveMin);
@@ -359,6 +383,8 @@ export function classifyRally(input: RallyShotInput, ctx: ClassifyContext): Shot
     if (!hitCourt) confidence *= 0.7;
     if (!landing && i < hits.length - 1) confidence *= 0.85;
     if (speed === null) confidence *= 0.8;
+    if (sideConflict) confidence *= 0.6;
+    if (farLanding) confidence *= 0.85; // far-court positions are coarse from a baseline camera
     if (type === "unknown") confidence *= 0.5;
     confidence = Math.round(Math.max(0.05, Math.min(0.97, confidence)) * 100) / 100;
 
@@ -383,6 +409,8 @@ export function classifyRally(input: RallyShotInput, ctx: ClassifyContext): Shot
         speedBasis,
         segCoverage: Math.round(segCoverage * 100) / 100,
         underPressure,
+        sideConflict,
+        farLanding,
         hitSource: hit.source,
         overhead: hit.overhead,
         landingT: landing ? Math.round(landing.t * 100) / 100 : null,
