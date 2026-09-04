@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { listAnalysesForUser, type AnalysisWithVideo } from "@/lib/db/analyses";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
+import { PlayIcon } from "@/components/motifs/Motifs";
 
 export const metadata: Metadata = { title: "Library — Baseline" };
 export const dynamic = "force-dynamic";
@@ -24,6 +25,13 @@ async function withVideoUrls(
       return { analysis, videoUrl: data?.signedUrl ?? null };
     })
   );
+}
+
+function formatDuration(seconds: number | null | undefined): string | null {
+  if (!seconds || seconds <= 0) return null;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 export default async function LibraryPage() {
@@ -60,23 +68,29 @@ export default async function LibraryPage() {
           </Link>
         </div>
       ) : (
-        <div className="stack g2">
-          {rows.map(({ analysis, videoUrl }) => (
-            <Link
-              key={analysis.id}
-              href={`/dashboard/${analysis.id}`}
-              className="card row g4"
-              style={{ justifyContent: "space-between", textDecoration: "none", color: "inherit" }}
-            >
-              <div className="row g4" style={{ minWidth: 0, flex: 1 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+            gap: "var(--a5)",
+          }}
+        >
+          {rows.map(({ analysis, videoUrl }) => {
+            const duration = formatDuration(analysis.video?.duration_seconds);
+            return (
+              <Link
+                key={analysis.id}
+                href={`/dashboard/${analysis.id}`}
+                className="stack g3"
+                style={{ textDecoration: "none", color: "inherit" }}
+              >
                 <div
                   style={{
-                    width: 96,
-                    height: 60,
-                    borderRadius: "var(--r2)",
+                    position: "relative",
+                    aspectRatio: "16 / 9",
+                    borderRadius: "var(--r3)",
                     overflow: "hidden",
                     background: "var(--night)",
-                    flex: "none",
                     border: "1px solid var(--line)",
                   }}
                 >
@@ -90,24 +104,72 @@ export default async function LibraryPage() {
                       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     />
                   ) : null}
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 46,
+                        height: 46,
+                        borderRadius: "50%",
+                        background: "rgba(7,13,11,.55)",
+                        backdropFilter: "blur(2px)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "var(--optic)",
+                      }}
+                    >
+                      <PlayIcon size={16} />
+                    </span>
+                  </div>
+                  {duration ? (
+                    <span
+                      className="mono"
+                      style={{
+                        position: "absolute",
+                        top: 10,
+                        right: 10,
+                        background: "rgba(7,13,11,.72)",
+                        color: "var(--ink)",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        padding: "3px 7px",
+                        borderRadius: "var(--r1)",
+                      }}
+                    >
+                      {duration}
+                    </span>
+                  ) : null}
+                  <span style={{ position: "absolute", top: 10, left: 10 }}>
+                    <StatusBadge status={analysis.status} />
+                  </span>
                 </div>
-                <div className="stack g1" style={{ minWidth: 0 }}>
-                  <p className="h3" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div className="row g2" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+                  <p
+                    className="h3"
+                    style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}
+                  >
                     {analysis.title}
                   </p>
-                  <p className="xs">
-                    {analysis.video?.original_filename ?? "No video attached"} ·{" "}
-                    {new Date(analysis.created_at).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
-                  </p>
                 </div>
-              </div>
-              <StatusBadge status={analysis.status} />
-            </Link>
-          ))}
+                <p className="xs">
+                  {new Date(analysis.created_at).toLocaleDateString(undefined, {
+                    weekday: "short",
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                </p>
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>
