@@ -1,9 +1,10 @@
 /**
- * Single-analysis skill meter — a simpler cousin of coach's original Meter
- * (which showed a recency-weighted score aggregated across many sessions).
- * Baseline doesn't have cross-analysis aggregation yet (see PHASE3
- * deliverables §7), so this shows just what this one analysis measured:
- * a 1-5 rating as a filled bar, plus the model's stated basis for it.
+ * Single-analysis skill meter — shows what one specific analysis measured:
+ * a 1-5 rating as a filled bar, plus the model's stated basis for it. For
+ * the recency-weighted score aggregated across every analysis, see the
+ * Practice page (src/app/dashboard/practice/page.tsx) and
+ * src/lib/coaching/stats.ts's getSkillProfiles — that's the cross-analysis
+ * view this component deliberately doesn't try to be.
  */
 export function SkillMeter({ name, raw, basis }: { name: string; raw: number; basis: string | null }) {
   const pct = Math.max(0, Math.min(100, (raw / 5) * 100));

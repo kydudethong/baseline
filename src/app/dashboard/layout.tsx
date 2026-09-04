@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { logout } from "@/app/actions/auth";
 import { Ball } from "@/components/motifs/Motifs";
+import { DashboardNav } from "@/components/dashboard/DashboardNav";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -23,7 +24,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <span className="wm">Baseline</span>
         </Link>
         <nav className="topnav">
-          <span className="xs">{user.email}</span>
+          <DashboardNav />
+          <span className="div" />
+          <Link href="/dashboard/new" className="btn btn-optic btn-sm">
+            + Analyze a game
+          </Link>
+          <span className="xs" style={{ marginLeft: "var(--a3)" }}>
+            {user.email}
+          </span>
           <form action={logout}>
             <button type="submit" className="btn btn-ghost btn-sm">
               Log out

@@ -1,11 +1,11 @@
 import type { AnalysisStatus } from "@/lib/db/types";
 
-const STYLES: Record<AnalysisStatus, string> = {
-  uploaded: "bg-slate-100 text-slate-700",
-  queued: "bg-amber-100 text-amber-800",
-  processing: "bg-amber-100 text-amber-800",
-  completed: "bg-emerald-100 text-emerald-800",
-  failed: "bg-red-100 text-red-700",
+const PILL_CLASS: Record<AnalysisStatus, string> = {
+  uploaded: "p-neutral",
+  queued: "p-live",
+  processing: "p-live",
+  completed: "p-good",
+  failed: "p-bad",
 };
 
 const LABELS: Record<AnalysisStatus, string> = {
@@ -18,12 +18,8 @@ const LABELS: Record<AnalysisStatus, string> = {
 
 export function StatusBadge({ status }: { status: AnalysisStatus }) {
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${STYLES[status]}`}
-    >
-      {(status === "processing" || status === "queued") && (
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
-      )}
+    <span className={`pill ${PILL_CLASS[status]}`}>
+      {(status === "processing" || status === "queued") && <span className="dot" />}
       {LABELS[status]}
     </span>
   );

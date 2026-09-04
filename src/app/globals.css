@@ -56,6 +56,8 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .topnav{display:flex;gap:2px;margin-left:auto;align-items:center}
 .topnav a{font-size:14px;font-weight:500;color:var(--ink-2);text-decoration:none;padding:7px 13px;border-radius:var(--rf)}
 .topnav a:hover{color:var(--ink);background:var(--sunk)}
+.topnav a[data-active="true"]{color:var(--ink);background:var(--sunk)}
+.topnav .div{width:1px;height:22px;background:var(--line);margin:0 var(--a2)}
 .page{max-width:1140px;margin:0 auto;padding:var(--a6) var(--a5) var(--a8);display:flex;flex-direction:column;gap:var(--a6)}
 .spin-ball{animation:spin 2.4s linear infinite;transform-origin:center}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -102,6 +104,11 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .track{height:8px;background:var(--sunk);border-radius:var(--rf);overflow:hidden}
 .fill{height:100%;border-radius:var(--rf);background:linear-gradient(90deg,var(--blue-bright),var(--blue))}
 .meter-foot{display:flex;gap:12px;font-size:12px;color:var(--ink-3);flex-wrap:wrap}
+
+.trend{display:inline-flex;align-items:center;gap:3px;font-family:var(--data);font-size:12px;font-weight:600}
+.trend.up{color:var(--good)}
+.trend.down{color:var(--bad)}
+.trend.flat{color:var(--ink-3)}
 
 .weak{background:var(--card);border-radius:var(--r3);box-shadow:var(--lift);overflow:hidden;display:grid;grid-template-columns:6px 1fr}
 .weak .stripe{background:var(--bad)}.weak.med .stripe{background:var(--warn)}.weak.strength .stripe{background:var(--good)}

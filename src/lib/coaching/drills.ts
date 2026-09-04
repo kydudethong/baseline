@@ -33,3 +33,10 @@ async function queryDrills(supabase: Client, skillKeys: string[]): Promise<Coach
   if (error) throw error;
   return (data as CoachingDrillRow[] | null) ?? [];
 }
+
+/** The whole drill library, for the standalone Drills page -- coaching_drills is shared reference content (readable by every authenticated user), not per-analysis, so this needs no user/analysis scoping. */
+export async function getAllDrills(supabase: Client): Promise<CoachingDrillRow[]> {
+  const { data, error } = await supabase.from("coaching_drills").select("*").order("skill_key");
+  if (error) throw error;
+  return (data as CoachingDrillRow[] | null) ?? [];
+}
