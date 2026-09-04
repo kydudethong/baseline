@@ -7,19 +7,23 @@
 // measurement (knee angle) or an explicitly-labeled, confidence-capped
 // proxy/heuristic (paddle position, contact side, rally boundaries).
 //
-// What this deliberately does NOT do: classify shot type. No signal
-// available here (body pose, audio onset timing, tracked position) tells
-// drive from drop from dink, and guessing would corrupt every downstream
-// coaching claim built on it — consistent with how Rally IQ's own
-// unknown_shot event naming already treats this.
+// Shot type: available ONLY when the ball was tracked (analysis_shots,
+// written by src/lib/vision/shots.ts from a ball detector run at native
+// frame rate). Without ball data nothing here tells a drive from a drop
+// from a dink, and this module says so in known_limitations rather than
+// guessing — consistent with how the unknown_shot event naming treats it.
 
 import type {
   AnalysisEventRow,
+  AnalysisShotRow,
+  BallTrackRow,
   MovementMetricRow,
   PlayerKeypointRow,
   PlayerTrackRow,
 } from "@/lib/db/types";
 import type { CocoKeypointName, PlayerTrackPoint, PoseKeypoint } from "@/lib/vision/phase2-types";
+import { clusterRalliesWithContacts, CLUSTER_PARAMS } from "@/lib/vision/rallies";
+import { summarizeShots, shotFromRow, SHOT_LABEL, type Shot, type ShotMix } from "@/lib/vision/shots";
 
 /* ------------------------------------------------------------------ */
 /* Rally boundary clustering — ported from Baseline's segment.ts        */
@@ -28,51 +32,6 @@ import type { CocoKeypointName, PlayerTrackPoint, PoseKeypoint } from "@/lib/vis
 /* unknown_shot audio events, already detected upstream (events.ts).    */
 /* Same gap-based grouping logic, same default parameters.              */
 /* ------------------------------------------------------------------ */
-
-interface ClusterParams {
-  gapS: number;
-  minShots: number;
-  minDurationS: number;
-  leadS: number;
-  tailS: number;
-}
-
-const CLUSTER_PARAMS: ClusterParams = {
-  gapS: 3.5,
-  minShots: 4,
-  minDurationS: 1.5,
-  leadS: 0.5,
-  tailS: 0.8,
-};
-
-interface ClusteredRally {
-  idx: number;
-  startS: number;
-  endS: number;
-  contacts: number[];
-}
-
-function clusterRalliesWithContacts(onsets: number[], params: ClusterParams): ClusteredRally[] {
-  if (onsets.length === 0) return [];
-  const sorted = [...onsets].sort((a, b) => a - b);
-
-  const groups: number[][] = [[sorted[0]]];
-  for (let i = 1; i < sorted.length; i++) {
-    const group = groups[groups.length - 1];
-    if (sorted[i] - group[group.length - 1] > params.gapS) groups.push([sorted[i]]);
-    else group.push(sorted[i]);
-  }
-
-  const rallies: ClusteredRally[] = [];
-  for (const group of groups) {
-    if (group.length < params.minShots) continue;
-    const startS = Math.max(0, group[0] - params.leadS);
-    const endS = group[group.length - 1] + params.tailS;
-    if (endS - startS < params.minDurationS) continue;
-    rallies.push({ idx: rallies.length + 1, startS, endS, contacts: group });
-  }
-  return rallies;
-}
 
 /* ------------------------------------------------------------------ */
 /* Court-side grouping — which tracked players share Rally IQ's own      */
@@ -302,6 +261,18 @@ export interface CoachingFactsRally {
   /** Clustered audio-contact count — an approximate shot count, not a verified one. */
   shots: number;
   contacts: Array<{ t_s: number; side: "self" | "opponent" | "unknown"; confidence: number }>;
+  /** Present only when the ball was tracked: one entry per contact, in order. */
+  shot_sequence?: Array<{
+    n: number;
+    t_s: number;
+    by: "self" | "opponent" | "unknown";
+    type: string;
+    from: string;
+    landed: string;
+    speed_mps: number | null;
+    outcome: string;
+    confidence: number;
+  }>;
   self_stance: { samples: number; avg_knee_bend_deg: number | null; bent_fraction: number | null } | null;
   self_paddle_proxy: { samples: number; raised_fraction: number | null; lowered_fraction: number | null } | null;
 }
@@ -323,6 +294,15 @@ export interface CoachingFacts {
     max_speed_court_units_s: number | null;
     court_coverage_bounds: CourtCoverageBounds | null;
   } | null;
+  /** Null when no ball model ran. Everything in it is derived from analysis_shots. */
+  shot_summary: {
+    ball_seen_fraction: number | null;
+    self: ShotMix;
+    opponents: ShotMix;
+    /** Mean classifier confidence over this player's shots — tell the coach how hard to lean on the mix. */
+    self_mean_confidence: number | null;
+    kitchen_exchanges: { count: number; longest_dinks: number };
+  } | null;
   known_limitations: string[];
 }
 
@@ -333,12 +313,43 @@ export interface BuildCoachingFactsInput {
   keypoints: PlayerKeypointRow[];
   movement: MovementMetricRow[];
   events: AnalysisEventRow[];
+  shots?: AnalysisShotRow[];
+  ballTrack?: BallTrackRow | null;
+}
+
+/** Longest run of consecutive dinks in any rally — "how long can you hang in a kitchen exchange". */
+function longestDinkRun(shots: Shot[]): { count: number; longest: number } {
+  const byRally = new Map<number, Shot[]>();
+  for (const s of shots) byRally.set(s.rallyIdx, [...(byRally.get(s.rallyIdx) ?? []), s]);
+  let longest = 0;
+  let exchanges = 0;
+  for (const list of byRally.values()) {
+    list.sort((a, b) => a.shotIdx - b.shotIdx);
+    let run = 0;
+    for (const s of list) {
+      if (s.type === "dink") {
+        run += 1;
+        if (run === 3) exchanges += 1;
+        longest = Math.max(longest, run);
+      } else run = 0;
+    }
+  }
+  return { count: exchanges, longest };
 }
 
 export function buildCoachingFacts(input: BuildCoachingFactsInput): CoachingFacts {
+  const allShots = (input.shots ?? []).map(shotFromRow);
+  const hasShots = allShots.length > 0;
   const knownLimitations: string[] = [
-    "Shot type (drive/dink/drop/volley/serve) is not classified anywhere in this data — no available " +
-      "signal (body pose, audio timing, tracked position) distinguishes them reliably.",
+    ...(hasShots
+      ? [
+          "Shot types come from ball tracking + court geometry (see shot_sequence per rally). Each shot carries " +
+            "a confidence; treat anything under 0.5 as a guess and prefer patterns supported by several shots.",
+        ]
+      : [
+          "Shot type (drive/dink/drop/volley/serve) is not classified for this clip — the ball was not tracked, and " +
+            "no other signal (body pose, audio timing, tracked position) distinguishes them reliably.",
+        ]),
     "Rally boundaries are approximated by clustering paddle-contact audio events (a gap of 3.5s or more " +
       "ends a rally); they are not read from game state or score.",
     "Paddle position is a PROXY — wrist height relative to shoulder from body pose — no paddle is ever " +
@@ -428,16 +439,53 @@ export function buildCoachingFacts(input: BuildCoachingFactsInput): CoachingFact
           }
         : null;
 
+    const rallyShots = allShots.filter((s) => s.rallyIdx === r.idx).sort((a, b) => a.shotIdx - b.shotIdx);
+    const shotSequence = rallyShots.length
+      ? rallyShots.map((s) => ({
+          n: s.shotIdx + 1,
+          t_s: Math.round(s.t * 10) / 10,
+          by: (s.playerId === null ? "unknown" : selfLabels.has(s.playerId) ? "self" : "opponent") as "self" | "opponent" | "unknown",
+          type: SHOT_LABEL[s.type],
+          from: s.hitZone,
+          landed: s.landingZone,
+          speed_mps: s.speedMpsApprox,
+          outcome: s.outcome,
+          confidence: s.confidence,
+        }))
+      : undefined;
+
     return {
       rally_number: r.idx,
       start_s: Math.round(r.startS * 10) / 10,
       end_s: Math.round(r.endS * 10) / 10,
       shots: r.contacts.length,
       contacts: contactAttrs.map((c) => ({ t_s: Math.round(c.tS * 10) / 10, side: c.side, confidence: c.confidence })),
+      ...(shotSequence ? { shot_sequence: shotSequence } : {}),
       self_stance: selfStance,
       self_paddle_proxy: selfPaddleProxy,
     };
   });
+
+  let shotSummary: CoachingFacts["shot_summary"] = null;
+  if (hasShots) {
+    const selfShots = allShots.filter((s) => s.playerId !== null && selfLabels.has(s.playerId));
+    const opponentIds = new Set(allShots.map((s) => s.playerId).filter((p): p is string => p !== null && !selfLabels.has(p)));
+    const meanConf = selfShots.length ? Math.round((selfShots.reduce((a, s) => a + s.confidence, 0) / selfShots.length) * 100) / 100 : null;
+    const dinkRuns = longestDinkRun(selfShots);
+    shotSummary = {
+      ball_seen_fraction: input.ballTrack?.coverage ?? null,
+      self: summarizeShots(allShots, selfLabels),
+      opponents: summarizeShots(allShots, opponentIds),
+      self_mean_confidence: meanConf,
+      kitchen_exchanges: { count: dinkRuns.count, longest_dinks: dinkRuns.longest },
+    };
+    if (selfShots.length === 0) {
+      knownLimitations.push("Shots were classified, but none could be attributed to the tagged player — the ball was never seen near your box at a contact. Shot facts below are about the whole court, not you.");
+    }
+    if ((input.ballTrack?.coverage ?? 1) < 0.35) {
+      knownLimitations.push(`The ball was only detected in ${Math.round((input.ballTrack?.coverage ?? 0) * 100)}% of rally frames — shot speeds and landing spots are missing for many shots.`);
+    }
+  }
 
   // One movement_metrics row per original (pre-merge) fragment — combine
   // them rather than taking just one, for the same re-identification reason
@@ -457,6 +505,7 @@ export function buildCoachingFacts(input: BuildCoachingFactsInput): CoachingFact
     self_player_labels: [...selfLabels],
     rallies,
     movement_summary: movementSummary,
+    shot_summary: shotSummary,
     known_limitations: knownLimitations,
   };
 }

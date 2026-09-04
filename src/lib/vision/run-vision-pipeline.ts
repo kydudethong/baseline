@@ -1,7 +1,10 @@
 import { getPhase2VisionProvider } from "./provider-v2";
 import { analyzeMovementWithCalibration } from "./provider-v2";
 import { detectUnknownShotEvents, detectFootworkFoundation } from "./events";
-import { computeAppearanceSignaturesViaPython } from "./cv-scripts";
+import { computeAppearanceSignaturesViaPython, detectBallViaPython, BallModelNotConfiguredError, ballModelConfigured } from "./cv-scripts";
+import { buildBallTrack, detectBounces, detectHits, sliceTrack, type BallTrackPoint, type BallTrackStats } from "./ball";
+import { classifyRally, courtFrameFromEnv, type Shot } from "./shots";
+import { clusterRalliesWithContacts } from "./rallies";
 import type {
   AnalysisEvent,
   CourtCalibration,
@@ -30,6 +33,9 @@ export interface VisionPipelineOutput {
   movement: PlayerMovementMetrics[];
   footwork: ReturnType<typeof detectFootworkFoundation>[];
   events: AnalysisEvent[];
+  /** Ball track (image-normalized) and per-contact shot classification — empty when no ball model is configured. */
+  ballTrack: { points: BallTrackPoint[]; stats: BallTrackStats | null; diagnostics: Record<string, unknown> };
+  shots: Shot[];
   quality: QualityDiagnostics;
 }
 
@@ -148,6 +154,71 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   }
   events.sort((a, b) => a.timestampSeconds - b.timestampSeconds);
 
+  // Ball + shots. Only inside audio-segmented rallies (the same rallies the
+  // coach will talk about), at native frame rate. Skipped — and said so —
+  // when no ball model is configured; a Python/model failure degrades to
+  // "no shots" with the reason recorded, never to made-up shots.
+  let ballTrack: VisionPipelineOutput["ballTrack"] = { points: [], stats: null, diagnostics: {} };
+  let shots: Shot[] = [];
+  const contactTimes = events.filter((e) => e.type === "unknown_shot").map((e) => e.timestampSeconds);
+  const rallies = clusterRalliesWithContacts(contactTimes);
+  if (!ballModelConfigured()) {
+    knownLimitations.push("No ball detector configured (BALL_MODEL_ID) — shot types were not classified for this clip.");
+  } else if (rallies.length === 0) {
+    knownLimitations.push("No rallies could be segmented from audio, so the ball detector had no windows to run over — shot types were not classified.");
+  } else {
+    try {
+      const windows = rallies.map((r) => [Math.max(0, r.startS - 0.3), r.endS + 0.3] as [number, number]);
+      const raw = await detectBallViaPython(input.videoPath, windows);
+      const built = buildBallTrack(raw.detections, raw.fps);
+      ballTrack = { points: built.points, stats: built.stats, diagnostics: raw.diagnostics };
+      if (built.stats.coverage < 0.15) {
+        knownLimitations.push(
+          `The ball was found in only ${Math.round(built.stats.coverage * 100)}% of rally frames — shot types below are low-confidence; a camera with the whole court in frame and a ball model trained on this camera angle improves this.`
+        );
+      }
+      const ctx = {
+        calibration: courtCalibration,
+        frame: courtFrameFromEnv(),
+        frameWidthPx: input.frameWidthPx,
+        frameHeightPx: input.frameHeightPx,
+        playerTracks: tracks,
+      };
+      const overheadAt = (playerId: string, t: number): boolean | null => {
+        let best: PlayerPoseFrame | null = null;
+        let bestDt = 0.3;
+        for (const p of poses) {
+          if (p.playerId !== playerId) continue;
+          const dt = Math.abs(p.timestampSeconds - t);
+          if (dt < bestDt) {
+            bestDt = dt;
+            best = p;
+          }
+        }
+        if (!best) return null;
+        const kp = (name: string) => best!.keypoints.find((k) => k.name === name);
+        const ls = kp("left_shoulder"), rs = kp("right_shoulder"), lw = kp("left_wrist"), rw = kp("right_wrist");
+        const shoulderY = [ls, rs].filter((k) => k && k.yNorm !== null && (k.confidence ?? 0) >= 0.3).map((k) => k!.yNorm!);
+        const wristY = [lw, rw].filter((k) => k && k.yNorm !== null && (k.confidence ?? 0) >= 0.3).map((k) => k!.yNorm!);
+        if (shoulderY.length === 0 || wristY.length === 0) return null;
+        return Math.min(...wristY) < Math.min(...shoulderY) - 0.03; // a wrist clearly above the shoulders
+      };
+      for (const r of rallies) {
+        const pts = sliceTrack(built.points, r.startS - 0.3, r.endS + 0.3);
+        const hits = detectHits(pts, r.contacts, tracks, overheadAt);
+        const bounces = detectBounces(pts, r.contacts);
+        shots.push(...classifyRally({ rallyIdx: r.idx, startS: r.startS, endS: r.endS, hits, bounces, ballPoints: pts }, ctx));
+      }
+    } catch (err) {
+      if (err instanceof BallModelNotConfiguredError) {
+        knownLimitations.push(err.message);
+      } else {
+        knownLimitations.push(`Ball detection failed, so shot types were not classified: ${(err as Error).message.split("\n")[0]}`);
+      }
+      shots = [];
+    }
+  }
+
   const playerCounts = perFrameDetections.map((f) => f.players.length);
   const quality: QualityDiagnostics = {
     videoDurationSeconds: input.videoDurationSeconds,
@@ -164,6 +235,8 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     poseFramesAttempted: input.frames.length,
     poseFramesSucceeded: new Set(poses.map((p) => p.timestampSeconds)).size,
     audioEventCount,
+    ballCoverage: ballTrack.stats?.coverage ?? null,
+    shotsClassified: shots.filter((s) => s.type !== "unknown").length,
     knownLimitations,
   };
 
@@ -176,6 +249,8 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     movement,
     footwork,
     events,
+    ballTrack,
+    shots,
     quality,
   };
 }

@@ -256,6 +256,51 @@ async function persistVisionResult(
     if (error) throw error;
   }
 
+  // ball_tracks + analysis_shots — replace-on-rerun so a reprocess never
+  // leaves two generations of shots behind.
+  {
+    const { error: delShots } = await supabase.from("analysis_shots").delete().eq("analysis_id", analysisId);
+    if (delShots) throw delShots;
+    if (result.ballTrack.stats) {
+      const { error } = await supabase.from("ball_tracks").upsert(
+        {
+          analysis_id: analysisId,
+          points: result.ballTrack.points,
+          frames_processed: result.ballTrack.stats.framesProcessed,
+          points_detected: result.ballTrack.stats.pointsDetected,
+          points_interpolated: result.ballTrack.stats.pointsInterpolated,
+          coverage: result.ballTrack.stats.coverage,
+          diagnostics: result.ballTrack.diagnostics,
+        },
+        { onConflict: "analysis_id" }
+      );
+      if (error) throw error;
+    }
+    if (result.shots.length > 0) {
+      const rows = result.shots.map((s) => ({
+        analysis_id: analysisId,
+        rally_idx: s.rallyIdx,
+        shot_idx: s.shotIdx,
+        timestamp_s: s.t,
+        player_label: s.playerId,
+        shot_type: s.type,
+        category: s.category,
+        confidence: s.confidence,
+        hit_court: s.hitCourt,
+        hit_zone: s.hitZone,
+        landing_court: s.landingCourt,
+        landing_zone: s.landingZone,
+        speed_mps_approx: s.speedMpsApprox,
+        arc_norm: s.arcNorm,
+        bounced_before: s.bouncedBefore,
+        outcome: s.outcome,
+        features: s.features,
+      }));
+      const { error } = await supabase.from("analysis_shots").insert(rows);
+      if (error) throw error;
+    }
+  }
+
   // analysis_events
   if (result.events.length > 0) {
     const rows = result.events.map((e) => ({

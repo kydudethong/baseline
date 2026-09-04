@@ -145,6 +145,9 @@ export interface AnalysisEvent {
 
 export interface QualityDiagnostics {
   videoDurationSeconds: number;
+  /** Ball detections per processed frame, when a ball model ran; null when shots were skipped. */
+  ballCoverage: number | null;
+  shotsClassified: number;
   visionFps: number;
   framesSampled: number;
   courtCalibrationConfidence: number;

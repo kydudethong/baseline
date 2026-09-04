@@ -15,6 +15,7 @@ import { PlayerTagPicker, type TagPickerFrame } from "@/components/dashboard/Pla
 import { Dialog } from "@/components/ui/Dialog";
 import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
 import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
+import { ShotsPanel } from "@/components/dashboard/ShotsPanel";
 import Player, { type RallyMark } from "@/components/breakdown/Player";
 import { SkillMeter } from "@/components/breakdown/SkillMeter";
 import { SkillRadar } from "@/components/breakdown/SkillRadar";
@@ -26,6 +27,7 @@ export const dynamic = "force-dynamic";
 const TABS = [
   { key: "summary", label: "Summary" },
   { key: "movement", label: "Movement" },
+  { key: "shots", label: "Shots" },
   { key: "rallies", label: "Rallies" },
   { key: "skills", label: "Skills" },
   { key: "plan", label: "Plan" },
@@ -251,6 +253,20 @@ async function AnalysisBreakdown({
             <Link href={`/dashboard/${analysis.id}/debug`}>Open the raw detections view</Link>.
           </p>
         </div>
+      ) : null}
+
+      {tab === "shots" ? (
+        phase2.shots.length > 0 ? (
+          <ShotsPanel shots={phase2.shots} ballTrack={phase2.ballTrack} selfLabels={selfLabels} />
+        ) : (
+          <div className="empty">
+            <h3 className="h2">No shot data for this game</h3>
+            <p className="body measure">
+              Shot types (dink, drive, drop, reset…) come from tracking the ball, which needs a ball-detector model
+              configured for this deployment. Once one is set up, re-run processing on this game and this tab fills in.
+            </p>
+          </div>
+        )
       ) : null}
 
       {tab === "rallies" ? (

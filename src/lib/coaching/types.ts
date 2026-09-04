@@ -1,32 +1,51 @@
 // Shared shapes for the coaching layer. Anything the coaching LLM produces
 // lands in one of these before it reaches the database.
 //
-// Ported from Baseline's original app with one deliberate change: the
-// five-dimension USAPA-style framework there had two dimensions ("shot
-// mechanics", "shot selection & strategy") that fundamentally depend on
-// knowing shot type — drive vs. drop vs. dink. Rally IQ's CV pipeline
-// cannot classify shot type (see facts.ts), so those two dimensions are not
-// ported: silently relabeling them to something that *sounds* similar would
-// misrepresent what this data can actually support. Only the three
-// dimensions this pipeline's real signals bear on remain.
+// Dimensions come in two tiers. The first three are supported by pose and
+// movement alone. The rest — kitchen game, serve & return, offense, defense,
+// shot selection — need shot types, which exist only when the ball was
+// tracked (facts.ts's shot_summary). prompts.ts only offers the second tier
+// to the coach when that data is present, so a clip without ball tracking
+// never gets a "your third-shot drop..." observation it can't support.
 
 export type Valence = "strength" | "weakness";
 
 export type CoachingDimension =
   | "ready_position_split_step"
   | "paddle_position_proxy"
-  | "footwork_court_movement";
+  | "footwork_court_movement"
+  | "kitchen_game"
+  | "serve_and_return"
+  | "offense"
+  | "defense"
+  | "shot_selection";
 
-export const COACHING_DIMENSIONS: CoachingDimension[] = [
+export const BASE_COACHING_DIMENSIONS: CoachingDimension[] = [
   "ready_position_split_step",
   "paddle_position_proxy",
   "footwork_court_movement",
 ];
 
+/** Only offered to the coach when shot types exist for the clip. */
+export const SHOT_COACHING_DIMENSIONS: CoachingDimension[] = [
+  "kitchen_game",
+  "serve_and_return",
+  "offense",
+  "defense",
+  "shot_selection",
+];
+
+export const COACHING_DIMENSIONS: CoachingDimension[] = [...BASE_COACHING_DIMENSIONS, ...SHOT_COACHING_DIMENSIONS];
+
 export const COACHING_DIMENSION_LABELS: Record<CoachingDimension, string> = {
   ready_position_split_step: "Ready position & split step",
   paddle_position_proxy: "Paddle position (proxy)",
   footwork_court_movement: "Footwork & court movement",
+  kitchen_game: "Kitchen game",
+  serve_and_return: "Serve & return",
+  offense: "Offense",
+  defense: "Defense",
+  shot_selection: "Shot selection",
 };
 
 export interface CoachingObservation {

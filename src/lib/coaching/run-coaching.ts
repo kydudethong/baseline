@@ -15,6 +15,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   AnalysisEventRow,
   AnalysisRow,
+  AnalysisShotRow,
+  BallTrackRow,
   Database,
   MovementMetricRow,
   PlayerKeypointRow,
@@ -73,16 +75,20 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   if (profileError) throw profileError;
   const profile = profileData as ProfileRow | null;
 
-  const [tracksRes, keypointsRes, movementRes, eventsRes] = await Promise.all([
+  const [tracksRes, keypointsRes, movementRes, eventsRes, shotsRes, ballRes] = await Promise.all([
     supabase.from("player_tracks").select("*").eq("analysis_id", analysisId),
     supabase.from("player_keypoints").select("*").eq("analysis_id", analysisId),
     supabase.from("movement_metrics").select("*").eq("analysis_id", analysisId),
     supabase.from("analysis_events").select("*").eq("analysis_id", analysisId),
+    supabase.from("analysis_shots").select("*").eq("analysis_id", analysisId),
+    supabase.from("ball_tracks").select("*").eq("analysis_id", analysisId).maybeSingle(),
   ]);
   if (tracksRes.error) throw tracksRes.error;
   if (keypointsRes.error) throw keypointsRes.error;
   if (movementRes.error) throw movementRes.error;
   if (eventsRes.error) throw eventsRes.error;
+  if (shotsRes.error) throw shotsRes.error;
+  if (ballRes.error) throw ballRes.error;
 
   const facts = buildCoachingFacts({
     selfPlayerLabels,
@@ -90,6 +96,8 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     keypoints: (keypointsRes.data ?? []) as PlayerKeypointRow[],
     movement: (movementRes.data ?? []) as MovementMetricRow[],
     events: (eventsRes.data ?? []) as AnalysisEventRow[],
+    shots: (shotsRes.data ?? []) as AnalysisShotRow[],
+    ballTrack: (ballRes.data as BallTrackRow | null) ?? null,
   });
 
   if (facts.rallies.length === 0) {

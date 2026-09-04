@@ -1,4 +1,4 @@
-import { SKILLS } from "./types";
+import { SKILLS, BASE_COACHING_DIMENSIONS, SHOT_COACHING_DIMENSIONS } from "./types";
 import type { Schema } from "./claude";
 import type { CoachingFacts } from "./facts";
 import type { CoachingRead } from "./types";
@@ -6,10 +6,43 @@ import type { CoachingRead } from "./types";
 const SKILL_LIST = SKILLS.map((s) => `${s.key} (${s.name})`).join(", ");
 
 /**
- * Three dimensions, not the original five — see types.ts's header comment.
- * "Shot mechanics" and "shot selection/strategy" are not assessable without
- * shot-type classification, which this pipeline deliberately does not do.
+ * Two tiers of dimensions — see types.ts. The shot tier is appended only
+ * when the facts carry a shot_summary (the ball was tracked), so the coach
+ * is never invited to judge shots it can't see.
  */
+const SHOT_FRAMEWORK = `
+4. KITCHEN GAME
+   - shot_sequence per rally names every contact (Dink, Volley, Speed-up,
+     Block, Reset...) with who hit it, where from, where it landed and its
+     speed. shot_summary.self.dinks and kitchen_exchanges say how often this
+     player dinks, how many land in the kitchen, and how long they can hold
+     an exchange.
+
+5. SERVE & RETURN
+   - shot_summary.self.serves / returns / thirdShot: serves in vs out,
+     returns landing deep, third-shot drops vs drives and how many drops
+     actually landed in the kitchen.
+
+6. OFFENSE
+   - Drives, speed-ups and overheads: counts, average drive speed, and which
+     rally-ending shots were winners vs errors (shot_summary.self.endings).
+
+7. DEFENSE
+   - Resets, blocks and lobs: how the player answers a fast ball
+     (look for "Reset"/"Block" following an opponent Drive in shot_sequence)
+     and how often that answer lands in the kitchen.
+
+8. SHOT SELECTION
+   - Read shot_sequence across rallies for choices, not mechanics: driving
+     from the back court into players already at the line, speeding up a
+     ball from below the net, dinking when a put-away was there. Cite the
+     rally and the shot number.
+
+Every shot carries a confidence. Prefer patterns that repeat across several
+shots with confidence >= 0.5; say "the tracking suggests" for anything
+resting on lower-confidence shots. shot_summary.ball_seen_fraction tells
+you how much of the ball the camera actually saw.`;
+
 const COACHING_FRAMEWORK = `
 COACHING ANALYSIS FRAMEWORK
 
@@ -34,12 +67,23 @@ below actually supports — never guess or invent a detail it doesn't contain.
    - movement_summary gives this player's total distance covered, average
      and max speed, and court-coverage bounds for the whole clip.
 
-DO NOT attempt to assess shot mechanics (contact point, swing path, shot
-type) or shot selection/strategy — no data below supports either, and
-guessing at them would be exactly the kind of fabricated confidence this
-system exists to avoid. If asked to comment on "shots", limit yourself to
-what the contacts array actually gives you: count, timing and (low-
+DO NOT attempt to assess swing path or contact-point mechanics — nothing
+below sees the paddle. Shot TYPE and shot SELECTION may be discussed only
+when a shot_summary is present (the ball was tracked); without it, limit
+yourself to what the contacts array gives you: count, timing and (low-
 confidence) which side produced them — never what kind of shot they were.`;
+
+function frameworkFor(facts: CoachingFacts): string {
+  return facts.shot_summary ? COACHING_FRAMEWORK + SHOT_FRAMEWORK : COACHING_FRAMEWORK;
+}
+
+function measuredFacts(facts: CoachingFacts): string {
+  return JSON.stringify({
+    rallies: facts.rallies,
+    movement_summary: facts.movement_summary,
+    ...(facts.shot_summary ? { shot_summary: facts.shot_summary } : {}),
+  });
+}
 
 /* ------------------------------------------------------------------ */
 /* Claude — call 1: the coaching read itself. Adapted from Baseline's    */
@@ -104,7 +148,18 @@ You will receive JSON data with one or more rallies, each with: a contact
 timeline (count, timing, and a low-confidence guess at which side produced
 each contact), this player's stance (knee-bend) samples, and this player's
 paddle-height-proxy samples. A separate movement_summary covers distance/
-speed/coverage for the whole clip. This data is measured or explicitly
+speed/coverage for the whole clip.${
+    opts.facts.shot_summary
+      ? `
+The ball was tracked for this clip, so each rally also carries a
+shot_sequence (every contact classified — serve, return, third-shot drop,
+dink, drive, reset, speed-up, lob... — with who hit it, where from, where it
+landed, its speed and a confidence), and a shot_summary aggregates this
+player's kitchen game, serve & return, offense and defense. Use it: this is
+the data a real coach would build a lesson around.`
+      : ""
+  }
+This data is measured or explicitly
 confidence-scored — your job is to interpret it and translate patterns into
 coaching insight, never to add certainty it doesn't have.
 ANALYSIS INSTRUCTIONS:
@@ -117,9 +172,16 @@ ANALYSIS INSTRUCTIONS:
   field is null/missing across most rallies, do not speculate — note that
   the footage didn't provide enough visibility on that aspect rather than
   guessing.
-- Do NOT comment on shot type, shot mechanics, or shot selection — this data
+${
+    opts.facts.shot_summary
+      ? `- Shot types are classified from ball tracking with a per-shot confidence.
+  Build claims on patterns across several shots with confidence >= 0.5, and
+  hedge ("the tracking suggests") on anything resting on lower-confidence
+  shots. Never comment on swing mechanics — the paddle is not seen.`
+      : `- Do NOT comment on shot type, shot mechanics, or shot selection — this data
   cannot distinguish a drive from a dink from a drop, and does not attempt
-  to. Stick to stance, paddle-height proxy, and movement/footwork.
+  to. Stick to stance, paddle-height proxy, and movement/footwork.`
+  }
 - Contact-side attribution (self vs. opponent) is a rough heuristic, not a
   verified fact — treat a low-confidence split (values near 0.3) as
   unreliable and don't build claims on it alone.
@@ -159,8 +221,9 @@ Player's self-reported skill level: ${skillLevel}
 Focus area requested (if any): ${focusArea}
 KNOWN DATA LIMITATIONS FOR THIS ANALYSIS:
 ${opts.facts.known_limitations.map((l) => `- ${l}`).join("\n")}
+${opts.facts.shot_summary ? frameworkFor(opts.facts) : ""}
 MEASURED FACTS:
-${JSON.stringify({ rallies: opts.facts.rallies, movement_summary: opts.facts.movement_summary })}`;
+${measuredFacts(opts.facts)}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -191,7 +254,7 @@ export const TAGGING_SCHEMA: Schema = {
           skill_key: { type: "string" },
           coaching_dimension: {
             type: "string",
-            enum: ["ready_position_split_step", "paddle_position_proxy", "footwork_court_movement"],
+            enum: [...BASE_COACHING_DIMENSIONS, ...SHOT_COACHING_DIMENSIONS],
           },
           valence: { type: "string", enum: ["strength", "weakness"] },
           title: { type: "string", description: "Short, concrete. Under 60 characters." },
@@ -245,20 +308,25 @@ GROUND RULES
    field in the data below, or to the coaching read you already wrote.
 2. Every observation must cite the rally it came from, by its rally_number.
    If you cannot point to a specific rally_number, do not make the claim.
-3. NEVER produce an observation about shot type, shot mechanics, or shot
+3. ${
+    opts.facts.shot_summary
+      ? `Shot types ARE available for this clip (shot_sequence / shot_summary).
+   coaching_dimension may be any of: ${[...BASE_COACHING_DIMENSIONS, ...SHOT_COACHING_DIMENSIONS].join(", ")}.
+   Never produce an observation about swing mechanics — the paddle is not seen.`
+      : `NEVER produce an observation about shot type, shot mechanics, or shot
    selection — no data below supports any of those. coaching_dimension must
-   be one of: ready_position_split_step, paddle_position_proxy,
-   footwork_court_movement.
+   be one of: ${BASE_COACHING_DIMENSIONS.join(", ")}.`
+  }
 4. Prefer few sharp observations over many vague ones. Six good ones beat twenty.
 5. Write to the player, in second person, plainly. No hype, no filler openers.
 
-${COACHING_FRAMEWORK}
+${frameworkFor(opts.facts)}
 
 THE COACHING READ YOU ALREADY WROTE
 ${JSON.stringify(opts.coaching)}
 
 THE MEASURED FACTS (one entry per rally)
-${JSON.stringify({ rallies: opts.facts.rallies, movement_summary: opts.facts.movement_summary })}
+${measuredFacts(opts.facts)}
 
 KNOWN DATA LIMITATIONS FOR THIS ANALYSIS
 ${opts.facts.known_limitations.map((l) => `- ${l}`).join("\n")}
@@ -275,11 +343,20 @@ supports it, on this scale:
   4 = a strength
   5 = a weapon
 Available skill keys: ${SKILL_LIST}
-Most of these skills (serve, return, third shot, hands, volleys, offense,
-shot selection) require shot-type or ball-tracking data this pipeline does
-not have — rate those ONLY if you have genuine, citable evidence, which
-will be rare. The data realistically supports positioning, transition, and,
-via the paddle-height and stance proxies, dinking/kitchen readiness.
+${
+    opts.facts.shot_summary
+      ? `With shot data present you may rate serve, return, thirdshot, dinking,
+kitchen, hands, volleys, resets, defense, offense, selection and consistency —
+but only from shots this player actually hit (shot_summary.self, and
+shot_sequence entries with by = "self"), and only where several shots
+support the rating. Cite counts in the basis ("4 of 6 third-shot drops landed
+in the kitchen").`
+      : `Most of these skills (serve, return, third shot, hands, volleys, offense,
+shot selection) require shot-type or ball-tracking data this clip does not
+have — rate those ONLY if you have genuine, citable evidence, which will be
+rare. The data realistically supports positioning, transition, and, via the
+paddle-height and stance proxies, dinking/kitchen readiness.`
+  }
 
 If the facts are too sparse or ambiguous to responsibly judge something,
 say so in footage_quality and leave it out rather than guessing.

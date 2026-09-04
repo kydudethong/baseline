@@ -262,6 +262,45 @@ export type AnalysisEventRow = {
   source: "audio-onset" | "movement-heuristic" | "mock";
   created_at: string;
 };
+export type BallTrackRow = {
+  id: string;
+  analysis_id: string;
+  /** [{t,x,y,conf,interpolated}] in image-normalized coordinates — see src/lib/vision/ball.ts. */
+  points: unknown;
+  frames_processed: number;
+  points_detected: number;
+  points_interpolated: number;
+  coverage: number;
+  diagnostics: unknown;
+  created_at: string;
+};
+export type BallTrackInsert = Omit<BallTrackRow, "id" | "created_at"> & { id?: string; created_at?: string };
+export type BallTrackUpdate = Partial<BallTrackInsert>;
+
+export type AnalysisShotRow = {
+  id: string;
+  analysis_id: string;
+  rally_idx: number;
+  shot_idx: number;
+  timestamp_s: number;
+  player_label: string | null;
+  shot_type: string;
+  category: string;
+  confidence: number;
+  hit_court: unknown;
+  hit_zone: string;
+  landing_court: unknown;
+  landing_zone: string;
+  speed_mps_approx: number | null;
+  arc_norm: number | null;
+  bounced_before: boolean | null;
+  outcome: string;
+  features: unknown;
+  created_at: string;
+};
+export type AnalysisShotInsert = Omit<AnalysisShotRow, "id" | "created_at"> & { id?: string; created_at?: string };
+export type AnalysisShotUpdate = Partial<AnalysisShotInsert>;
+
 export type AnalysisEventInsert = Omit<AnalysisEventRow, "id" | "created_at"> & {
   id?: string;
   created_at?: string;
@@ -501,6 +540,34 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "movement_metrics_analysis_id_fkey";
+            columns: ["analysis_id"];
+            isOneToOne: false;
+            referencedRelation: "analyses";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ball_tracks: {
+        Row: BallTrackRow;
+        Insert: BallTrackInsert;
+        Update: BallTrackUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "ball_tracks_analysis_id_fkey";
+            columns: ["analysis_id"];
+            isOneToOne: true;
+            referencedRelation: "analyses";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      analysis_shots: {
+        Row: AnalysisShotRow;
+        Insert: AnalysisShotInsert;
+        Update: AnalysisShotUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "analysis_shots_analysis_id_fkey";
             columns: ["analysis_id"];
             isOneToOne: false;
             referencedRelation: "analyses";

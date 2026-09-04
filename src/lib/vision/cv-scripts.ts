@@ -96,3 +96,37 @@ export async function detectAudioEventsViaPython(videoPath: string): Promise<Raw
   const stdout = await runPython("audio_events.py", [videoPath]);
   return JSON.parse(stdout) as RawAudioEvents;
 }
+
+export interface RawBallDetections {
+  fps: number;
+  sourceFps: number;
+  width: number;
+  height: number;
+  framesProcessed: number;
+  detections: Array<{ t: number; frame: number; x: number; y: number; w: number; h: number; conf: number }>;
+  diagnostics: Record<string, unknown>;
+}
+
+export class BallModelNotConfiguredError extends Error {}
+
+/** True when a ball model is configured (a Roboflow model id or local weights) — the pipeline skips shots otherwise. */
+export function ballModelConfigured(): boolean {
+  return Boolean(process.env.BALL_MODEL_ID || process.env.BALL_MODEL_PATH);
+}
+
+/**
+ * Runs detect_ball.py over the given rally windows at up to the clip's
+ * native frame rate. Exit code 2 from the script means "no model
+ * configured" and is surfaced as BallModelNotConfiguredError so the
+ * pipeline can record shots as unavailable instead of failing the run.
+ */
+export async function detectBallViaPython(
+  videoPath: string,
+  windows: Array<[number, number]>
+): Promise<RawBallDetections> {
+  if (!ballModelConfigured()) throw new BallModelNotConfiguredError("No ball model configured (BALL_MODEL_ID / BALL_MODEL_PATH).");
+  const stdout = await runPython("detect_ball.py", [videoPath, "--windows", JSON.stringify(windows)], {
+    maxBuffer: 200 * 1024 * 1024,
+  });
+  return JSON.parse(stdout) as RawBallDetections;
+}
