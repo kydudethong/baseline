@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { colorForPlayer, playerDisplayName } from "@/lib/vision/player-colors";
+import { useDialog } from "@/components/ui/Dialog";
 
 export interface TagPickerFrame {
   url: string;
@@ -38,6 +39,7 @@ export function PlayerTagPicker({
   initialCoachingKind,
   initialNotes,
   hasExistingRead,
+  frameless = false,
 }: {
   analysisId: string;
   players: string[];
@@ -50,8 +52,11 @@ export function PlayerTagPicker({
   initialCoachingKind: string;
   initialNotes: string | null;
   hasExistingRead: boolean;
+  /** Inside a Dialog the dialog is the card — skip the section's own frame and heading. */
+  frameless?: boolean;
 }) {
   const router = useRouter();
+  const dialog = useDialog();
   const [selected, setSelected] = useState<Set<string>>(new Set(initialSelfLabels));
   const [skillLevel, setSkillLevel] = useState(initialSkillLevel ?? "");
   const [paddleHand, setPaddleHand] = useState(initialPaddleHand ?? "");
@@ -92,6 +97,7 @@ export function PlayerTagPicker({
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Could not generate a coaching read.");
       router.refresh();
+      dialog?.close();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate a coaching read.");
     } finally {
@@ -100,12 +106,14 @@ export function PlayerTagPicker({
   }
 
   return (
-    <section className="card stack g5" id="tag">
+    <section className={frameless ? "stack g5" : "card stack g5"} id="tag">
       <div className="stack g2">
-        <div className="row g3">
-          <span className="eyebrow">{hasExistingRead ? "Re-tag & regenerate" : "Step 2 of 2"}</span>
-        </div>
-        <h2 className="h2">{hasExistingRead ? "Change who you are in this clip" : "Which player is you?"}</h2>
+        {!frameless ? (
+          <>
+            <span className="eyebrow">Step 2 of 2</span>
+            <h2 className="h2">Which player is you?</h2>
+          </>
+        ) : null}
         <p className="sm measure">
           Tap every box that&apos;s you. The tracker can lose you behind another player and pick you back up
           under a new color, so you may be more than one — that&apos;s expected. The frames below are spread

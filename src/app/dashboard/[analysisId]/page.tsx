@@ -12,6 +12,7 @@ import { ProcessingControls } from "@/components/dashboard/ProcessingControls";
 import { AnalysisResultPanel } from "@/components/dashboard/AnalysisResultPanel";
 import { MovementMetricsPanel } from "@/components/dashboard/MovementMetricsPanel";
 import { PlayerTagPicker, type TagPickerFrame } from "@/components/dashboard/PlayerTagPicker";
+import { Dialog } from "@/components/ui/Dialog";
 import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
 import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
 import Player, { type RallyMark } from "@/components/breakdown/Player";
@@ -145,6 +146,7 @@ async function AnalysisBreakdown({
       phase2Frames={phase2.frames}
       profile={profile}
       hasExistingRead={hasRead}
+      frameless={hasRead}
     />
   );
 
@@ -173,12 +175,27 @@ async function AnalysisBreakdown({
         </div>
       ) : null}
 
-      <div className="tabs">
-        {TABS.map((t) => (
-          <Link key={t.key} href={`/dashboard/${analysis.id}?tab=${t.key}`} className={t.key === tab ? "on" : ""}>
-            {t.label}
-          </Link>
-        ))}
+      <div className="row g3" style={{ justifyContent: "space-between" }}>
+        <div className="tabs">
+          {TABS.map((t) => (
+            <Link key={t.key} href={`/dashboard/${analysis.id}?tab=${t.key}`} className={t.key === tab ? "on" : ""}>
+              {t.label}
+            </Link>
+          ))}
+        </div>
+        {hasRead && phase2.tracks.length > 0 ? (
+          <Dialog
+            trigger={
+              <button type="button" className="btn btn-soft btn-sm">
+                Change who you are
+              </button>
+            }
+            eyebrow="Re-tag & regenerate"
+            title="Change who you are in this clip"
+          >
+            {tagSection}
+          </Dialog>
+        ) : null}
       </div>
 
       {tab === "summary" ? (
@@ -311,7 +328,6 @@ async function AnalysisBreakdown({
         </div>
       ) : null}
 
-      {hasRead ? tagSection : null}
     </div>
   );
 }
@@ -331,6 +347,7 @@ async function TagSection({
   phase2Frames,
   profile,
   hasExistingRead,
+  frameless,
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   analysis: AnalysisWithVideo;
@@ -338,6 +355,7 @@ async function TagSection({
   phase2Frames: AnalysisFrameRow[];
   profile: Awaited<ReturnType<typeof getProfile>>;
   hasExistingRead: boolean;
+  frameless?: boolean;
 }) {
   if (phase2Tracks.length === 0) return null; // nothing to tag yet
 
@@ -375,6 +393,7 @@ async function TagSection({
       initialCoachingKind={analysis.coaching_kind}
       initialNotes={analysis.coaching_notes}
       hasExistingRead={hasExistingRead}
+      frameless={frameless}
     />
   );
 }
