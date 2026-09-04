@@ -12,12 +12,14 @@ recoverable from 5 sampled frames per second. So players stay at
 VISION_FPS, the ball gets every frame in a rally.
 
 Model source (in order of preference; see README "Ball detector"):
-  --model-id <workspace/project/version>  a Roboflow model — a public
-       Roboflow Universe model or one you trained. Run locally through the
+  --model-id <project/version>  a Roboflow model — a public Roboflow
+       Universe model or one you trained. Run locally through the
        `inference` package (pip install inference), which downloads the
        weights once with ROBOFLOW_API_KEY and then runs offline. Pass
-       --hosted to call detect.roboflow.com per frame instead (only sane
-       for short clips — it is one API call per frame).
+       --hosted (or BALL_INFERENCE=hosted) to call Roboflow's serverless
+       API per frame instead — the right call when the model is too heavy
+       for the machine (RF-DETR on a laptop CPU runs ~3 s/frame; hosted is
+       ~0.2 s/frame) at the cost of one inference credit per frame.
   --model-path <weights.pt>  an Ultralytics YOLO weights file.
 
 Honesty contract: no model → exit 2 with a clear message; the caller
@@ -141,7 +143,7 @@ def main():
     ap.add_argument("--model-id", default=os.environ.get("BALL_MODEL_ID"))
     ap.add_argument("--model-path", default=os.environ.get("BALL_MODEL_PATH"))
     ap.add_argument("--hosted", action="store_true", default=os.environ.get("BALL_INFERENCE", "local") == "hosted")
-    ap.add_argument("--host", default=os.environ.get("ROBOFLOW_HOST", "https://detect.roboflow.com"))
+    ap.add_argument("--host", default=os.environ.get("BALL_HOST", "https://serverless.roboflow.com"))
     ap.add_argument("--confidence", type=float, default=float(os.environ.get("BALL_CONFIDENCE", "0.25")))
     ap.add_argument("--fps-cap", type=float, default=float(os.environ.get("BALL_FPS_CAP", "15")))
     ap.add_argument("--top-k", type=int, default=3)
