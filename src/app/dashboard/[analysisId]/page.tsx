@@ -16,6 +16,7 @@ import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
 import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
 import Player, { type RallyMark } from "@/components/breakdown/Player";
 import { SkillMeter } from "@/components/breakdown/SkillMeter";
+import { SkillRadar } from "@/components/breakdown/SkillRadar";
 import { skillName } from "@/lib/coaching/types";
 import { formatBytes } from "@/lib/video/validation";
 import type { CoachingObservationRow, PlayerTrackRow } from "@/lib/db/types";
@@ -205,25 +206,33 @@ async function AnalysisBreakdown({
       ) : null}
 
       {tab === "skills" ? (
-        <div className="stack g4">
+        <div className="stack g5">
           {coachingData.skills.length > 0 ? (
-            <div className="grid2">
-              {coachingData.skills.map((s) => (
-                <div key={s.id} className="card">
-                  <SkillMeter name={skillName(s.skill_key)} raw={s.raw} basis={s.basis} />
+            <>
+              <div className="card">
+                <SkillRadar skills={coachingData.skills} />
+              </div>
+              <section className="sec">
+                <h3 className="eyebrow">Every rated skill</h3>
+                <div className="grid2">
+                  {coachingData.skills.map((s) => (
+                    <div key={s.id} className="card">
+                      <SkillMeter name={skillName(s.skill_key)} raw={s.raw} basis={s.basis} />
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </section>
+              <p className="note">
+                These are the coach&rsquo;s read of what this one clip shows. See the Progress page
+                for how a skill has moved across your matches.
+              </p>
+            </>
           ) : (
             <div className="empty">
               <h3 className="h2">No skill ratings yet</h3>
               <p className="body measure">These appear once a coaching read has been generated.</p>
             </div>
           )}
-          <p className="note">
-            These are the coach&rsquo;s read of what this one clip shows, not a running average across
-            your matches — cross-analysis tracking isn&rsquo;t built yet.
-          </p>
         </div>
       ) : null}
 
