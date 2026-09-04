@@ -78,6 +78,7 @@ export class MockPhase2VisionProvider implements Phase2VisionProvider {
       method: "mock",
       confidence: 0,
       cornersImagePx: null,
+      quadKind: null,
       frameTimestampSeconds: frame.timestampSeconds,
       diagnostics: { note: "mock provider never claims a real calibration" },
     };

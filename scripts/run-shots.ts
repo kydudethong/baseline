@@ -14,6 +14,10 @@
  *   <outDir>/labels.csv      one row per shot for you to hand-label
  *                            (fill the `truth` column, then run eval-shots.ts)
  *   <outDir>/quality.json    pipeline quality + known limitations
+ *   <outDir>/ball.json       the ball track, audio contacts, rallies and
+ *                            calibration — everything needed to re-run the
+ *                            classifier offline while tuning it
+ *   <outDir>/tracks.json     player tracks
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -74,7 +78,18 @@ async function main() {
   console.log(`pipeline done in ${((Date.now() - t0) / 1000).toFixed(0)}s — ${result.shots.length} shots, ball coverage ${result.quality.ballCoverage ?? "n/a"}`);
 
   await fs.writeFile(path.join(outDir, "shots.json"), JSON.stringify(result.shots, null, 2));
-  await fs.writeFile(path.join(outDir, "quality.json"), JSON.stringify({ quality: result.quality, ball: result.ballTrack.stats, diagnostics: result.ballTrack.diagnostics }, null, 2));
+  await fs.writeFile(path.join(outDir, "quality.json"), JSON.stringify({ quality: result.quality, ball: result.ballTrack.stats, diagnostics: result.ballTrack.diagnostics, calibration: result.courtCalibration }, null, 2));
+  await fs.writeFile(
+    path.join(outDir, "ball.json"),
+    JSON.stringify({
+      calibration: result.courtCalibration,
+      frameWidthPx: meta.width,
+      frameHeightPx: meta.height,
+      contacts: result.events.filter((e) => e.type === "unknown_shot").map((e) => e.timestampSeconds),
+      points: result.ballTrack.points,
+    })
+  );
+  await fs.writeFile(path.join(outDir, "tracks.json"), JSON.stringify(result.tracks));
   const csv = ["rally_idx,shot_idx,t_s,player,predicted,confidence,truth"]
     .concat(result.shots.map((s) => [s.rallyIdx, s.shotIdx, s.t, s.playerId ?? "", s.type, s.confidence, ""].join(",")))
     .join("\n");

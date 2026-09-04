@@ -8,8 +8,11 @@ export async function detectCourt(frame: { path: string; timestampSeconds: numbe
     method: "classical-cv-hsv-contour",
     confidence: raw.confidence,
     cornersImagePx: raw.cornersImagePx,
+    quadKind: raw.quadKind ?? null,
     frameTimestampSeconds: frame.timestampSeconds,
-    diagnostics: raw.diagnostics,
+    // quadKind rides along in diagnostics too, so it survives the DB round
+    // trip without a schema change (court_calibrations.diagnostics is jsonb).
+    diagnostics: { ...raw.diagnostics, quadKind: raw.quadKind ?? null },
   };
 }
 

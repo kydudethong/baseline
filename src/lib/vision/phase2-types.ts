@@ -32,6 +32,15 @@ export interface CourtCalibration {
   confidence: number;
   /** Pixel coordinates in the source frame used for calibration. */
   cornersImagePx: CourtCorners | null;
+  /**
+   * Which physical rectangle the quad covers. Everything that turns court
+   * units into feet, zones or sides reads this — see shots.ts courtFrameFor().
+   *   near-inplay  two-tone court: baseline -> kitchen line (20 x 15 ft)
+   *   near-half    baseline -> net (20 x 22 ft)
+   *   full         baseline -> far baseline (20 x 44 ft)
+   * Null for a failed or mock calibration.
+   */
+  quadKind: "near-inplay" | "near-half" | "full" | null;
   frameTimestampSeconds: number;
   diagnostics: Record<string, unknown>;
 }

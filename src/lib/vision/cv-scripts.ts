@@ -27,9 +27,13 @@ async function runPython(scriptName: string, args: string[], opts: { maxBuffer?:
   }
 }
 
+export type CourtQuadKind = "near-inplay" | "near-half" | "full";
+
 export interface RawCourtDetection {
   method: string;
   confidence: number;
+  /** Which physical rectangle the quad is — see detect_court.py's detect_with_masks(). Null when nothing was found. */
+  quadKind: CourtQuadKind | null;
   cornersImagePx: {
     topLeft: [number, number];
     topRight: [number, number];

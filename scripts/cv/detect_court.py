@@ -56,24 +56,37 @@ import cv2
 
 def order_corners(pts):
     """Given 4 (x,y) points, label them topLeft/topRight/bottomLeft/bottomRight
-    in *image* space (y grows downward).
+    in *image* space (y grows downward), where "bottom" is the court edge
+    nearest the camera.
 
-    The classic sum/diff trick (min-sum=topLeft, max-sum=bottomRight, etc.)
-    assumes a roughly axis-aligned rectangle. A court shot from behind the
-    baseline is a strong trapezoid — its "left" and "right" sides differ
-    a lot in length — and that breaks the sum/diff trick (a single point can
-    simultaneously hold the min-sum AND max-diff, colliding two labels onto
-    one point). Instead: split by y into a top pair / bottom pair, then
-    split each pair by x into left/right. Robust to skew, only assumes the
-    court isn't rotated more than ~45 degrees in-frame, which "camera
-    behind the baseline" guarantees.
+    Sorting by y alone (the classic trick) breaks as soon as the camera sits
+    off the court's centre line — from a corner, the near baseline runs
+    diagonally and one of its endpoints can be higher in the frame than a
+    far-edge corner. Instead: walk the quad in polygon order, take the edge
+    whose midpoint is lowest in the frame as the near edge, and label the
+    other two corners by adjacency.
     """
     pts = np.array(pts, dtype=np.float32)
-    order_by_y = pts[np.argsort(pts[:, 1])]
-    top_pair = order_by_y[:2]
-    bottom_pair = order_by_y[2:]
-    top_left, top_right = sorted(top_pair, key=lambda p: p[0])
-    bottom_left, bottom_right = sorted(bottom_pair, key=lambda p: p[0])
+    centre = pts.mean(axis=0)
+    angles = np.arctan2(pts[:, 1] - centre[1], pts[:, 0] - centre[0])
+    order = np.argsort(angles)  # counter-clockwise in image coords
+    p = pts[order]
+    edges = [(i, (i + 1) % 4) for i in range(4)]
+    # The edge nearest the camera is the longest one in the image — true
+    # even from a corner, where "lowest midpoint" would pick a sideline.
+    near = max(edges, key=lambda e: float(np.hypot(*(p[e[0]] - p[e[1]]))))
+    i0, i1 = near
+    a, b = p[i0], p[i1]
+    if a[0] <= b[0]:
+        bottom_left, bottom_right, bl_idx = a, b, i0
+    else:
+        bottom_left, bottom_right, bl_idx = b, a, i1
+    # Walk the polygon from bottomLeft away from bottomRight: the next
+    # vertex is topLeft, the one after that topRight.
+    br_idx = i1 if bl_idx == i0 else i0
+    step = -1 if (bl_idx + 1) % 4 == br_idx else 1
+    top_left = p[(bl_idx + step) % 4]
+    top_right = p[(bl_idx + 2 * step) % 4]
     return {
         "topLeft": [float(top_left[0]), float(top_left[1])],
         "topRight": [float(top_right[0]), float(top_right[1])],
@@ -159,50 +172,108 @@ def quad_from_contour(c, w, h):
         "cornerMethod": corner_method,
     }
 
-    if area_frac < 0.03 or solidity < 0.5:
+    if area_frac < 0.03 or solidity < 0.7:
         diagnostics["reason"] = "contour too small or not solid enough to trust"
         return None, diagnostics
 
     corners = order_corners(approx.reshape(-1, 2).tolist())
 
+    # A court seen from behind its baseline is a trapezoid whose top edge is
+    # shorter than its bottom edge. A fit that isn't is not a court.
+    top_w = float(np.hypot(corners["topRight"][0] - corners["topLeft"][0], corners["topRight"][1] - corners["topLeft"][1]))
+    bottom_w = float(np.hypot(corners["bottomRight"][0] - corners["bottomLeft"][0], corners["bottomRight"][1] - corners["bottomLeft"][1]))
+    if bottom_w <= 0 or top_w / bottom_w > 1.0 or top_w / bottom_w < 0.15:
+        diagnostics["reason"] = f"not a baseline-view trapezoid (top/bottom width ratio {top_w / max(bottom_w, 1):.2f})"
+        return None, diagnostics
+
     eps_score = 1.0 - (used_eps - 0.015) / (0.04 - 0.015)
     area_score = min(1.0, area_frac / 0.15)
     confidence = float(np.clip(0.45 * solidity + 0.35 * area_score + 0.20 * eps_score, 0.0, 1.0))
     if corner_method == "minAreaRect":
-        confidence *= 0.85  # a real fallback, but a coarser one than a converged polygon
+        confidence *= 0.5  # a rotated bounding box is a rough stand-in, never a measured court
 
     diagnostics["confidence"] = round(confidence, 3)
     return {"corners": corners, "confidence": confidence}, diagnostics
 
 
-def best_quad_from_mask(mask, w, h):
-    """Full contour pipeline (find contours -> pick the one reaching
-    furthest down the frame -> fit a quad) for one candidate mask. Returns
-    (result_or_None, diagnostics)."""
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((21, 21), np.uint8))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((9, 9), np.uint8))
-
+def largest_component_reaching_lowest(mask, w, h, min_area_frac=0.02):
+    """Connected component (after cleanup) that reaches furthest down the
+    frame — the court being played on, for a camera behind the near
+    baseline. Returns (component_mask, contour) or (None, None)."""
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((15, 15), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((7, 7), np.uint8))
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None, {"reason": "no contours found after masking"}
-
-    min_area = 0.02 * w * h
-    candidates = [c for c in contours if cv2.contourArea(c) >= min_area]
+    candidates = [c for c in contours if cv2.contourArea(c) >= min_area_frac * w * h]
     if not candidates:
-        return None, {"reason": "no contour cleared the minimum area threshold"}
+        return None, None
 
     def bottom_extent(contour):
         _, y, _, ch = cv2.boundingRect(contour)
         return y + ch
 
-    # Venues with adjacent courts down a hallway produce multiple same-color
-    # blobs. The app's own filming guidance requires the camera centred
-    # behind the near baseline, so the court actually being played on is the
-    # one whose contour reaches furthest toward the bottom of the frame —
-    # not necessarily the one with the largest raw area (a merged blob of
-    # several distant courts can out-area the single near one).
     c = max(candidates, key=bottom_extent)
-    return quad_from_contour(c, w, h)
+    comp = np.zeros((h, w), np.uint8)
+    cv2.drawContours(comp, [c], -1, 255, thickness=cv2.FILLED)
+    return comp, c
+
+
+def detect_with_masks(in_play_mask, kitchen_mask, roi, w, h):
+    """Court quad from an in-play-surface mask plus (optionally) a
+    differently-colored kitchen mask.
+
+    The old approach OR-ed the two masks before looking for a shape, which
+    let anything kitchen-colored anywhere in the frame (warm ceiling lights,
+    wood, skin) merge into the court blob. Here the in-play surface is found
+    FIRST, and kitchen pixels count only where they touch it. The quad is
+    then fitted to the in-play component alone, which is the cleanest
+    trapezoid in the frame, and the kitchen/other-half evidence is reported
+    as `quadKind` so the caller knows which physical rectangle the quad is:
+      near-inplay  two-tone court: baseline -> kitchen line (20 x 15 ft)
+      near-half    single-tone court split by the net: baseline -> net (20 x 22 ft)
+      full         single blob with nothing above it: baseline -> far baseline (20 x 44 ft)
+    """
+    in_play = cv2.bitwise_and(in_play_mask, roi)
+    comp, contour = largest_component_reaching_lowest(in_play, w, h)
+    if comp is None:
+        return None, {"reason": "no in-play surface component cleared the minimum area"}
+
+    result, diag = quad_from_contour(contour, w, h)
+    if result is None:
+        return None, diag
+
+    # Kitchen strip: kitchen-colored pixels touching the in-play component.
+    ring = cv2.dilate(comp, np.ones((25, 25), np.uint8))
+    ring = cv2.bitwise_and(ring, cv2.bitwise_not(comp))
+    kitchen_touching = cv2.bitwise_and(cv2.bitwise_and(kitchen_mask, roi), ring)
+    # grow that seed into the full connected kitchen region
+    kitchen_full = cv2.bitwise_and(kitchen_mask, roi)
+    kitchen_full = cv2.morphologyEx(kitchen_full, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+    n, labels = cv2.connectedComponents(kitchen_full)
+    seed_labels = set(np.unique(labels[kitchen_touching > 0])) - {0}
+    kitchen_region = np.isin(labels, list(seed_labels)).astype(np.uint8) * 255 if seed_labels else np.zeros((h, w), np.uint8)
+    kitchen_area_frac = float((kitchen_region > 0).sum()) / float((comp > 0).sum())
+
+    # Another same-color component directly above (the far half across the net)?
+    top_y = int(min(p[1] for p in result["corners"].values()))
+    band = np.zeros((h, w), np.uint8)
+    band[max(0, top_y - 40):max(0, top_y - 4), :] = 255
+    above = cv2.bitwise_and(cv2.bitwise_and(in_play_mask, band), cv2.bitwise_not(comp))
+    above_frac = float((above > 0).sum()) / max(1.0, float((band > 0).sum()))
+
+    if kitchen_area_frac > 0.12:
+        kind = "near-inplay"
+    elif above_frac > 0.15:
+        kind = "near-half"
+    else:
+        kind = "full"
+
+    diag.update({
+        "kitchenAreaFraction": round(kitchen_area_frac, 3),
+        "sameColorAboveFraction": round(above_frac, 3),
+        "quadKind": kind,
+    })
+    result["quadKind"] = kind
+    return result, diag
 
 
 def detect(image_path: str) -> dict:
@@ -212,56 +283,49 @@ def detect(image_path: str) -> dict:
             "method": "classical-cv-hsv-contour",
             "confidence": 0.0,
             "cornersImagePx": None,
+            "quadKind": None,
             "diagnostics": {"error": f"could not read image: {image_path}"},
         }
 
     h, w = img.shape[:2]
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    # Court surface is never in the top quarter of a baseline-behind shot
-    # (that's wall/ceiling/lighting rig). Restricting the search window
-    # measurably reduces false contours from colored signage.
+    # A fixed camera behind the baseline never has court surface in the top
+    # ~30% of the frame — that is wall, ceiling and lighting, which is
+    # exactly where warm "kitchen-colored" false positives live.
     roi = np.zeros((h, w), np.uint8)
-    roi[int(h * 0.20):, :] = 255
+    roi[int(h * 0.30):, :] = 255
 
     attempts = {}
+    in_play_fixed = cv2.inRange(hsv, (35, 40, 40), (95, 255, 255))
+    kitchen_fixed = cv2.inRange(hsv, (0, 60, 60), (25, 255, 255))
 
-    fixed_mask = cv2.bitwise_and(fixed_band_mask(hsv), roi)
-    fixed_result, fixed_diag = best_quad_from_mask(fixed_mask, w, h)
+    fixed_result, fixed_diag = detect_with_masks(in_play_fixed, kitchen_fixed, roi, w, h)
     attempts["fixedBands"] = fixed_diag
+    best_result, best_source = fixed_result, ("fixedBands" if fixed_result else None)
 
-    best_result = fixed_result
-    best_source = "fixedBands" if fixed_result else None
-
-    # Only spend the auto-detection pass when the fixed bands didn't
-    # already produce a confident result — most real courts match the
-    # fixed bands, and this keeps the common case exactly as cheap as
-    # before.
     if best_result is None or best_result["confidence"] < 0.5:
         auto_mask, peak_hue = auto_dominant_mask(hsv, roi)
         if auto_mask is not None:
-            auto_result, auto_diag = best_quad_from_mask(auto_mask, w, h)
-            auto_diag["peakHueDegrees"] = round(peak_hue * 2, 1)  # OpenCV hue is 0-179 = 0-358deg
+            # With an auto-detected in-play hue, "kitchen" is any saturated
+            # region of a clearly different hue touching it.
+            other = cv2.bitwise_and(cv2.inRange(hsv, (0, 60, 50), (179, 255, 255)), cv2.bitwise_not(auto_mask))
+            auto_result, auto_diag = detect_with_masks(auto_mask, other, roi, w, h)
+            auto_diag["peakHueDegrees"] = round(peak_hue * 2, 1)
             attempts["autoDominantColor"] = auto_diag
             if auto_result and (best_result is None or auto_result["confidence"] > best_result["confidence"]):
-                best_result = auto_result
-                best_source = "autoDominantColor"
+                best_result, best_source = auto_result, "autoDominantColor"
 
     diagnostics = {"frameSize": [w, h], "attempts": attempts, "source": best_source}
-
     if best_result is None:
-        diagnostics["reason"] = "no candidate mask (fixed bands or auto-detected dominant color) produced a usable quadrilateral"
-        return {
-            "method": "classical-cv-hsv-contour",
-            "confidence": 0.0,
-            "cornersImagePx": None,
-            "diagnostics": diagnostics,
-        }
+        diagnostics["reason"] = "no candidate mask produced a usable quadrilateral"
+        return {"method": "classical-cv-hsv-contour", "confidence": 0.0, "cornersImagePx": None, "quadKind": None, "diagnostics": diagnostics}
 
     return {
         "method": "classical-cv-hsv-contour",
         "confidence": round(best_result["confidence"], 3),
         "cornersImagePx": best_result["corners"],
+        "quadKind": best_result.get("quadKind"),
         "diagnostics": diagnostics,
     }
 

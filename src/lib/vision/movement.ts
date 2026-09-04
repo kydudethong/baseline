@@ -1,15 +1,12 @@
 import { transformToCourtCoordinates } from "./court";
+import { courtFrameFor } from "./shots";
 import type { CourtCalibration, PlayerMovementMetrics, PlayerTrack, MovementSample } from "./phase2-types";
 
-// Approximate physical size of the quadrilateral a successful calibration
-// captures (near half-court: sideline-to-sideline x baseline-to-net).
-// Standard pickleball doubles court: 20ft x 44ft total; one baseline-to-net
-// half is 20ft x 22ft = 6.10m x 6.71m. This is an ASSUMPTION about which
-// physical rectangle detectCourt() found, not a measured fact — meters
-// figures derived from it are explicitly labeled "Approx" everywhere they
-// appear, and are never presented as precise measurements.
-const ASSUMED_COURT_WIDTH_METERS = 6.10;
-const ASSUMED_COURT_LENGTH_METERS = 6.71;
+// Physical size of one court unit on each axis comes from what the
+// detector said the quad is (calibration.quadKind — see shots.ts
+// courtFrameFor()): 20 ft wide always; 15, 22 or 44 ft deep. Metres
+// figures are still labelled "approx" downstream: the quad corners are a
+// contour fit, not surveyed points.
 
 export function analyzeMovement(
   track: PlayerTrack,
@@ -81,12 +78,13 @@ export function analyzeMovement(
   // diagonal movement. Approximate by scaling each axis independently
   // before combining — still an approximation, not exact geodesic distance
   // on the real court, and labeled as such downstream.
+  const frame = courtFrameFor(calibration.quadKind);
   let distanceMeters = 0;
   prev = null;
   for (const s of samples) {
     if (prev) {
-      const dx = (s.courtX - prev.x) * ASSUMED_COURT_WIDTH_METERS;
-      const dy = (s.courtY - prev.y) * ASSUMED_COURT_LENGTH_METERS;
+      const dx = (s.courtX - prev.x) * frame.metresX;
+      const dy = (s.courtY - prev.y) * frame.metresY;
       distanceMeters += Math.hypot(dx, dy);
     }
     prev = { t: s.timestampSeconds, x: s.courtX, y: s.courtY };

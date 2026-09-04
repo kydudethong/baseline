@@ -3,7 +3,7 @@ import { analyzeMovementWithCalibration } from "./provider-v2";
 import { detectUnknownShotEvents, detectFootworkFoundation } from "./events";
 import { computeAppearanceSignaturesViaPython, detectBallViaPython, BallModelNotConfiguredError, ballModelConfigured } from "./cv-scripts";
 import { buildBallTrack, detectBounces, detectHits, sliceTrack, type BallTrackPoint, type BallTrackStats } from "./ball";
-import { classifyRally, courtFrameFromEnv, type Shot } from "./shots";
+import { classifyRally, courtFrameFor, type Shot } from "./shots";
 import { clusterRalliesWithContacts } from "./rallies";
 import type {
   AnalysisEvent,
@@ -78,7 +78,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     if (courtCalibration.confidence >= 0.7) break; // good enough, stop spending calls
   }
   courtCalibration ??= await provider.detectCourt(input.frames[0]);
-  log(`court calibration confidence ${courtCalibration.confidence}`);
+  log(`court calibration confidence ${courtCalibration.confidence}${courtCalibration.quadKind ? ` (${courtCalibration.quadKind})` : ""}`);
   if (courtCalibration.confidence === 0) {
     knownLimitations.push("Court calibration failed on every candidate frame tried — movement metrics will be null for every player.");
   }
@@ -185,7 +185,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
       const rallySeconds = windows.reduce((a, [s, e]) => a + (e - s), 0);
       log(`detecting the ball in ${rallies.length} rallies (${rallySeconds.toFixed(0)}s of play) — first run downloads the model…`);
       const raw = await detectBallViaPython(input.videoPath, windows);
-      const built = buildBallTrack(raw.detections, raw.fps);
+      const built = buildBallTrack(raw.detections, raw.fps, raw.framesProcessed);
       log(`ball: seen in ${Math.round(built.stats.coverage * 100)}% of ${built.stats.framesProcessed} frames (${JSON.stringify(raw.diagnostics.modelSource)})`);
       ballTrack = { points: built.points, stats: built.stats, diagnostics: raw.diagnostics };
       if (built.stats.coverage < 0.15) {
@@ -195,7 +195,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
       }
       const ctx = {
         calibration: courtCalibration,
-        frame: courtFrameFromEnv(),
+        frame: courtFrameFor(courtCalibration.quadKind),
         frameWidthPx: input.frameWidthPx,
         frameHeightPx: input.frameHeightPx,
         playerTracks: tracks,

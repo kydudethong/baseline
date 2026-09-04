@@ -76,7 +76,12 @@ const REACQUIRE_MIN_CONF = 0.35;
  * ball, a shoe, a line marker) is handled by gating on the prediction
  * rather than by trusting the highest-confidence box blindly.
  */
-export function buildBallTrack(detections: BallDetection[], fps: number): { points: BallTrackPoint[]; stats: BallTrackStats } {
+export function buildBallTrack(
+  detections: BallDetection[],
+  fps: number,
+  /** Frames the detector actually looked at — coverage is detections over THIS, not over frames that happened to have a candidate. */
+  framesProcessed?: number
+): { points: BallTrackPoint[]; stats: BallTrackStats } {
   const byFrame = new Map<number, BallDetection[]>();
   for (const d of detections) {
     const list = byFrame.get(d.frame) ?? [];
@@ -143,14 +148,14 @@ export function buildBallTrack(detections: BallDetection[], fps: number): { poin
     lastFrame = frame;
   }
 
-  const framesProcessed = frames.length;
+  const total = framesProcessed ?? frames.length;
   return {
     points,
     stats: {
-      framesProcessed,
+      framesProcessed: total,
       pointsDetected: detected,
       pointsInterpolated: interpolated,
-      coverage: framesProcessed > 0 ? Math.round((detected / framesProcessed) * 1000) / 1000 : 0,
+      coverage: total > 0 ? Math.round((detected / total) * 1000) / 1000 : 0,
     },
   };
 }

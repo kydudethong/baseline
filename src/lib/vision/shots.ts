@@ -117,7 +117,7 @@ export const SHOT_LABEL: Record<ShotType, string> = {
 /* ------------------------------------------------------------------ */
 
 export interface CourtFrame {
-  kind: "near-half" | "full";
+  kind: "near-inplay" | "near-half" | "full";
   /** y (court units) of the net line. */
   netY: number;
   /** Kitchen depth (7 ft) in court-length units. */
@@ -129,13 +129,25 @@ export interface CourtFrame {
   metresY: number;
 }
 
-export function courtFrameFromEnv(kind = process.env.COURT_QUAD ?? "near-half"): CourtFrame {
+/** Court units -> physical meaning, from what the detector said the quad is. */
+export function courtFrameFor(kind: CourtFrame["kind"] | null | undefined): CourtFrame {
   if (kind === "full") {
     return { kind: "full", netY: 0.5, kitchenDepth: 7 / 44, halfLength: 0.5, metresX: 6.1, metresY: 13.41 };
   }
-  // Near half: top edge of the quad (image top) is the net, bottom edge is
-  // the near baseline. Court y grows toward the camera. Far court is y < 0.
+  if (kind === "near-inplay") {
+    // Two-tone court: the quad is the near in-play surface, baseline (y=1)
+    // to kitchen line (y=0). The net is 7 ft beyond the kitchen line, i.e.
+    // y = -7/15; the far baseline is y = -29/15. Court y grows toward the
+    // camera; 1 unit of y = 15 ft.
+    return { kind: "near-inplay", netY: -7 / 15, kitchenDepth: 7 / 15, halfLength: 22 / 15, metresX: 6.1, metresY: 4.572 };
+  }
+  // Near half: top edge of the quad is the net, bottom edge the near
+  // baseline. Court y grows toward the camera. Far court is y < 0.
   return { kind: "near-half", netY: 0, kitchenDepth: 7 / 22, halfLength: 1, metresX: 6.1, metresY: 6.71 };
+}
+
+export function courtFrameFromEnv(kind = process.env.COURT_QUAD ?? "near-half"): CourtFrame {
+  return courtFrameFor(kind as CourtFrame["kind"]);
 }
 
 export function distanceFromNet(frame: CourtFrame, y: number): number {
@@ -208,9 +220,13 @@ function toCourt(h: Homography | null, ctx: ClassifyContext, p: { x: number; y: 
   const [cx, cy] = applyHomography(h, [p.x * ctx.frameWidthPx, p.y * ctx.frameHeightPx]);
   if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
   // Far-court extrapolation is legitimate for a planar homography but gets
-  // numerically soft well beyond the calibrated quad — clamp to the court.
-  const maxY = ctx.frame.kind === "near-half" ? 1.15 : 1.1;
-  const minY = ctx.frame.kind === "near-half" ? -1.15 : -0.1;
+  // numerically soft well beyond the calibrated quad — clamp to the court
+  // plus a little run-off behind each baseline.
+  const f = ctx.frame;
+  const farBaselineY = f.netY - f.halfLength;
+  const nearBaselineY = f.netY + f.halfLength;
+  const maxY = nearBaselineY + 0.15 * f.halfLength;
+  const minY = farBaselineY - 0.15 * f.halfLength;
   if (cx < -0.4 || cx > 1.4 || cy < minY || cy > maxY) return null;
   return { x: Math.round(cx * 1000) / 1000, y: Math.round(cy * 1000) / 1000 };
 }
@@ -233,15 +249,27 @@ function landingZone(frame: CourtFrame, court: { x: number; y: number } | null):
   return "deep";
 }
 
-/** The net's image-space y at a given x, from the calibrated quad's net edge. */
+/** The net's image-space y at a given x: project the net line (court y = netY) through the homography. */
 function netImageY(ctx: ClassifyContext, xNorm: number): number | null {
   const c = ctx.calibration.cornersImagePx;
   if (!c) return null;
-  const [x1, y1] = ctx.frame.kind === "near-half" ? c.topLeft : [c.topLeft[0], (c.topLeft[1] + c.bottomLeft[1]) / 2];
-  const [x2, y2] = ctx.frame.kind === "near-half" ? c.topRight : [c.topRight[0], (c.topRight[1] + c.bottomRight[1]) / 2];
-  const x = xNorm * ctx.frameWidthPx;
-  const f = x2 === x1 ? 0 : (x - x1) / (x2 - x1);
-  return (y1 + (y2 - y1) * f) / ctx.frameHeightPx;
+  const inv = computeHomography(
+    [[0, 0], [1, 0], [0, 1], [1, 1]],
+    [c.topLeft, c.topRight, c.bottomLeft, c.bottomRight]
+  );
+  if (!inv) return null;
+  // Find the net's image y under the ball's image x by sampling the net line.
+  let best: number | null = null;
+  let bestDx = Infinity;
+  for (let i = 0; i <= 20; i++) {
+    const [px, py] = applyHomography(inv, [i / 20, ctx.frame.netY]);
+    const dx = Math.abs(px / ctx.frameWidthPx - xNorm);
+    if (dx < bestDx) {
+      bestDx = dx;
+      best = py / ctx.frameHeightPx;
+    }
+  }
+  return best;
 }
 
 /**
