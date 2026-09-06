@@ -1,0 +1,114 @@
+{
+  "quality": {
+    "videoDurationSeconds": 101.326,
+    "visionFps": 5,
+    "framesSampled": 507,
+    "courtCalibrationConfidence": 0.777,
+    "playersDetectedPerFrame": {
+      "min": 0,
+      "max": 2,
+      "mean": 0.93
+    },
+    "tracksProduced": 12,
+    "tracksWithStableId": 1,
+    "poseFramesAttempted": 507,
+    "poseFramesSucceeded": 282,
+    "audioEventCount": 100,
+    "ballCoverage": 0.641,
+    "shotsClassified": 32,
+    "knownLimitations": []
+  },
+  "ball": {
+    "framesProcessed": 686,
+    "pointsDetected": 440,
+    "pointsInterpolated": 550,
+    "coverage": 0.641
+  },
+  "diagnostics": {
+    "modelSource": "roboflow-hosted:pickleball-detection-1sjz9/12",
+    "confidenceThreshold": 0.25,
+    "windows": [
+      [
+        0,
+        4.77
+      ],
+      [
+        4.680000000000001,
+        10.73
+      ],
+      [
+        11.03,
+        17.400000000000002
+      ],
+      [
+        36.730000000000004,
+        44.03
+      ],
+      [
+        50.61000000000001,
+        56.8
+      ],
+      [
+        58.68000000000001,
+        69.83
+      ],
+      [
+        78.33000000000001,
+        85.57
+      ],
+      [
+        80.94000000000001,
+        88.66
+      ]
+    ],
+    "frameStep": 2,
+    "framesWithBall": 601,
+    "ballHitRate": 0.876,
+    "failedFrames": 0,
+    "elapsedSeconds": 122.8
+  },
+  "calibration": {
+    "method": "classical-cv-hsv-contour",
+    "confidence": 0.777,
+    "cornersImagePx": {
+      "topLeft": [
+        416,
+        668
+      ],
+      "topRight": [
+        1279,
+        656
+      ],
+      "bottomLeft": [
+        352,
+        719
+      ],
+      "bottomRight": [
+        1279,
+        719
+      ]
+    },
+    "quadKind": "full",
+    "frameTimestampSeconds": 5,
+    "diagnostics": {
+      "frameSize": [
+        1280,
+        720
+      ],
+      "attempts": {
+        "fixedBands": {
+          "areaFraction": 0.0584,
+          "solidity": 0.9787,
+          "approxEpsilonUsed": 0.015,
+          "cornerMethod": "polygon",
+          "confidence": 0.777,
+          "kitchenAreaFraction": 0,
+          "sameColorAboveFraction": 0,
+          "quadKind": "full"
+        }
+      },
+      "source": "fixedBands",
+      "quadKind": "full"
+    }
+  }
+}

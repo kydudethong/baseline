@@ -1,29 +1,29 @@
-import { detectAudioEventsViaPython } from "./cv-scripts";
 import type { AnalysisEvent, FootworkFoundationMetrics, PlayerTrack } from "./phase2-types";
+import type { BallHit } from "./ball";
 
 /**
- * unknown_shot events: WHEN a paddle contact likely happened, from audio —
- * never WHAT shot it was. Per spec, shot-type classification is explicitly
- * out of scope for this phase; asserting "dink" or "drive" without a model
- * that actually distinguishes them would be exactly the kind of fabricated
+ * unknown_shot events: WHEN a paddle contact likely happened, from the
+ * ball's own tracked trajectory (see ball.ts's detectHits) — never WHAT
+ * shot it was. Per spec, shot-type classification is explicitly out of
+ * scope for this phase; asserting "dink" or "drive" without a model that
+ * actually distinguishes them would be exactly the kind of fabricated
  * confidence this project is built to avoid.
+ *
+ * This used to be its own audio-analysis step run once up front, before
+ * ball detection. Now that hits come from the ball track, they're a
+ * byproduct of ball detection (computed per-rally in run-vision-pipeline.ts
+ * and recompute.ts) rather than a separate pass — this is just the shared
+ * mapping from a BallHit to the AnalysisEvent shape the rest of the app
+ * (facts.ts, coaching prompts, the DB) already expects.
  */
-export async function detectUnknownShotEvents(videoPath: string): Promise<{
-  events: AnalysisEvent[];
-  diagnostics: Record<string, unknown>;
-}> {
-  const raw = await detectAudioEventsViaPython(videoPath);
-  const events: AnalysisEvent[] = raw.events.map((e) => ({
+export function hitsToUnknownShotEvents(hits: BallHit[]): AnalysisEvent[] {
+  return hits.map((h) => ({
     type: "unknown_shot",
-    timestampSeconds: e.timestampSeconds,
-    playerId: null, // audio has no spatial info — which player contacted is not claimed
-    // Strength is a relative onset measure, not a calibrated probability;
-    // squash it into a defensible 0-1 confidence band rather than passing
-    // an unbounded number through as if it meant something absolute.
-    confidence: Math.max(0.3, Math.min(0.95, e.strength * 4)),
-    source: "audio-onset",
+    timestampSeconds: h.t,
+    playerId: h.playerId,
+    confidence: h.confidence,
+    source: "movement-heuristic",
   }));
-  return { events, diagnostics: raw.diagnostics };
 }
 
 const SPLIT_STEP_MIN_DROP = 0.03; // normalized bbox-height drop that counts as a "crouch" candidate

@@ -149,7 +149,7 @@ export interface AnalysisEvent {
   timestampSeconds: number;
   playerId: string | null;
   confidence: number;
-  source: "audio-onset" | "movement-heuristic" | "mock";
+  source: "movement-heuristic" | "mock";
 }
 
 export interface QualityDiagnostics {
@@ -165,7 +165,8 @@ export interface QualityDiagnostics {
   tracksWithStableId: number;
   poseFramesAttempted: number;
   poseFramesSucceeded: number;
-  audioEventCount: number;
+  /** unknown_shot events found (ball-track direction-change detection, not audio). */
+  shotEventCount: number;
   knownLimitations: string[];
 }
 

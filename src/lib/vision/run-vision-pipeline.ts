@@ -1,11 +1,11 @@
 import { getPhase2VisionProvider } from "./provider-v2";
 import { analyzeMovementWithCalibration } from "./provider-v2";
-import { detectUnknownShotEvents, detectFootworkFoundation } from "./events";
+import { hitsToUnknownShotEvents, detectFootworkFoundation } from "./events";
 import { computeAppearanceSignaturesViaPython, detectBallViaPython, BallModelNotConfiguredError, ballModelConfigured } from "./cv-scripts";
-import { buildBallTrack, detectBounces, detectHits, sliceTrack, type BallTrackPoint, type BallTrackStats } from "./ball";
+import { buildBallTrack, detectBounces, detectHits, sliceTrack, type BallDetection, type BallHit, type BallTrackPoint, type BallTrackStats } from "./ball";
 import { classifyRally, courtFrameFor, sideOf as courtSideOf, type Shot } from "./shots";
 import { transformToCourtCoordinates } from "./court";
-import { clusterRalliesWithContacts } from "./rallies";
+import { clusterRalliesFromHits, HIT_CLUSTER_PARAMS } from "./rallies";
 import type {
   AnalysisEvent,
   BoundingBoxNorm,
@@ -36,7 +36,21 @@ export interface VisionPipelineOutput {
   footwork: ReturnType<typeof detectFootworkFoundation>[];
   events: AnalysisEvent[];
   /** Ball track (image-normalized) and per-contact shot classification — empty when no ball model is configured. */
-  ballTrack: { points: BallTrackPoint[]; stats: BallTrackStats | null; diagnostics: Record<string, unknown> };
+  ballTrack: {
+    points: BallTrackPoint[];
+    stats: BallTrackStats | null;
+    diagnostics: Record<string, unknown>;
+    /**
+     * Every per-frame candidate the model returned, before buildBallTrack's
+     * gating/tracking collapses them to one point per frame. Kept so the
+     * tracker's constants (GATE_BASE, GATE_PER_SPEED, MAX_GAP_FRAMES,
+     * REACQUIRE_MIN_CONF in ball.ts) can be re-tuned offline against real
+     * footage later, without paying for another model run just to get the
+     * raw candidates back -- see scripts/run-shots.ts, which persists this
+     * to ball.json. Empty when no ball model is configured.
+     */
+    rawDetections: BallDetection[];
+  };
   shots: Shot[];
   quality: QualityDiagnostics;
 }
@@ -89,32 +103,38 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // (not Promise.all) on purpose — a free-tier hosted API can rate-limit
   // bursts, and this keeps VISION_FPS the actual throttle on call volume.
   const perFrameDetections: FrameDetectionSet[] = [];
-  let appearanceSignatureFailures = 0;
   log(`detecting players (${input.frames.length} frames, one call each)…`);
   for (const [fi, frame] of input.frames.entries()) {
     if (fi > 0 && fi % 100 === 0) log(`  players: ${fi}/${input.frames.length} frames`);
     const players = await provider.detectPlayers(frame);
-
-    // Best-effort: a color signature per box, used only so the tracker can
-    // try to re-identify a track that goes missing for a while (see
-    // tracker.ts). Never lets a Python/OpenCV failure here fail the whole
-    // pipeline -- the tracker works fine without signatures, just without
-    // re-identification.
-    if (players.length > 0) {
-      try {
-        const signatures = await computeAppearanceSignaturesViaPython(
-          frame.path,
-          players.map((p) => p.boxImageNorm)
-        );
-        for (let i = 0; i < players.length; i++) {
-          players[i] = { ...players[i], appearanceSignature: signatures[i] ?? null };
-        }
-      } catch {
-        appearanceSignatureFailures += 1;
-      }
-    }
-
     perFrameDetections.push({ timestampSeconds: frame.timestampSeconds, framePath: frame.path, players });
+  }
+
+  // Appearance signatures (a color cue for re-identifying a lost track, see
+  // tracker.ts) in ONE batched Python process across every frame, instead
+  // of one process per frame -- this is classical CV with no model to
+  // load, so a per-frame process was mostly paying Python startup/import
+  // cost over and over. Never lets a Python/OpenCV failure here fail the
+  // whole pipeline -- the tracker works fine without signatures, just
+  // without re-identification.
+  let appearanceSignatureFailures = 0;
+  const framesWithPlayers = perFrameDetections.filter((f) => f.players.length > 0);
+  if (framesWithPlayers.length > 0) {
+    try {
+      const signaturesByPath = await computeAppearanceSignaturesViaPython(
+        framesWithPlayers.map((f) => ({ imagePath: f.framePath, boxes: f.players.map((p) => p.boxImageNorm) }))
+      );
+      for (const f of framesWithPlayers) {
+        const signatures = signaturesByPath.get(f.framePath);
+        if (!signatures) {
+          appearanceSignatureFailures += 1;
+          continue;
+        }
+        f.players = f.players.map((p, i) => ({ ...p, appearanceSignature: signatures[i] ?? null }));
+      }
+    } catch {
+      appearanceSignatureFailures = framesWithPlayers.length;
+    }
   }
 
   if (appearanceSignatureFailures > 0) {
@@ -154,7 +174,19 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   });
   if (offCourtDropped > 0) log(`dropped ${offCourtDropped} off-court detections (spectators, other courts)`);
 
-  const tracks = await provider.trackPlayers(filteredDetections, { sideOf });
+  const rawTracks = await provider.trackPlayers(filteredDetections, { sideOf });
+  // trackPlayers() has no calibration context of its own, so it always
+  // leaves courtPosition null -- backfill it here using the same
+  // homography (feetCourt) already computed above for on-court filtering
+  // and side assignment. Every downstream consumer (rally motion
+  // clustering, movement metrics, coaching facts) prefers real court-
+  // meters distance over the cruder image-space-per-second fallback
+  // whenever calibration succeeded; when it did not, feetCourt already
+  // returns null and behavior is unchanged.
+  const tracks: PlayerTrack[] = rawTracks.map((t) => ({
+    ...t,
+    points: t.points.map((p) => ({ ...p, courtPosition: p.courtPosition ?? feetCourt(p.boxImageNorm) })),
+  }));
   log(`tracking: ${tracks.length} player track(s)`);
   if (tracks.length === 0) {
     knownLimitations.push("No player tracks survived (need >=2 sampled detections to count as a track).");
@@ -178,15 +210,6 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   const footwork = tracks.map((t) => detectFootworkFoundation(t));
 
   const events: AnalysisEvent[] = [];
-  let audioEventCount = 0;
-  log("detecting paddle contacts from audio…");
-  try {
-    const { events: shotEvents } = await detectUnknownShotEvents(input.videoPath);
-    events.push(...shotEvents);
-    audioEventCount = shotEvents.length;
-  } catch (err) {
-    knownLimitations.push(`Audio event detection failed: ${(err as Error).message}`);
-  }
   for (const fw of footwork) {
     for (const candidate of fw.possibleSplitSteps) {
       events.push({
@@ -198,32 +221,45 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
       });
     }
   }
-  events.sort((a, b) => a.timestampSeconds - b.timestampSeconds);
 
-  // Ball + shots. Only inside audio-segmented rallies (the same rallies the
-  // coach will talk about), at native frame rate. Skipped — and said so —
-  // when no ball model is configured; a Python/model failure degrades to
-  // "no shots" with the reason recorded, never to made-up shots.
-  let ballTrack: VisionPipelineOutput["ballTrack"] = { points: [], stats: null, diagnostics: {} };
+  // Ball, rallies and shots. Rally boundaries now come from the ball
+  // track itself (clusterRalliesFromHits, rallies.ts): a paddle hit,
+  // detected purely from the ball's own trajectory, is the evidence a
+  // rally is live -- player movement between points turned out not to be
+  // a reliable "nothing's happening" signal (players routinely walk
+  // briskly for several seconds between points), so it's no longer used
+  // to find boundaries at all. No audio signal is used anywhere in this
+  // app either. Skipped entirely -- and said so -- when no ball model is
+  // configured, or when ball detection fails; there is no fallback that
+  // finds rallies without ball data, so that clip gets NO rallies and NO
+  // shots, honestly, rather than a guessed boundary from something else.
+  let ballTrack: VisionPipelineOutput["ballTrack"] = { points: [], stats: null, diagnostics: {}, rawDetections: [] };
   let shots: Shot[] = [];
-  const contactTimes = events.filter((e) => e.type === "unknown_shot").map((e) => e.timestampSeconds);
-  const rallies = clusterRalliesWithContacts(contactTimes);
   if (!ballModelConfigured()) {
-    knownLimitations.push("No ball detector configured (BALL_MODEL_ID) — shot types were not classified for this clip.");
-  } else if (rallies.length === 0) {
-    knownLimitations.push("No rallies could be segmented from audio, so the ball detector had no windows to run over — shot types were not classified.");
+    knownLimitations.push(
+      "No ball detector configured (BALL_MODEL_ID) — rally boundaries come from ball hits, not player movement or audio, so no rallies could be found at all and no shot types were classified."
+    );
   } else {
     try {
-      const windows = rallies.map((r) => [Math.max(0, r.startS - 0.3), r.endS + 0.3] as [number, number]);
-      const rallySeconds = windows.reduce((a, [s, e]) => a + (e - s), 0);
-      log(`detecting the ball in ${rallies.length} rallies (${rallySeconds.toFixed(0)}s of play) — first run downloads the model…`);
-      const raw = await detectBallViaPython(input.videoPath, windows);
+      // Ball presence/movement is the primary signal for "is a rally
+      // happening", not player speed (see clusterRalliesFromHits in
+      // rallies.ts) -- player movement between points turned out not to
+      // be a reliable "nothing's happening" signal (players routinely
+      // walk briskly for several seconds to retrieve the ball or
+      // reposition between points), so this scans the ball across the
+      // WHOLE clip up front rather than only inside player-motion-
+      // derived windows like before. Costs more ball-detector calls per
+      // clip than the old windowed approach, which is the trade Ky
+      // approved after seeing it roughly doubled worst-clip rally F1 in
+      // testing (0.167 -> 0.348 across the 3 labeled clips).
+      log(`detecting the ball across the full ${input.videoDurationSeconds.toFixed(0)}s clip — first run downloads the model…`);
+      const raw = await detectBallViaPython(input.videoPath, [[0, input.videoDurationSeconds]]);
       const built = buildBallTrack(raw.detections, raw.fps, raw.framesProcessed);
       log(`ball: seen in ${Math.round(built.stats.coverage * 100)}% of ${built.stats.framesProcessed} frames (${JSON.stringify(raw.diagnostics.modelSource)})`);
-      ballTrack = { points: built.points, stats: built.stats, diagnostics: raw.diagnostics };
+      ballTrack = { points: built.points, stats: built.stats, diagnostics: raw.diagnostics, rawDetections: raw.detections };
       if (built.stats.coverage < 0.15) {
         knownLimitations.push(
-          `The ball was found in only ${Math.round(built.stats.coverage * 100)}% of rally frames — shot types below are low-confidence; a camera with the whole court in frame and a ball model trained on this camera angle improves this.`
+          `The ball was found in only ${Math.round(built.stats.coverage * 100)}% of frames — rally boundaries and shot types below are low-confidence; a camera with the whole court in frame and a ball model trained on this camera angle improves this.`
         );
       }
       const ctx = {
@@ -252,12 +288,29 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
         if (shoulderY.length === 0 || wristY.length === 0) return null;
         return Math.min(...wristY) < Math.min(...shoulderY) - 0.03; // a wrist clearly above the shoulders
       };
+      // Scan the whole track once for hits, then group hits directly
+      // into rallies -- a hit is the strongest evidence a rally is
+      // actually live, so it decides the boundary, not the other way
+      // around.
+      const allHitsWide = detectHits(built.points, tracks, overheadAt);
+      const rallies = clusterRalliesFromHits(allHitsWide.map((h) => h.t), input.videoDurationSeconds, HIT_CLUSTER_PARAMS);
+      if (rallies.length === 0) {
+        knownLimitations.push("No ball hits were detected sharply enough to identify any rallies — shot types were not classified.");
+      }
+      log(`segmented ${rallies.length} rallies from ${allHitsWide.length} ball hits`);
+      const allHits: BallHit[] = [];
       for (const r of rallies) {
+        // Re-detect scoped to the reported window (+0.3s pad) so hit
+        // indices near the edge have the same neighbor context detectHits
+        // expects, rather than reusing the global scan's edge-of-array
+        // results directly.
         const pts = sliceTrack(built.points, r.startS - 0.3, r.endS + 0.3);
-        const hits = detectHits(pts, r.contacts, tracks, overheadAt);
-        const bounces = detectBounces(pts, r.contacts);
+        const hits = detectHits(pts, tracks, overheadAt);
+        const bounces = detectBounces(pts, hits.map((h) => h.t));
+        allHits.push(...hits);
         shots.push(...classifyRally({ rallyIdx: r.idx, startS: r.startS, endS: r.endS, hits, bounces, ballPoints: pts }, ctx));
       }
+      events.push(...hitsToUnknownShotEvents(allHits));
     } catch (err) {
       if (err instanceof BallModelNotConfiguredError) {
         knownLimitations.push(err.message);
@@ -268,7 +321,9 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     }
   }
 
-  log(`shots: ${shots.length} classified · done in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  events.sort((a, b) => a.timestampSeconds - b.timestampSeconds);
+  const shotEventCount = events.filter((e) => e.type === "unknown_shot").length;
+  log(`shots: ${shots.length} classified (${shotEventCount} ball-detected contacts) · done in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
   const playerCounts = filteredDetections.map((f) => f.players.length);
   const quality: QualityDiagnostics = {
     videoDurationSeconds: input.videoDurationSeconds,
@@ -284,7 +339,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     tracksWithStableId: tracks.filter((t) => t.points.length >= input.frames.length * 0.3).length,
     poseFramesAttempted: input.frames.length,
     poseFramesSucceeded: new Set(poses.map((p) => p.timestampSeconds)).size,
-    audioEventCount,
+    shotEventCount,
     ballCoverage: ballTrack.stats?.coverage ?? null,
     shotsClassified: shots.filter((s) => s.type !== "unknown").length,
     knownLimitations,

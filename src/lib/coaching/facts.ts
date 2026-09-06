@@ -1,11 +1,12 @@
 // Facts assembly: turns Rally IQ's own raw CV output (player tracks, pose
-// keypoints, movement metrics, audio-onset events) into the compact,
-// honesty-scored JSON the coaching LLM prompts (see prompts.ts) actually
-// read. This is the module the 0005_coaching_layer.sql migration's header
-// comment refers to — nothing here measures anything the CV pipeline
-// doesn't actually see; everything below is either a genuine geometric
-// measurement (knee angle) or an explicitly-labeled, confidence-capped
-// proxy/heuristic (paddle position, contact side, rally boundaries).
+// keypoints, movement metrics, ball-movement contact events) into the
+// compact, honesty-scored JSON the coaching LLM prompts (see prompts.ts)
+// actually read. This is the module the 0005_coaching_layer.sql
+// migration's header comment refers to — nothing here measures anything
+// the CV pipeline doesn't actually see; everything below is either a
+// genuine geometric measurement (knee angle) or an explicitly-labeled,
+// confidence-capped proxy/heuristic (paddle position, contact side,
+// rally boundaries). No audio signal is used anywhere in this app.
 //
 // Shot type: available ONLY when the ball was tracked (analysis_shots,
 // written by src/lib/vision/shots.ts from a ball detector run at native
@@ -22,15 +23,15 @@ import type {
   PlayerTrackRow,
 } from "@/lib/db/types";
 import type { CocoKeypointName, PlayerTrackPoint, PoseKeypoint } from "@/lib/vision/phase2-types";
-import { clusterRalliesWithContacts, CLUSTER_PARAMS } from "@/lib/vision/rallies";
+import { clusterRalliesFromHits, HIT_CLUSTER_PARAMS } from "@/lib/vision/rallies";
 import { summarizeShots, shotFromRow, SHOT_LABEL, type Shot, type ShotMix } from "@/lib/vision/shots";
 
 /* ------------------------------------------------------------------ */
-/* Rally boundary clustering — ported from Baseline's segment.ts        */
-/* clusterRallies(). There it clustered onsets found by this app's own  */
-/* spectral-flux detector; here the onsets are Rally IQ's own            */
-/* unknown_shot audio events, already detected upstream (events.ts).    */
-/* Same gap-based grouping logic, same default parameters.              */
+/* Rally boundary clustering — clusterRalliesFromHits (rallies.ts): the  */
+/* stored unknown_shot events ARE the ball hits (see events.ts / ball.ts */
+/* -- direction changes on the tracked ball, no audio), so this module   */
+/* just groups those timestamps directly into rallies. No player-motion  */
+/* fallback: a clip with no recorded contacts gets no rallies here.      */
 /* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
@@ -42,6 +43,17 @@ import { summarizeShots, shotFromRow, SHOT_LABEL, type Shot, type ShotMix } from
 interface TrackData {
   playerId: string;
   points: PlayerTrackPoint[];
+}
+
+/** No explicit clip-duration field is stored on the analysis row here, so
+ * this takes the latest timestamp Rally IQ's own CV output ever touched
+ * (track points, contact/footwork events) and pads it slightly — enough to
+ * size clusterRalliesFromMotion's buckets without a second DB round-trip. */
+function estimateDurationSeconds(tracks: TrackData[], events: AnalysisEventRow[]): number {
+  let maxT = 0;
+  for (const t of tracks) for (const p of t.points) maxT = Math.max(maxT, p.timestampSeconds);
+  for (const e of events) maxT = Math.max(maxT, e.timestamp_s);
+  return maxT > 0 ? maxT + 5 : 0;
 }
 
 /**
@@ -123,7 +135,7 @@ function groupSides(
 
 /* ------------------------------------------------------------------ */
 /* Contact-side attribution — which side (self's team vs. opponent's)    */
-/* most likely produced each audio contact. Motion energy (the same      */
+/* most likely produced each contact. Motion energy (the same            */
 /* bbox-position-change signal events.ts already uses for split-step     */
 /* candidates) near the contact timestamp is the only signal available;  */
 /* it identifies a SIDE, never an individual player within a team — see  */
@@ -258,7 +270,7 @@ export interface CoachingFactsRally {
   rally_number: number;
   start_s: number;
   end_s: number;
-  /** Clustered audio-contact count — an approximate shot count, not a verified one. */
+  /** Clustered contact count — an approximate shot count, not a verified one. */
   shots: number;
   contacts: Array<{ t_s: number; side: "self" | "opponent" | "unknown"; confidence: number }>;
   /** Present only when the ball was tracked: one entry per contact, in order. */
@@ -348,9 +360,9 @@ export function buildCoachingFacts(input: BuildCoachingFactsInput): CoachingFact
         ]
       : [
           "Shot type (drive/dink/drop/volley/serve) is not classified for this clip — the ball was not tracked, and " +
-            "no other signal (body pose, audio timing, tracked position) distinguishes them reliably.",
+            "no other signal (body pose, tracked position) distinguishes them reliably.",
         ]),
-    "Rally boundaries are approximated by clustering paddle-contact audio events (a gap of 3.5s or more " +
+    "Rally boundaries are approximated from player movement (a gap of 1.5s or more with nobody moving " +
       "ends a rally); they are not read from game state or score.",
     "Paddle position is a PROXY — wrist height relative to shoulder from body pose — no paddle is ever " +
       "detected or tracked directly.",
@@ -392,14 +404,18 @@ export function buildCoachingFacts(input: BuildCoachingFactsInput): CoachingFact
     knownLimitations.push("No opposing-side player track was found; contact-side attribution can only ever say \"self\" or \"unknown\" for this analysis.");
   }
 
-  // Audio contacts.
-  const onsets = input.events
+  // Contact timestamps (unknown_shot events — ball-track direction
+  // changes, see ball.ts's detectHits, not audio) ARE the rally-boundary
+  // signal here: group them directly, the same way run-vision-pipeline.ts
+  // and recompute.ts group freshly-detected hits.
+  const contacts = input.events
     .filter((e) => e.event_type === "unknown_shot")
     .map((e) => e.timestamp_s)
     .sort((a, b) => a - b);
-  const clustered = clusterRalliesWithContacts(onsets, CLUSTER_PARAMS);
+  const durationSeconds = estimateDurationSeconds(rawTrackData, input.events);
+  const clustered = clusterRalliesFromHits(contacts, durationSeconds, HIT_CLUSTER_PARAMS);
   if (clustered.length === 0) {
-    knownLimitations.push("No audio-contact clusters met the minimum rally thresholds (>=4 contacts, >=1.5s) — no rallies could be segmented.");
+    knownLimitations.push("No ball-track contact events were recorded for this analysis — no rallies could be segmented.");
   }
 
   // Pose keypoints, grouped by self player (any merged label) + rally window.

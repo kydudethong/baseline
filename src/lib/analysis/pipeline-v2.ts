@@ -6,6 +6,7 @@ import type { Database } from "@/lib/db/types";
 import { getAnalysisForUser, updateAnalysisStatus, updateVideoMetadata } from "@/lib/db/analyses";
 import { VideoProcessor } from "@/lib/video/processor";
 import { runVisionPipeline } from "@/lib/vision/run-vision-pipeline";
+import { downloadToFile } from "@/lib/storage/r2";
 
 const VISION_FPS = Number(process.env.VISION_FPS ?? "5");
 
@@ -57,7 +58,7 @@ export async function runPipelineV2(
       /* turbopackIgnore: true */ tempDir,
       video.original_filename.replace(/[^\w.-]/g, "_")
     );
-    await downloadToFile(supabase, video.storage_bucket, video.storage_path, localPath);
+    await downloadToFile(video.storage_path, localPath);
 
     const processor = new VideoProcessor(localPath);
     const metadata = await processor.getMetadata();
@@ -98,14 +99,14 @@ export async function runPipelineV2(
           tracksProduced: result.quality.tracksProduced,
           framesSampled: result.quality.framesSampled,
           courtCalibrationConfidence: result.quality.courtCalibrationConfidence,
-          unknownShotEvents: result.quality.audioEventCount,
+          unknownShotEvents: result.quality.shotEventCount,
         },
         events: result.events.slice(0, 20).map((e) => ({
           type: e.type,
           timestampSeconds: e.timestampSeconds,
           description:
             e.type === "unknown_shot"
-              ? "Paddle contact detected from audio — shot type not classified (out of scope for this phase)."
+              ? "Paddle contact detected from ball movement — shot type not classified (out of scope for this phase)."
               : `Candidate split-step for ${e.playerId} — a movement heuristic, not a verified technique judgment.`,
         })),
         insights: [
@@ -316,16 +317,3 @@ async function persistVisionResult(
   }
 }
 
-async function downloadToFile(
-  supabase: SupabaseClient<Database>,
-  bucket: string,
-  storagePath: string,
-  localPath: string
-): Promise<void> {
-  const { data, error } = await supabase.storage.from(bucket).download(storagePath);
-  if (error || !data) {
-    throw new Error(`Could not download video from storage: ${error?.message ?? "no data"}`);
-  }
-  const buffer = Buffer.from(await data.arrayBuffer());
-  await fs.writeFile(localPath, buffer);
-}

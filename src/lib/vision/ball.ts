@@ -2,8 +2,18 @@
  * Ball tracking: turns per-frame ball detections (detect_ball.py, up to
  * top-k candidates per frame) into one continuous track, then reads the
  * physical events off that track — bounces (the ball touching the court)
- * and hits (a paddle changing its direction), the latter cross-checked
- * against the audio contacts that already exist upstream.
+ * and hits (a paddle changing direction sharply) — purely from the ball's
+ * own trajectory. No audio signal is used anywhere in this app.
+ *
+ * That means a hit is only ever found where the ball was actually seen
+ * turning sharply in the track above — there is no "we know a contact
+ * happened, we just don't know where" fallback any more (that used to be
+ * audio's job). A rally with poor ball coverage will genuinely show fewer
+ * detected shots; that's disclosed via BallTrackStats.coverage and
+ * QualityDiagnostics.knownLimitations, not papered over. Whether that's
+ * good enough, or needs a second visual signal (e.g. player-swing timing
+ * from pose) when the ball itself isn't visible, is open — see the
+ * ball-detection-coverage work this is downstream of.
  *
  * Everything here is in normalized IMAGE space (x right, y DOWN, 0-1).
  * Court-plane positions are derived later, and only for points that are
@@ -43,17 +53,16 @@ export interface BallBounce {
 
 export interface BallHit {
   t: number;
-  /** Ball position at (nearest track point to) the hit; null if the ball was not seen within the window. */
-  ball: { x: number; y: number } | null;
+  /** Ball position at the detected direction-change — always present; a hit is only ever reported where the ball was seen. */
+  ball: { x: number; y: number };
   /** Track label of the player most plausibly at the ball; null if nobody was close. */
   playerId: string | null;
   /** Feet position (bottom-center of the box) of that player at the hit, image-normalized. */
   playerFeet: { x: number; y: number } | null;
   /** Wrist-above-shoulder at the hit (from pose, when available) — an overhead cue. */
   overhead: boolean | null;
-  /** 0-1: ball seen + direction change + player nearby all agree. */
+  /** 0-1: how sharp the turn was + whether a player was nearby. */
   confidence: number;
-  source: "audio+ball" | "audio-only" | "ball-only";
 }
 
 export interface BallTrackStats {
@@ -174,7 +183,8 @@ export function sliceTrack(points: BallTrackPoint[], startS: number, endS: numbe
 //      court, where perspective shrinks a bounce to a few pixels and the
 //      ball's travel away from the camera can hide the y-maximum entirely.
 // A paddle strike produces both signatures too, so anything within
-// BOUNCE_CONTACT_EXCLUSION_S of an audio contact is a hit, not a bounce.
+// BOUNCE_CONTACT_EXCLUSION_S of a detected hit (see detectHits) is a hit,
+// not a bounce.
 const BOUNCE_MIN_PROMINENCE = 0.006;
 const BOUNCE_WINDOW = 5;
 const KINK_WINDOW = 3; // frames each side for the velocity estimate
@@ -224,8 +234,20 @@ export function detectBounces(points: BallTrackPoint[], contactsS: number[] = []
   return out;
 }
 
-const HIT_WINDOW_S = 0.18; // how far a ball direction change may sit from the audio onset
+const HIT_TURN_WINDOW = 2; // frames each side used to measure the direction change at a point
 const HIT_TURN_MIN_DEG = 25; // direction change that counts as a strike
+const HIT_MIN_SPACING_S = 0.25; // two real strikes are never closer together than this
+// A real strike reverses a ball that was already travelling with some
+// pace; scanning the whole track for ANY sharp angle (rather than only
+// checking near an already-known audio contact, like this used to) means
+// ordinary tracking jitter on a slow or barely-moving ball reads as a
+// "sharp turn" too -- small position noise produces a huge relative angle
+// change when the ball barely moved. Requiring real speed on both legs
+// of the turn is what audio's precise timing anchor used to do for free.
+// Normalized image-units/second; unvalidated against hand-labeled shot
+// times (none exist yet) -- tune against real footage the same way every
+// other threshold in this file was.
+const HIT_MIN_LEG_SPEED = 0.35;
 const PLAYER_REACH = 0.16; // normalized image distance a player can plausibly reach from box center (scaled by box height)
 
 function directionChangeDeg(points: BallTrackPoint[], i: number, span: number): number {
@@ -238,6 +260,11 @@ function directionChangeDeg(points: BallTrackPoint[], i: number, span: number): 
   if (n1 < 1e-5 || n2 < 1e-5) return 0;
   const cos = Math.max(-1, Math.min(1, (v1x * v2x + v1y * v2y) / (n1 * n2)));
   return (Math.acos(cos) * 180) / Math.PI;
+}
+
+function legSpeed(a: BallTrackPoint, b: BallTrackPoint): number {
+  const dt = Math.max(1e-3, Math.abs(b.t - a.t));
+  return Math.hypot(b.x - a.x, b.y - a.y) / dt;
 }
 
 function playerAt(track: PlayerTrack, t: number) {
@@ -255,74 +282,67 @@ function playerAt(track: PlayerTrack, t: number) {
 }
 
 /**
- * Hits: for every audio contact, look for a sharp direction change of the
- * ball within ±HIT_WINDOW_S; take the ball position there and the nearest
- * player. A contact with no ball in view still yields a hit (audio is the
- * more reliable "when"), attributed by whichever player was nearest the
- * ball's last known position — at lower confidence.
+ * Hits: scan the ball track itself for a sharp direction change — a paddle
+ * strike, or the ball bouncing off a wall/frame in a way that also turns
+ * it sharply (bounces are filtered separately downstream by proximity to
+ * the court plane; this function only reports "the ball's path bent
+ * here"). No external "when" signal (audio) is used or needed — a real
+ * strike is exactly the kind of event a tracked trajectory should show
+ * directly. This also means: no ball seen turning sharply, no hit
+ * reported, ever — there is no lower-confidence fallback for "we're
+ * pretty sure a shot happened here but lost the ball". A rally where the
+ * ball wasn't tracked well will simply come back with fewer shots; see
+ * BallTrackStats.coverage for how much of the rally the ball was actually
+ * visible for.
  */
 export function detectHits(
   points: BallTrackPoint[],
-  contactsS: number[],
   playerTracks: PlayerTrack[],
   overheadAt?: (playerId: string, t: number) => boolean | null
 ): BallHit[] {
   const hits: BallHit[] = [];
-  for (const tc of contactsS) {
-    // candidate ball point: biggest direction change within the window, else nearest in time
-    let bestIdx = -1;
-    let bestTurn = 0;
-    let nearestIdx = -1;
-    let nearestDt = Infinity;
-    for (let i = 0; i < points.length; i++) {
-      const dt = Math.abs(points[i].t - tc);
-      if (dt < nearestDt) {
-        nearestDt = dt;
-        nearestIdx = i;
-      }
-      if (dt > HIT_WINDOW_S) continue;
-      const turn = directionChangeDeg(points, i, 2);
-      if (turn > bestTurn) {
-        bestTurn = turn;
-        bestIdx = i;
-      }
-    }
-    const ballIdx = bestTurn >= HIT_TURN_MIN_DEG ? bestIdx : nearestDt <= HIT_WINDOW_S ? nearestIdx : -1;
-    const ball = ballIdx >= 0 ? { x: points[ballIdx].x, y: points[ballIdx].y } : null;
+  for (let i = HIT_TURN_WINDOW; i < points.length - HIT_TURN_WINDOW; i++) {
+    const p = points[i];
+    if (p.interpolated) continue;
+    if (hits.length && p.t - hits[hits.length - 1].t < HIT_MIN_SPACING_S) continue;
+    const before = points[Math.max(0, i - HIT_TURN_WINDOW)];
+    const after = points[Math.min(points.length - 1, i + HIT_TURN_WINDOW)];
+    if (legSpeed(before, p) < HIT_MIN_LEG_SPEED || legSpeed(p, after) < HIT_MIN_LEG_SPEED) continue;
+    const turn = directionChangeDeg(points, i, HIT_TURN_WINDOW);
+    if (turn < HIT_TURN_MIN_DEG) continue;
 
-    // nearest player to the ball (or, without a ball, nobody)
+    const ball = { x: p.x, y: p.y };
+
+    // nearest player to the ball
     let playerId: string | null = null;
     let playerFeet: { x: number; y: number } | null = null;
     let playerDist = Infinity;
-    if (ball) {
-      for (const tr of playerTracks) {
-        const p = playerAt(tr, tc);
-        if (!p) continue;
-        const b = p.boxImageNorm;
-        const cx = b.x + b.width / 2;
-        const cy = b.y + b.height / 2;
-        const reach = Math.max(PLAYER_REACH * 0.6, b.height * 0.9);
-        const dist = Math.hypot((ball.x - cx) / Math.max(0.02, b.width * 1.6), (ball.y - cy) / Math.max(0.02, b.height * 0.9));
-        if (dist < playerDist && Math.hypot(ball.x - cx, ball.y - cy) <= reach) {
-          playerDist = dist;
-          playerId = tr.playerId;
-          playerFeet = { x: cx, y: b.y + b.height };
-        }
+    for (const tr of playerTracks) {
+      const pl = playerAt(tr, p.t);
+      if (!pl) continue;
+      const b = pl.boxImageNorm;
+      const cx = b.x + b.width / 2;
+      const cy = b.y + b.height / 2;
+      const reach = Math.max(PLAYER_REACH * 0.6, b.height * 0.9);
+      const dist = Math.hypot((ball.x - cx) / Math.max(0.02, b.width * 1.6), (ball.y - cy) / Math.max(0.02, b.height * 0.9));
+      if (dist < playerDist && Math.hypot(ball.x - cx, ball.y - cy) <= reach) {
+        playerDist = dist;
+        playerId = tr.playerId;
+        playerFeet = { x: cx, y: b.y + b.height };
       }
     }
 
-    const sawTurn = bestTurn >= HIT_TURN_MIN_DEG;
-    const confidence = ball
-      ? Math.min(0.95, 0.45 + (sawTurn ? 0.25 : 0) + (playerId ? 0.2 : 0) + Math.min(0.1, (points[ballIdx]?.conf ?? 0) * 0.1))
-      : 0.3;
+    const confidence = Math.min(
+      0.95,
+      0.5 + Math.min(0.25, (turn - HIT_TURN_MIN_DEG) / 100) + (playerId ? 0.2 : 0) + Math.min(0.1, p.conf * 0.1)
+    );
     hits.push({
-      t: tc,
+      t: p.t,
       ball,
       playerId,
       playerFeet,
-      overhead: playerId && overheadAt ? overheadAt(playerId, tc) : null,
+      overhead: playerId && overheadAt ? overheadAt(playerId, p.t) : null,
       confidence: Math.round(confidence * 100) / 100,
-      source: ball ? "audio+ball" : "audio-only",
     });
   }
   return hits;

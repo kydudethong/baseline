@@ -108,10 +108,10 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       {
         analysis_id: analysisId,
         model: null,
-        headline: "Not enough audio-contact data to build a coaching read",
+        headline: "Not enough movement data to build a coaching read",
         summary:
-          "No rally could be segmented from this clip's audio — either too few paddle contacts were " +
-          "detected, or they weren't clustered closely enough to look like real rallies.",
+          "No rally could be segmented from this clip's player movement — either the players weren't " +
+          "moving enough to look like real points, or too little of the clip could be tracked.",
         quality: { usable: false, issues: facts.known_limitations },
         coaching_json: null,
         facts_json: JSON.stringify(facts),

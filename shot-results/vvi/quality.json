@@ -1,0 +1,326 @@
+{
+  "quality": {
+    "videoDurationSeconds": 445.725011,
+    "visionFps": 5,
+    "framesSampled": 2229,
+    "courtCalibrationConfidence": 0.595,
+    "playersDetectedPerFrame": {
+      "min": 1,
+      "max": 6,
+      "mean": 3.24
+    },
+    "tracksProduced": 28,
+    "tracksWithStableId": 2,
+    "poseFramesAttempted": 2229,
+    "poseFramesSucceeded": 2181,
+    "shotEventCount": 271,
+    "ballCoverage": 0.735,
+    "shotsClassified": 170,
+    "knownLimitations": []
+  },
+  "ball": {
+    "framesProcessed": 6001,
+    "pointsDetected": 4410,
+    "pointsInterpolated": 5284,
+    "coverage": 0.735
+  },
+  "diagnostics": {
+    "modelSource": "roboflow-hosted:pickleball-detection-1sjz9/12",
+    "confidenceThreshold": 0.25,
+    "windows": [
+      [
+        0,
+        18.45
+      ],
+      [
+        18.45,
+        23.2
+      ],
+      [
+        27.2,
+        32.7
+      ],
+      [
+        32.7,
+        37.2
+      ],
+      [
+        37.2,
+        47.45
+      ],
+      [
+        47.45,
+        51.2
+      ],
+      [
+        54.7,
+        59.45
+      ],
+      [
+        59.45,
+        75.7
+      ],
+      [
+        75.7,
+        82.7
+      ],
+      [
+        83.7,
+        90.2
+      ],
+      [
+        91.7,
+        97.2
+      ],
+      [
+        97.7,
+        106.7
+      ],
+      [
+        107.2,
+        114.2
+      ],
+      [
+        114.2,
+        121.2
+      ],
+      [
+        123.2,
+        129.2
+      ],
+      [
+        137.2,
+        142.7
+      ],
+      [
+        142.7,
+        152.2
+      ],
+      [
+        152.2,
+        160.7
+      ],
+      [
+        160.7,
+        167.2
+      ],
+      [
+        168.7,
+        172.7
+      ],
+      [
+        172.7,
+        175.2
+      ],
+      [
+        175.2,
+        184.7
+      ],
+      [
+        185.7,
+        192.95
+      ],
+      [
+        192.95,
+        198.45
+      ],
+      [
+        198.45,
+        201.45
+      ],
+      [
+        201.45,
+        210.45
+      ],
+      [
+        210.45,
+        212.45
+      ],
+      [
+        212.45,
+        221.95
+      ],
+      [
+        221.95,
+        225.2
+      ],
+      [
+        225.2,
+        229.7
+      ],
+      [
+        229.7,
+        234.7
+      ],
+      [
+        234.7,
+        251.95
+      ],
+      [
+        251.95,
+        257.2
+      ],
+      [
+        257.2,
+        266.45
+      ],
+      [
+        266.45,
+        272.45
+      ],
+      [
+        272.45,
+        279.95
+      ],
+      [
+        279.95,
+        282.45
+      ],
+      [
+        282.45,
+        284.45
+      ],
+      [
+        284.45,
+        292.2
+      ],
+      [
+        296.7,
+        301.2
+      ],
+      [
+        301.2,
+        314.2
+      ],
+      [
+        315.2,
+        321.45
+      ],
+      [
+        321.45,
+        325.95
+      ],
+      [
+        325.95,
+        329.95
+      ],
+      [
+        329.95,
+        332.7
+      ],
+      [
+        332.7,
+        338.45
+      ],
+      [
+        338.45,
+        344.7
+      ],
+      [
+        354.2,
+        360.2
+      ],
+      [
+        360.2,
+        367.7
+      ],
+      [
+        367.7,
+        373.2
+      ],
+      [
+        378.7,
+        384.2
+      ],
+      [
+        388.7,
+        392.95
+      ],
+      [
+        392.95,
+        405.45
+      ],
+      [
+        405.45,
+        411.45
+      ],
+      [
+        411.45,
+        420.45
+      ],
+      [
+        420.45,
+        425.7
+      ],
+      [
+        425.7,
+        428.2
+      ],
+      [
+        428.2,
+        439.45
+      ],
+      [
+        439.45,
+        445.725011
+      ]
+    ],
+    "frameStep": 2,
+    "framesWithBall": 5457,
+    "ballHitRate": 0.909,
+    "failedFrames": 0,
+    "elapsedSeconds": 669.5
+  },
+  "calibration": {
+    "method": "classical-cv-hsv-contour",
+    "confidence": 0.595,
+    "cornersImagePx": {
+      "topLeft": [
+        1049,
+        589
+      ],
+      "topRight": [
+        1263,
+        660
+      ],
+      "bottomLeft": [
+        735,
+        719
+      ],
+      "bottomRight": [
+        1242,
+        719
+      ]
+    },
+    "quadKind": "near-inplay",
+    "frameTimestampSeconds": 378.8,
+    "diagnostics": {
+      "frameSize": [
+        1280,
+        720
+      ],
+      "attempts": {
+        "fixedBands": {
+          "areaFraction": 0.0324,
+          "solidity": 0.7441,
+          "approxEpsilonUsed": 0.015,
+          "cornerMethod": "polygon",
+          "reason": "not a baseline-view trapezoid (top/bottom width ratio 4.61)"
+        },
+        "autoDominantColor": {
+          "areaFraction": 0.0443,
+          "solidity": 0.9142,
+          "approxEpsilonUsed": 0.03,
+          "cornerMethod": "polygon",
+          "confidence": 0.595,
+          "kitchenAreaFraction": 0.615,
+          "sameColorAboveFraction": 0.313,
+          "quadKind": "near-inplay",
+          "peakHueDegrees": 244
+        }
+      },
+      "source": "autoDominantColor",
+      "quadKind": "near-inplay"
+    }
+  }
+}

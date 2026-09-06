@@ -1,0 +1,94 @@
+{
+  "quality": {
+    "videoDurationSeconds": 138.4,
+    "visionFps": 5,
+    "framesSampled": 692,
+    "courtCalibrationConfidence": 0.724,
+    "playersDetectedPerFrame": {
+      "min": 2,
+      "max": 7,
+      "mean": 4.24
+    },
+    "tracksProduced": 4,
+    "tracksWithStableId": 4,
+    "poseFramesAttempted": 692,
+    "poseFramesSucceeded": 687,
+    "shotEventCount": 58,
+    "ballCoverage": 0.544,
+    "shotsClassified": 43,
+    "knownLimitations": []
+  },
+  "ball": {
+    "framesProcessed": 2077,
+    "pointsDetected": 1129,
+    "pointsInterpolated": 2907,
+    "coverage": 0.544
+  },
+  "diagnostics": {
+    "modelSource": "roboflow-hosted:pickleball-detection-1sjz9/12",
+    "confidenceThreshold": 0.25,
+    "windows": [
+      [
+        0,
+        99.7
+      ],
+      [
+        99.7,
+        114.2
+      ],
+      [
+        114.2,
+        138.4
+      ]
+    ],
+    "frameStep": 4,
+    "framesWithBall": 1318,
+    "ballHitRate": 0.635,
+    "failedFrames": 4,
+    "elapsedSeconds": 318.9
+  },
+  "calibration": {
+    "method": "classical-cv-hsv-contour",
+    "confidence": 0.724,
+    "cornersImagePx": {
+      "topLeft": [
+        589,
+        426
+      ],
+      "topRight": [
+        999,
+        484
+      ],
+      "bottomLeft": [
+        324,
+        465
+      ],
+      "bottomRight": [
+        938,
+        610
+      ]
+    },
+    "quadKind": "near-inplay",
+    "frameTimestampSeconds": 131.4,
+    "diagnostics": {
+      "frameSize": [
+        1280,
+        720
+      ],
+      "attempts": {
+        "fixedBands": {
+          "areaFraction": 0.0614,
+          "solidity": 0.8464,
+          "approxEpsilonUsed": 0.015,
+          "cornerMethod": "polygon",
+          "confidence": 0.724,
+          "kitchenAreaFraction": 1.087,
+          "sameColorAboveFraction": 0.023,
+          "quadKind": "near-inplay"
+        }
+      },
+      "source": "fixedBands",
+      "quadKind": "near-inplay"
+    }
+  }
+}

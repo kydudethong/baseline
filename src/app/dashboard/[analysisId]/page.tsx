@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
+import { getSignedDownloadUrl } from "@/lib/storage/r2";
 import { getAnalysisForUser, type AnalysisWithVideo } from "@/lib/db/analyses";
 import { getPhase2Data } from "@/lib/db/vision";
 import { getProfile } from "@/lib/db/profiles";
@@ -126,8 +127,7 @@ async function AnalysisBreakdown({
   const video = analysis.video;
   let videoUrl: string | null = null;
   if (video) {
-    const { data } = await supabase.storage.from(video.storage_bucket).createSignedUrl(video.storage_path, 3600);
-    videoUrl = data?.signedUrl ?? null;
+    videoUrl = await getSignedDownloadUrl(video.storage_path).catch(() => null);
   }
 
   const rallies: RallyMark[] = coachingData.rallies.map((r) => ({
@@ -304,7 +304,7 @@ async function AnalysisBreakdown({
               </tbody>
             </table>
           ) : (
-            <p className="sm">No rallies were detected from the audio for this clip.</p>
+            <p className="sm">No rallies were detected from player movement for this clip.</p>
           )}
         </div>
       ) : null}

@@ -11,9 +11,9 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
-import { detectBounces, detectHits, sliceTrack, type BallTrackPoint } from "../src/lib/vision/ball";
+import { detectBounces, detectHits, sliceTrack, type BallHit, type BallTrackPoint } from "../src/lib/vision/ball";
 import { classifyRally, courtFrameFor, type Shot } from "../src/lib/vision/shots";
-import { clusterRalliesWithContacts } from "../src/lib/vision/rallies";
+import { clusterRalliesFromHits, HIT_CLUSTER_PARAMS } from "../src/lib/vision/rallies";
 import type { CourtCalibration, PlayerTrack } from "../src/lib/vision/phase2-types";
 
 async function main() {
@@ -28,9 +28,25 @@ async function main() {
     frameHeightPx: number;
     contacts: number[];
     points: BallTrackPoint[];
+    durationSeconds?: number;
   };
   const tracks = JSON.parse(await fs.readFile(path.join(dir, "tracks.json"), "utf8")) as PlayerTrack[];
-  const rallies = clusterRalliesWithContacts(ball.contacts);
+  // Older ball.json dumps (from before rallies moved to motion) have no
+  // durationSeconds — fall back to the latest timestamp seen anywhere.
+  const durationSeconds =
+    ball.durationSeconds ??
+    Math.max(
+      0,
+      ...tracks.flatMap((t) => t.points.map((p) => p.timestampSeconds)),
+      ...ball.contacts,
+      ...ball.points.map((p) => p.t)
+    ) + 5;
+  // Rally boundaries come from ball hits, not player motion (see
+  // clusterRalliesFromHits, rallies.ts) -- rescan the cached ball track
+  // for hits rather than trusting ball.contacts, which on an old dump may
+  // predate this tuning loop's current detectHits constants.
+  const allHitsWide = detectHits(ball.points, tracks);
+  const rallies = clusterRalliesFromHits(allHitsWide.map((h) => h.t), durationSeconds, HIT_CLUSTER_PARAMS);
   const ctx = {
     calibration: ball.calibration,
     frame: courtFrameFor(ball.calibration.quadKind),
@@ -39,11 +55,13 @@ async function main() {
     playerTracks: tracks,
   };
   const shots: Shot[] = [];
+  const hitsByRally = new Map<number, BallHit[]>();
   let bounceCount = 0;
   for (const r of rallies) {
     const pts = sliceTrack(ball.points, r.startS - 0.3, r.endS + 0.3);
-    const hits = detectHits(pts, r.contacts, tracks);
-    const bounces = detectBounces(pts, r.contacts);
+    const hits = detectHits(pts, tracks);
+    const bounces = detectBounces(pts, hits.map((h) => h.t));
+    hitsByRally.set(r.idx, hits);
     bounceCount += bounces.length;
     shots.push(...classifyRally({ rallyIdx: r.idx, startS: r.startS, endS: r.endS, hits, bounces, ballPoints: pts }, ctx));
   }
@@ -72,6 +90,16 @@ async function main() {
   for (const s of shots) counts[s.type] = (counts[s.type] ?? 0) + 1;
   console.log(`${rallies.length} rallies · ${shots.length} shots · ${bounceCount} bounces · frame=${ctx.frame.kind}`);
   console.log(counts);
+
+  // Actual boundaries -- this is what you check against the real video to
+  // judge whether HIT_CLUSTER_PARAMS (src/lib/vision/rallies.ts) needs
+  // adjusting: seek the source clip to each mm:ss and see whether that's
+  // really where the point started/ended.
+  const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  console.log("\nrally boundaries:");
+  for (const r of rallies) {
+    console.log(`  #${r.idx}  ${mmss(r.startS)} -> ${mmss(r.endS)}  (${(r.endS - r.startS).toFixed(1)}s, ${(hitsByRally.get(r.idx) ?? []).length} ball-detected contacts)`);
+  }
   console.log(`landing known: ${shots.filter((s) => s.landingZone !== "unknown").length} · hit zone known: ${shots.filter((s) => s.hitZone !== "unknown").length} · with speed: ${shots.filter((s) => s.speedMpsApprox !== null).length}`);
 }
 

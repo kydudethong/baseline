@@ -411,7 +411,6 @@ export function classifyRally(input: RallyShotInput, ctx: ClassifyContext): Shot
         underPressure,
         sideConflict,
         farLanding,
-        hitSource: hit.source,
         overhead: hit.overhead,
         landingT: landing ? Math.round(landing.t * 100) / 100 : null,
       },

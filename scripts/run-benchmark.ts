@@ -1,9 +1,13 @@
 /**
  * Standalone benchmark harness — NOT part of the Next.js app. Runs the real
- * Phase 2 CV pipeline (court detection, tracking, pose, movement, audio
- * events) against the actual benchmark video and dumps results to disk for
- * inspection, without touching Supabase (this dev sandbox has no network
- * path to supabase.co — see the deliverables report).
+ * Phase 2 CV pipeline (court detection, tracking, pose, movement) against
+ * the actual benchmark video and dumps results to disk for inspection,
+ * without touching Supabase (this dev sandbox has no network path to
+ * supabase.co — see the deliverables report). No ball model is run here,
+ * so unlike the real pipeline this harness can't produce unknown_shot
+ * events — those come from the ball track's own direction changes (see
+ * ball.ts's detectHits), not audio, and there's no ball track without a
+ * ball detector run. Use scripts/run-shots.ts for that.
  *
  * Player detection stand-in: this environment also has no network path to
  * roboflow.com, so detectPlayers() here is NOT RoboflowPhase2VisionProvider
@@ -25,8 +29,8 @@ import { estimatePoseViaPython } from "../src/lib/vision/cv-scripts";
 import { detectCourt } from "../src/lib/vision/court";
 import { trackPlayersByIoU } from "../src/lib/vision/tracker";
 import { analyzeMovement } from "../src/lib/vision/movement";
-import { detectUnknownShotEvents, detectFootworkFoundation } from "../src/lib/vision/events";
-import type { FrameDetectionSet, PlayerPoseFrame } from "../src/lib/vision/phase2-types";
+import { detectFootworkFoundation } from "../src/lib/vision/events";
+import type { AnalysisEvent, FrameDetectionSet, PlayerPoseFrame } from "../src/lib/vision/phase2-types";
 
 const execFileAsync = promisify(execFile);
 
@@ -168,12 +172,10 @@ async function main() {
     console.log(`  ${f.playerId}: lateralRange=${f.lateralRangeCourtUnits?.toFixed(3)}, possibleSplitSteps=${f.possibleSplitSteps.length}`);
   }
 
-  console.log("\nDetecting unknown_shot events (audio onset) ...");
-  const { events: shotEvents, diagnostics: audioDiag } = await detectUnknownShotEvents(VIDEO_PATH);
-  console.log("  audio diagnostics:", audioDiag);
-  console.log(`  ${shotEvents.length} unknown_shot events`);
-
-  const allEvents = [...shotEvents];
+  // No ball model runs in this harness, so no unknown_shot events either —
+  // see the header comment above.
+  console.log("\nunknown_shot events: skipped (no ball detector in this harness)");
+  const allEvents: AnalysisEvent[] = [];
   for (const f of footwork) {
     for (const c of f.possibleSplitSteps) {
       allEvents.push({ type: "possible_split_step", timestampSeconds: c.timestampSeconds, playerId: f.playerId, confidence: c.confidence, source: "movement-heuristic" });
@@ -193,7 +195,7 @@ async function main() {
     },
     tracksProduced: tracks.length,
     poseFramesLinked: poses.length,
-    audioEventCount: shotEvents.length,
+    shotEventCount: 0,
   };
 
   await fs.mkdir(OUT_DIR, { recursive: true });

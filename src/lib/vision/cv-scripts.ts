@@ -10,7 +10,11 @@ const POSE_MODEL_PATH = path.join(process.cwd(), "models", "yolov8n-pose.pt");
 
 export class PythonCvError extends Error {}
 
-async function runPython(scriptName: string, args: string[], opts: { maxBuffer?: number; streamStderr?: boolean } = {}): Promise<string> {
+async function runPython(
+  scriptName: string,
+  args: string[],
+  opts: { maxBuffer?: number; streamStderr?: boolean; stdin?: string } = {}
+): Promise<string> {
   const scriptPath = path.join(SCRIPTS_DIR, scriptName);
   try {
     const child = execFileAsync("python3", [scriptPath, ...args], {
@@ -19,6 +23,12 @@ async function runPython(scriptName: string, args: string[], opts: { maxBuffer?:
     // Long-running scripts report progress on stderr; forward it live so a
     // ten-minute ball pass doesn't look like a hang.
     if (opts.streamStderr) child.child.stderr?.on("data", (chunk: Buffer) => process.stderr.write(chunk));
+    // Large batched payloads go over stdin, not argv -- an argv string is
+    // capped by the OS (ARG_MAX, ~256KB-1MB depending on platform), which a
+    // clip with thousands of frames' worth of player boxes could exceed.
+    if (opts.stdin !== undefined) {
+      child.child.stdin?.end(opts.stdin);
+    }
     const { stdout } = await child;
     return stdout;
   } catch (err) {
@@ -64,13 +74,34 @@ export interface RawAppearanceSignature {
  * whole vision pipeline, since appearance signatures are an enhancement to
  * tracking, not a dependency of it.
  */
+export interface AppearanceSignatureRequest {
+  imagePath: string;
+  boxes: Array<{ x: number; y: number; width: number; height: number }>;
+}
+
+/**
+ * Batched across every frame in ONE Python process, mirroring
+ * estimatePoseViaPython below -- this is classical CV (numpy/cv2 mean-HSV,
+ * no model), so calling it once per frame was mostly paying Python
+ * interpreter + import startup over and over rather than real work. One
+ * process for the whole clip removes that repeated cost.
+ */
 export async function computeAppearanceSignaturesViaPython(
-  imagePath: string,
-  boxes: Array<{ x: number; y: number; width: number; height: number }>
-): Promise<Array<RawAppearanceSignature | null>> {
-  if (boxes.length === 0) return [];
-  const stdout = await runPython("appearance_signature.py", [imagePath, JSON.stringify(boxes)]);
-  return JSON.parse(stdout) as Array<RawAppearanceSignature | null>;
+  requests: AppearanceSignatureRequest[]
+): Promise<Map<string, Array<RawAppearanceSignature | null>>> {
+  const withBoxes = requests.filter((r) => r.boxes.length > 0);
+  if (withBoxes.length === 0) return new Map();
+  const stdout = await runPython("appearance_signature.py", [], {
+    stdin: JSON.stringify(withBoxes),
+    maxBuffer: 50 * 1024 * 1024,
+  });
+  const results = new Map<string, Array<RawAppearanceSignature | null>>();
+  for (const line of stdout.split("\n")) {
+    if (!line.trim()) continue;
+    const parsed = JSON.parse(line) as { imagePath: string; signatures: Array<RawAppearanceSignature | null> };
+    results.set(parsed.imagePath, parsed.signatures);
+  }
+  return results;
 }
 
 export interface RawPoseResult {
@@ -93,16 +124,6 @@ export async function estimatePoseViaPython(imagePaths: string[]): Promise<RawPo
     .split("\n")
     .filter((line) => line.trim().length > 0)
     .map((line) => JSON.parse(line) as RawPoseResult);
-}
-
-export interface RawAudioEvents {
-  events: Array<{ timestampSeconds: number; strength: number }>;
-  diagnostics: Record<string, unknown>;
-}
-
-export async function detectAudioEventsViaPython(videoPath: string): Promise<RawAudioEvents> {
-  const stdout = await runPython("audio_events.py", [videoPath]);
-  return JSON.parse(stdout) as RawAudioEvents;
 }
 
 export interface RawBallDetections {

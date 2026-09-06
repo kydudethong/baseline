@@ -259,7 +259,7 @@ export type AnalysisEventRow = {
   timestamp_s: number;
   player_label: string | null;
   confidence: number;
-  source: "audio-onset" | "movement-heuristic" | "mock";
+  source: "movement-heuristic" | "mock";
   created_at: string;
 };
 export type BallTrackRow = {

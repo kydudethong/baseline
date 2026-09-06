@@ -1,6 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
-  AnalysisEventRow,
   BallTrackRow,
   CourtCalibrationRow,
   Database,
@@ -13,27 +12,47 @@ import { analyzeMovement } from "./movement";
 import { detectFootworkFoundation } from "./events";
 import { buildBallTrack, detectBounces, detectHits, sliceTrack, type BallTrackPoint } from "./ball";
 import { classifyRally, courtFrameFor, type Shot } from "./shots";
-import { clusterRalliesWithContacts } from "./rallies";
+import { clusterRalliesFromHits, HIT_CLUSTER_PARAMS } from "./rallies";
 
 type Client = SupabaseClient<Database>;
+
+/** Fallback for when the stored video row has no duration_seconds (older
+ * rows, or a probe that failed) — derives an upper bound from the latest
+ * tracked timestamp and pads it slightly, same approach as facts.ts's
+ * estimateDurationSeconds. */
+function estimateDurationSeconds(tracks: PlayerTrack[]): number {
+  let maxT = 0;
+  for (const t of tracks) for (const p of t.points) maxT = Math.max(maxT, p.timestampSeconds);
+  return maxT > 0 ? maxT + 5 : 0;
+}
 
 /**
  * Everything that depends on the court calibration — movement metrics and
  * shot classification — can be rebuilt from what's already stored
- * (player tracks, the ball track, audio contacts) without touching the
- * video or any model. That is what makes a manual calibration fix cheap:
- * the user drags four corners, this reruns in a second or two, and the
- * numbers on the page are right.
+ * (player tracks, the ball track) without touching the video or any
+ * model. That is what makes a manual calibration fix cheap: the user
+ * drags four corners, this reruns in a second or two, and the numbers on
+ * the page are right.
+ *
+ * Rally windows, hits and bounces are all recomputed the same way a fresh
+ * pipeline run finds them — from the stored ball track alone (a hit is
+ * the evidence a rally is live; player movement no longer decides
+ * boundaries at all, see clusterRalliesFromHits in rallies.ts), no audio
+ * — so a manual calibration fix can't leave an analysis with boundaries
+ * or shots that disagree with what a rerun of the pipeline would
+ * produce. Hits/bounces are recomputed fresh from the stored ball track
+ * rather than reusing whatever unknown_shot events happen to be stored,
+ * which is strictly more correct (source data, not a stale derivative of
+ * it).
  */
 export async function recomputeFromStored(supabase: Client, analysisId: string): Promise<{ shots: number; movement: number }> {
-  const [calRes, tracksRes, ballRes, eventsRes, videoRes] = await Promise.all([
+  const [calRes, tracksRes, ballRes, videoRes] = await Promise.all([
     supabase.from("court_calibrations").select("*").eq("analysis_id", analysisId).maybeSingle(),
     supabase.from("player_tracks").select("*").eq("analysis_id", analysisId),
     supabase.from("ball_tracks").select("*").eq("analysis_id", analysisId).maybeSingle(),
-    supabase.from("analysis_events").select("*").eq("analysis_id", analysisId).eq("event_type", "unknown_shot"),
     supabase.from("videos").select("*").eq("analysis_id", analysisId).maybeSingle(),
   ]);
-  for (const r of [calRes, tracksRes, ballRes, eventsRes, videoRes]) if (r.error) throw r.error;
+  for (const r of [calRes, tracksRes, ballRes, videoRes]) if (r.error) throw r.error;
 
   const calRow = calRes.data as CourtCalibrationRow | null;
   const video = videoRes.data as VideoRow | null;
@@ -72,9 +91,8 @@ export async function recomputeFromStored(supabase: Client, analysisId: string):
 
   // analysis_shots
   const ball = ballRes.data as BallTrackRow | null;
-  const contacts = ((eventsRes.data ?? []) as AnalysisEventRow[]).map((e) => Number(e.timestamp_s)).sort((a, b) => a - b);
   const shots: Shot[] = [];
-  if (ball && contacts.length > 0) {
+  if (ball) {
     const points = (ball.points as BallTrackPoint[] | null) ?? [];
     // Points were stored post-tracking; rebuild nothing, just slice per rally.
     void buildBallTrack; // (kept importable for callers that store raw detections)
@@ -85,10 +103,16 @@ export async function recomputeFromStored(supabase: Client, analysisId: string):
       frameHeightPx: height,
       playerTracks: tracks,
     };
-    for (const r of clusterRalliesWithContacts(contacts)) {
+    const durationSeconds = video.duration_seconds ?? estimateDurationSeconds(tracks);
+    // Rally boundaries come from ball hits, not player motion (see
+    // clusterRalliesFromHits, rallies.ts) -- cheap to redo here since the
+    // whole stored ball track is already in memory, no new detector call.
+    const allHitsWide = detectHits(points, tracks);
+    const rallies = clusterRalliesFromHits(allHitsWide.map((h) => h.t), durationSeconds, HIT_CLUSTER_PARAMS);
+    for (const r of rallies) {
       const pts = sliceTrack(points, r.startS - 0.3, r.endS + 0.3);
-      const hits = detectHits(pts, r.contacts, tracks);
-      const bounces = detectBounces(pts, r.contacts);
+      const hits = detectHits(pts, tracks);
+      const bounces = detectBounces(pts, hits.map((h) => h.t));
       shots.push(...classifyRally({ rallyIdx: r.idx, startS: r.startS, endS: r.endS, hits, bounces, ballPoints: pts }, ctx));
     }
   }

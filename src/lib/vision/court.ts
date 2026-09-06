@@ -1,5 +1,6 @@
 import { detectCourtViaPython } from "./cv-scripts";
 import { computeHomography, applyHomography, type Homography } from "./homography";
+import { courtFrameFor } from "./shots";
 import type { BoundingBoxNorm, CourtCalibration } from "./phase2-types";
 
 export async function detectCourt(frame: { path: string; timestampSeconds: number }): Promise<CourtCalibration> {
@@ -61,5 +62,24 @@ export function transformToCourtCoordinates(
 
   const [cx, cy] = applyHomography(h, [feetXPx, feetYPx]);
   if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+
+  // Same numerically-soft-region guard shots.ts's toCourt() applies to
+  // shot-landing points: a planar homography is only trustworthy near the
+  // calibrated quad. A player standing well past the far baseline is far
+  // enough from the camera that a few pixels of ordinary detection jitter
+  // become feet (sometimes meters) of "movement" once translated through
+  // the perspective transform -- found via real tracking data where a
+  // few-pixel box wobble on a far-court player produced implied speeds of
+  // 15-30 m/s (unrunnable for a human). Reject those points outright
+  // rather than feeding fake motion into anything downstream (rally
+  // boundaries, distance-covered stats): a missing sample is honest, a
+  // fabricated one isn't.
+  const frame = courtFrameFor(calibration.quadKind);
+  const farBaselineY = frame.netY - frame.halfLength;
+  const nearBaselineY = frame.netY + frame.halfLength;
+  const maxY = nearBaselineY + 0.25 * frame.halfLength;
+  const minY = farBaselineY - 1.5 * frame.halfLength;
+  if (cx < -0.6 || cx > 1.6 || cy < minY || cy > maxY) return null;
+
   return { x: cx, y: cy };
 }

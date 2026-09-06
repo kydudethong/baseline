@@ -1,8 +1,9 @@
 /**
  * Standalone shot-classification harness — runs the real vision pipeline
- * (court, players, pose, audio contacts, BALL + SHOTS) on a local video and
- * writes the result to disk. No Supabase involved, so you can iterate on
- * the ball model and the classifier thresholds against one clip quickly.
+ * (court, players, pose, ball-movement contacts, BALL + SHOTS) on a local
+ * video and writes the result to disk. No Supabase involved, so you can
+ * iterate on the ball model and the classifier thresholds against one
+ * clip quickly.
  *
  * Needs the same env as the app (.env.local is loaded): VISION_PROVIDER=
  * roboflow + ROBOFLOW_API_KEY for players, BALL_MODEL_ID for the ball.
@@ -14,9 +15,9 @@
  *   <outDir>/labels.csv      one row per shot for you to hand-label
  *                            (fill the `truth` column, then run eval-shots.ts)
  *   <outDir>/quality.json    pipeline quality + known limitations
- *   <outDir>/ball.json       the ball track, audio contacts, rallies and
- *                            calibration — everything needed to re-run the
- *                            classifier offline while tuning it
+ *   <outDir>/ball.json       the ball track, ball-derived contacts, rallies
+ *                            and calibration — everything needed to re-run
+ *                            the classifier offline while tuning it
  *   <outDir>/tracks.json     player tracks
  */
 import fs from "node:fs/promises";
@@ -61,7 +62,22 @@ async function main() {
 
   const meta = await probe(videoPath);
   const framesDir = await fs.mkdtemp(path.join(os.tmpdir(), "baseline-frames-"));
-  await execFileAsync("ffmpeg", ["-y", "-i", videoPath, "-vf", `fps=${visionFps}`, "-q:v", "3", path.join(framesDir, "frame-%05d.jpg")]);
+  // Cap player/court-detection frames at 1280px long edge regardless of
+  // source resolution -- ball detection reads the source video directly
+  // (detect_ball.py) and is unaffected, so a 4K source still gives it full
+  // detail while this step uploads the same amount of data as a 720p clip
+  // would. See src/lib/video/ffmpeg.ts's extractFrames for the app path.
+  const maxDimension = Number(process.env.VISION_FRAME_MAX_DIMENSION ?? "1280");
+  await execFileAsync("ffmpeg", [
+    "-y",
+    "-i",
+    videoPath,
+    "-vf",
+    `fps=${visionFps},scale='min(${maxDimension},iw)':-2`,
+    "-q:v",
+    "3",
+    path.join(framesDir, "frame-%05d.jpg"),
+  ]);
   const files = (await fs.readdir(framesDir)).filter((f) => f.endsWith(".jpg")).sort();
   const frames = files.map((f, i) => ({ path: path.join(framesDir, f), timestampSeconds: i / visionFps }));
   console.log(`${frames.length} frames at ${visionFps} fps · ${meta.width}x${meta.height} · ${meta.durationSeconds.toFixed(1)}s`);
@@ -85,8 +101,18 @@ async function main() {
       calibration: result.courtCalibration,
       frameWidthPx: meta.width,
       frameHeightPx: meta.height,
+      // Rally windows come from player motion alone; these are the ball-
+      // track-derived contact timestamps (ball.ts's detectHits), kept for
+      // per-rally grouping and for reclassify-shots.ts/eval-rallies.ts.
       contacts: result.events.filter((e) => e.type === "unknown_shot").map((e) => e.timestampSeconds),
       points: result.ballTrack.points,
+      // Per-frame candidates before tracking -- lets buildBallTrack's gating
+      // constants be re-tuned offline later against real data instead of
+      // needing a fresh (paid) model run each time. See run-vision-pipeline.ts.
+      rawDetections: result.ballTrack.rawDetections,
+      // So reclassify-shots.ts can re-derive the same rally windows offline
+      // without re-probing the source video.
+      durationSeconds: meta.durationSeconds,
     })
   );
   await fs.writeFile(path.join(outDir, "tracks.json"), JSON.stringify(result.tracks));

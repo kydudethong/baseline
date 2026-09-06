@@ -1,0 +1,73 @@
+{
+  "quality": {
+    "videoDurationSeconds": 824.23873,
+    "visionFps": 5,
+    "framesSampled": 4121,
+    "courtCalibrationConfidence": 0.375,
+    "playersDetectedPerFrame": {
+      "min": 1,
+      "max": 7,
+      "mean": 3.29
+    },
+    "tracksProduced": 55,
+    "tracksWithStableId": 2,
+    "poseFramesAttempted": 4121,
+    "poseFramesSucceeded": 2855,
+    "audioEventCount": 377,
+    "ballCoverage": null,
+    "shotsClassified": 0,
+    "knownLimitations": [
+      "No ball detector configured (BALL_MODEL_ID) — shot types were not classified for this clip."
+    ]
+  },
+  "ball": null,
+  "diagnostics": {},
+  "calibration": {
+    "method": "classical-cv-hsv-contour",
+    "confidence": 0.375,
+    "cornersImagePx": {
+      "topLeft": [
+        971.0000610351562,
+        716.9998779296875
+      ],
+      "topRight": [
+        1919,
+        716.9998779296875
+      ],
+      "bottomLeft": [
+        971.0000610351562,
+        1078.9998779296875
+      ],
+      "bottomRight": [
+        1919,
+        1078.9998779296875
+      ]
+    },
+    "quadKind": "near-inplay",
+    "frameTimestampSeconds": 206,
+    "diagnostics": {
+      "frameSize": [
+        1920,
+        1080
+      ],
+      "attempts": {
+        "fixedBands": {
+          "reason": "no in-play surface component cleared the minimum area"
+        },
+        "autoDominantColor": {
+          "areaFraction": 0.1354,
+          "solidity": 0.9634,
+          "approxEpsilonUsed": 0.04,
+          "cornerMethod": "minAreaRect",
+          "confidence": 0.375,
+          "kitchenAreaFraction": 0.849,
+          "sameColorAboveFraction": 0,
+          "quadKind": "near-inplay",
+          "peakHueDegrees": 242
+        }
+      },
+      "source": "autoDominantColor",
+      "quadKind": "near-inplay"
+    }
+  }
+}
