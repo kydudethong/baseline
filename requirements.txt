@@ -1,0 +1,60 @@
+# Python side of the CV pipeline (scripts/cv/*.py).
+#
+# Versions here are the ones VERIFIED WORKING on Ky's laptop, not the newest.
+# Reproducing a known-good run matters more than being current: a silent minor
+# bump in ultralytics or opencv changes detection output, and "the model got
+# worse after a deploy" is a miserable thing to debug.
+ultralytics==8.3.155
+opencv-python-headless==4.11.0.86
+
+# Required, not optional: .env.local sets BALL_MODEL_ID with
+# BALL_INFERENCE=local, which makes detect_ball.py do
+# `from inference import get_model`. Drop this only if you switch to
+# BALL_MODEL_PATH (a local .pt), in which case ultralytics alone is enough.
+#
+# 1.0.5 is the version actually installed on the laptop that produced every
+# result so far. The package is up to 1.5.2 and warns about it on every run;
+# upgrading is a change to make deliberately, with a clip re-run to compare,
+# not silently as part of a deploy.
+inference==1.0.5
+
+# numpy is deliberately NOT pinned. torch, ultralytics and inference each
+# carry their own numpy range, and pinning a fourth opinion on top is how you
+# get an unresolvable dependency set. Let the resolver pick.
+
+# rally_seg (ml/) — automatic court fit and player detection for the setup
+# screen. Its other needs (numpy, opencv-headless, torch, torchvision,
+# ultralytics) are already satisfied above, so these two are the whole cost of
+# shipping it.
+#
+# These two are RANGES, unlike everything above, and that is deliberate. The
+# laptop venv runs Python 3.9 (scipy 1.13.1, PyYAML 6.0.3); this image runs
+# whatever python3 `node:22-slim` currently ships, which is several releases
+# newer. scipy did not publish cp313 wheels until 1.14.1, so pinning the
+# laptop's 1.13.1 here would send pip off to build scipy from source against
+# a missing Fortran toolchain and fail the deploy. rally_seg's own
+# requirements-core.txt asks for `scipy>=1.10` / `PyYAML>=6.0`; match that and
+# let the resolver pick a version with a wheel for the interpreter in the box.
+#
+# The reproducibility argument above still holds for the detection stack,
+# where a version bump changes model output. It does not hold here: scipy is
+# used for interpolation and signal helpers whose results do not drift between
+# minor releases.
+#
+# Without these the container still runs: setup-frame returns 503 and the user
+# marks the court and players by hand. That is a worse first upload, not a
+# broken one.
+scipy>=1.13
+PyYAML>=6.0
+
+# yt-dlp backs the "paste a link" box on /dashboard/new. Without it that
+# feature returns 503 in the container while working fine on the laptop, which
+# is exactly how it shipped the first time.
+#
+# DELIBERATELY UNPINNED, and this is the opposite call from the detection stack
+# above. Those are pinned because a version bump silently changes model output.
+# yt-dlp is pinned by nobody for the opposite reason: sites change their
+# players every few weeks and yt-dlp's whole value is keeping up. A pin here
+# does not reproduce a good run, it freezes a good run into a broken one a
+# month later. Rebuild the image to update it.
+yt-dlp

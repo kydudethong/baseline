@@ -1,0 +1,32 @@
+{
+  "rallies": [
+    {
+      "start_s": 0,
+      "end_s": 4
+    },
+    {
+      "start_s": 10,
+      "end_s": 17
+    },
+    {
+      "start_s": 27,
+      "end_s": 34
+    },
+    {
+      "start_s": 42,
+      "end_s": 51
+    },
+    {
+      "start_s": 58,
+      "end_s": 61
+    },
+    {
+      "start_s": 79,
+      "end_s": 84
+    },
+    {
+      "start_s": 89,
+      "end_s": 95
+    }
+  ]
+}

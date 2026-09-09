@@ -1,0 +1,13 @@
+# Core pipeline (CPU-only, works everywhere)
+numpy>=1.24
+opencv-python-headless>=4.8
+scipy>=1.10
+PyYAML>=6.0
+
+# Perception models. Install these once you have YOLO weights.
+# torch wheels differ per platform: see ml/README.md
+ultralytics>=8.3.0 ; extra == "yolo"
+torch>=2.2 ; extra == "yolo"
+
+# Temporal segmentation model training (optional)
+# torch>=2.2

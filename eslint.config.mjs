@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated: the compiled JS the vision integration harness builds.
+    ".vision-test-build/**",
+    // Scratch experiments moved out of the tree, kept only until deleted.
+    "_to_delete/**",
   ]),
 ]);
 

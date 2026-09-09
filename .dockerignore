@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.env*
+!.env.example
+_to_delete
+_to_delete_empty
+.vision-test-build
+benchmark-results
+ml-experiments
+shot-results
+public/rally-debug
+public/setup-frames
+*.log
+ball_debug_*.txt
+tracknet_result.json

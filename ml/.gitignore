@@ -1,0 +1,12 @@
+.rally_cache/
+runs/
+models/*.pt
+models/*.onnx
+assets/*.mp4
+assets/*.npz
+assets/_debug/
+*.debug.mp4
+*.features.npz
+__pycache__/
+*.pyc
+.rsvenv/

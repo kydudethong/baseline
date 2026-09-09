@@ -1,0 +1,40 @@
+# Starting point for a real match. Copy it, run `calibrate`, paste the result.
+#
+#   python -m rally_seg segment match.mp4 --config ml/configs/default.yaml --out rallies.json
+#
+# Every value here is a default from config.py restated for visibility; delete
+# anything you are not deliberately changing.
+
+video:
+  stride: 1          # every frame: a pickleball crosses the court in under a second
+  max_side: 1280     # perception resolution; detections map back to source pixels
+
+ball:
+  backend: yolo
+  weights: ml/models/ball_yolo.pt
+  conf: 0.15         # low on purpose: the tracker rejects false positives, a miss is gone forever
+  imgsz: 960
+  tiled: true        # essential at 1080p, see detect/ball.py
+  roi_tracking: true
+
+players:
+  backend: yolo
+  weights: yolov8n.pt
+  detect_every: 3
+
+court:
+  backend: classical
+  fit_samples: 24
+  # manual_points_path: ml/configs/my_court.json   # rescue hatch for odd angles
+
+state:
+  # The two knobs worth tuning first, in this order.
+  max_ball_gap_s: 1.1
+  start_threshold: 0.55
+  lead_s: 0.45
+  tail_s: 0.70
+
+segmenter:
+  kind: rule_based   # rule_based | temporal | ensemble
+
+cache_dir: ml/.rally_cache

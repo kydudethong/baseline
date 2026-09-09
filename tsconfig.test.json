@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "es2022",
+    "outDir": "./.vision-test-build",
+    "noEmit": false,
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowJs": false,
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "src/lib/vision/**/*.ts",
+    "src/lib/db/**/*.ts",
+    "src/lib/analysis/**/*.ts",
+    "src/lib/video/**/*.ts"
+  ]
+}

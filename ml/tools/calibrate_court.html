@@ -1,0 +1,119 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Court calibration</title>
+<style>
+  :root { color-scheme: light dark; --line:#3aa0ff; --pt:#ffd23a; --bg:#101216; --fg:#e9edf2; --mut:#98a2b3; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  header { padding:14px 18px; border-bottom:1px solid #232833; display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
+  h1 { font-size:15px; margin:0; font-weight:600; }
+  .hint { color:var(--mut); }
+  main { display:grid; grid-template-columns:1fr 320px; gap:0; height:calc(100vh - 56px); }
+  #stage { position:relative; overflow:auto; background:#0a0c10; display:grid; place-items:center; }
+  #wrap { position:relative; line-height:0; }
+  canvas { max-width:100%; cursor:crosshair; }
+  aside { border-left:1px solid #232833; padding:18px; overflow:auto; }
+  ol { padding-left:20px; margin:0 0 16px; }
+  li { margin:6px 0; }
+  li.done { color:var(--mut); text-decoration:line-through; }
+  button { font:inherit; padding:7px 12px; border-radius:7px; border:1px solid #333b4a; background:#1a1f29; color:var(--fg); cursor:pointer; }
+  button:hover { background:#222936; }
+  button:disabled { opacity:.45; cursor:default; }
+  pre { background:#0a0c10; border:1px solid #232833; border-radius:8px; padding:10px; overflow:auto; font-size:12px; }
+  .row { display:flex; gap:8px; margin:10px 0; flex-wrap:wrap; }
+  input[type=file] { color:var(--mut); }
+</style>
+<header>
+  <h1>Court calibration</h1>
+  <span class="hint">Click the four <b>outer corners</b> of the court, in the order listed. Click a placed point to drag it.</span>
+</header>
+<main>
+  <div id="stage"><div id="wrap"><canvas id="c" width="960" height="540"></canvas></div></div>
+  <aside>
+    <div class="row"><input type="file" id="file" accept="image/*"></div>
+    <ol id="steps">
+      <li data-i="0">Near-left corner <span class="hint">(baseline nearest the camera, left side)</span></li>
+      <li data-i="1">Near-right corner</li>
+      <li data-i="2">Far-right corner <span class="hint">(baseline furthest away)</span></li>
+      <li data-i="3">Far-left corner</li>
+    </ol>
+    <p class="hint" id="note">If the far baseline is hidden behind the net, click where the <b>net</b> meets each sideline instead and tick half-court below.</p>
+    <div class="row">
+      <label><input type="checkbox" id="half"> near half only (baseline&nbsp;→&nbsp;net)</label>
+    </div>
+    <div class="row">
+      <button id="undo" disabled>Undo</button>
+      <button id="clear" disabled>Clear</button>
+      <button id="save" disabled>Download JSON</button>
+    </div>
+    <pre id="out">Load a frame to begin.</pre>
+    <p class="hint">Save as <code>ml/configs/&lt;name&gt;_court.json</code>, then run with<br>
+      <code>--set court.manual_points_path=configs/&lt;name&gt;_court.json</code></p>
+  </aside>
+</main>
+<script>
+const cvs = document.getElementById('c'), ctx = cvs.getContext('2d');
+let img = null, pts = [], drag = -1;
+
+document.getElementById('file').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const im = new Image();
+  im.onload = () => { img = im; cvs.width = im.naturalWidth; cvs.height = im.naturalHeight; pts = []; draw(); };
+  im.src = URL.createObjectURL(f);
+};
+
+function toImageXY(ev) {
+  const r = cvs.getBoundingClientRect();
+  return [ (ev.clientX - r.left) * cvs.width / r.width, (ev.clientY - r.top) * cvs.height / r.height ];
+}
+
+cvs.onmousedown = ev => {
+  if (!img) return;
+  const [x, y] = toImageXY(ev);
+  const near = pts.findIndex(p => Math.hypot(p[0]-x, p[1]-y) < 14 * cvs.width / cvs.getBoundingClientRect().width);
+  if (near >= 0) { drag = near; return; }
+  if (pts.length < 4) { pts.push([x, y]); draw(); }
+};
+cvs.onmousemove = ev => { if (drag < 0) return; pts[drag] = toImageXY(ev); draw(); };
+window.onmouseup = () => { drag = -1; };
+
+document.getElementById('undo').onclick = () => { pts.pop(); draw(); };
+document.getElementById('clear').onclick = () => { pts = []; draw(); };
+document.getElementById('half').onchange = draw;
+document.getElementById('save').onclick = () => {
+  const blob = new Blob([json()], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'court.json'; a.click();
+};
+
+function json() {
+  return JSON.stringify({
+    corners_px: pts.map(p => [Math.round(p[0]*10)/10, Math.round(p[1]*10)/10]),
+    extent: document.getElementById('half').checked ? 'near_half' : 'full',
+    image_size: [cvs.width, cvs.height]
+  }, null, 2);
+}
+
+function draw() {
+  if (!img) return;
+  ctx.drawImage(img, 0, 0);
+  const s = cvs.width / 960;
+  if (pts.length > 1) {
+    ctx.strokeStyle = '#3aa0ff'; ctx.lineWidth = 2 * s; ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    if (pts.length === 4) ctx.closePath();
+    ctx.stroke();
+  }
+  pts.forEach((p, i) => {
+    ctx.fillStyle = '#ffd23a'; ctx.beginPath(); ctx.arc(p[0], p[1], 6*s, 0, 7); ctx.fill();
+    ctx.fillStyle = '#101216'; ctx.font = `${12*s}px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(i+1, p[0], p[1]);
+  });
+  document.querySelectorAll('#steps li').forEach(li => li.classList.toggle('done', +li.dataset.i < pts.length));
+  document.getElementById('undo').disabled = !pts.length;
+  document.getElementById('clear').disabled = !pts.length;
+  document.getElementById('save').disabled = pts.length !== 4;
+  document.getElementById('out').textContent = pts.length === 4 ? json()
+    : `${pts.length}/4 corners placed.`;
+}
+</script>

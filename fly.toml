@@ -1,0 +1,46 @@
+# Fly.io. Any host that runs a container works the same way (Railway, Render,
+# a VPS with docker compose); only this file is Fly-specific.
+app = "baseline-court"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3000"
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # A run continues on the Node event loop AFTER its HTTP response has gone
+  # back (see pipeline-v2.ts). Stopping the machine when traffic goes quiet
+  # would kill runs in flight, so this one stays up.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  # ONE machine, always. Fly creates a second for high availability unless you
+  # stop it, and a second machine is wrong for this app: a run lives in one
+  # process's memory, and the overlay and setup frames it writes land on that
+  # machine's disk. With two, requests round-robin, so roughly half the time
+  # the browser asks the machine that never rendered the video and gets a 404.
+  # --ha=false is what stops that, but ONLY where it applies: creating the app,
+  # and deploying an app that has been scaled to zero. A routine deploy of an
+  # app already running one Machine does not add a second, so the flag is not
+  # needed on every deploy — it was in the first instructions for this app
+  # because the first deploy is exactly the case where it does apply.
+  # `fly scale count 1` is the fix if a second one already exists.
+
+# No volume on purpose. The two things written to disk at runtime — the
+# annotated overlay (public/rally-debug) and the setup frames
+# (public/setup-frames) — are both regenerable: re-run the analysis and they
+# come back. They are served as static files out of public/, so moving them to
+# a volume elsewhere would 404 unless a route served them too. The real fix is
+# uploading them to R2, which src/lib/vision/debug-video-store.ts was written
+# to make a one-file change; until then, a redeploy costs you the overlays of
+# past runs and nothing else.
+
+[[vm]]
+  # Ultralytics on CPU wants memory more than cores: torch, ffmpeg and a
+  # decoded frame buffer are all resident at once and 2GB is not enough.
+  size = "performance-2x"   # 2 vCPU / 4GB

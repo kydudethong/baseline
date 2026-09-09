@@ -1,0 +1,14 @@
+# Half the frames, smaller frames, no tiling: roughly 4x faster and noticeably
+# less precise. For a first pass over a long match, or for checking that a video
+# is usable before committing to a full run.
+video:
+  stride: 2
+  max_side: 960
+ball:
+  tiled: false
+  imgsz: 768
+players:
+  detect_every: 5
+state:
+  # A coarser frame rate needs a little more slack before a gap reads as an end.
+  max_ball_gap_s: 1.4
