@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { Ball } from "@/components/motifs/Motifs";
+import Image from "next/image";
 
 export function Nav({ isAuthed }: { isAuthed: boolean }) {
   return (
-    <header className="topbar" style={{ position: "static", borderBottom: "1px solid var(--line)" }}>
+    <header className="topbar" style={{ position: "static", borderBottom: 0, background: "transparent", backdropFilter: "none", maxWidth: 1180, margin: "0 auto", width: "100%" }}>
       <Link href="/" className="logo">
-        <Ball size={24} />
+        <Image src="/brand/baseline-mark.png" alt="" width={494} height={420} style={{ height: 26, width: "auto" }} priority />
         <span className="wm">Baseline</span>
       </Link>
       <nav className="topnav" style={{ marginLeft: "var(--a6)", marginRight: "auto" }}>
@@ -23,7 +23,7 @@ export function Nav({ isAuthed }: { isAuthed: boolean }) {
               Log in
             </Link>
             <Link href="/signup" className="btn btn-optic btn-sm">
-              Sign up
+              Get started
             </Link>
           </>
         )}

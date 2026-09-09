@@ -44,11 +44,23 @@ export default function Player({
   posterUrl,
   rallies,
   durationS,
+  seekRequest,
+  onTime,
 }: {
   videoUrl: string;
   posterUrl?: string | null;
   rallies: RallyMark[];
   durationS: number;
+  /**
+   * A seek asked for from outside — selecting a rally or a shot.
+   *
+   * Carries a `nonce` as well as a time because selecting the SAME shot twice
+   * should seek twice: after watching past it, clicking it again means "take
+   * me back", and a plain number would compare equal and do nothing.
+   */
+  seekRequest?: { t: number; nonce: number } | null;
+  /** Playback position, so a parent can follow along without owning the video. */
+  onTime?: (t: number) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [time, setTime] = useState(0);
@@ -68,6 +80,13 @@ export default function Player({
     if (!video) return;
     video.currentTime = Math.max(0, Math.min(total, t));
   }, [total]);
+
+  // External seeks. Kept as an effect on the nonce rather than a ref handed
+  // upward, so the parent stays declarative and never holds the <video>.
+  useEffect(() => {
+    if (!seekRequest) return;
+    seek(seekRequest.t);
+  }, [seekRequest, seek]);
 
   const goToRally = useCallback((i: number) => {
     const clamped = Math.max(0, Math.min(rallies.length - 1, i));
@@ -119,7 +138,7 @@ export default function Player({
         preload="metadata"
         playsInline
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || durationS)}
-        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => { setTime(e.currentTarget.currentTime); onTime?.(e.currentTarget.currentTime); }}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onClick={togglePlay}

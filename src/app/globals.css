@@ -1,45 +1,90 @@
 @import "tailwindcss";
 
-/* Baseline — Daylight. A bright, professional ground: white paper with a
-   cool navy ink, a confident court blue as the working accent (links,
-   focus, progress, active states), and the ball's optic yellow-green
-   reserved for the few calls-to-action and the ball motif itself. Built
-   to read the same to a 3.0 and a pro: plain words next to precise
-   numbers, nothing decorative that isn't carrying information.
-   Tailwind is still imported for layout utilities, but every color,
-   radius and type decision lives in these hand-written component
-   classes — no Tailwind color utilities anywhere in src/, so a theme
-   change is a token change and nothing else.
+/* Baseline — Day Court. A light ground carrying a five-hue gradient system.
+   Off-white blue-grey page, white cards, hairline slate rules, near-black
+   ink, and a palette of five saturated hues that do the interesting work:
+   deep blue, rose, violet, green and burnt orange, each paired with a
+   brighter partner into a gradient.
 
-   Token roles: --ink is dark text on a light ground. --deep is the one
-   solid dark fill (navy) for chips that need light text on top regardless
-   of theme — primary buttons, active tabs, toasts — and --on-deep is the
-   text color that sits on it. --optic-ink is the dark text/graphic color
-   on top of optic-colored surfaces (the optic button, the ball's holes). */
+   This is a TOKEN SWAP, not a rewrite. Every colour, radius and type
+   decision in the app resolves through the variables below and no Tailwind
+   colour utility appears anywhere in src/, so restyling the whole product
+   is this block plus the handful of rules underneath that had baked in the
+   opposite ground. That was the point of building it this way.
+
+   THE FIVE HUES ARE NOT DECORATION — they are a validated categorical
+   palette. #2563EB #E11D48 #7C3AED #047857 #C2410C passes all six checks:
+   the lightness band, the chroma floor, adjacent-pair separation under
+   deuteranopia/protanopia/tritanopia, the normal-vision floor, and 3:1
+   against a white card. Do not add a sixth hue by picking something that
+   looks nice; re-run the validator, or fold the extra series into "other".
+   Assign them in fixed order and never cycle — colour follows the entity,
+   not its rank, so filtering a series must not repaint the survivors.
+
+   WHITE TEXT GOES ON THE DARK STOP ONLY. Each --g* gradient runs from a
+   deep stop (>= 4.5:1 with white) to a bright one (as low as 1.7:1). A
+   label placed on the bright end is unreadable, which is the flaw in most
+   gradient-card designs. .tile solves it structurally: a left-weighted
+   scrim over the fill, and a dark track behind the ring numeral. Keep text
+   in the tile's left half and it stays legible; move it right and it will
+   not.
+
+   Two surfaces stay dark on purpose. The video player and its controls are
+   white-on-black because footage and overlays need a dark surround, and the
+   scoreboard is dark because scoreboards are. Neither is an oversight.
+
+   Token roles: --ink is dark text on a light ground. --deep is the solid
+   accent fill for chips needing contrasting text on top — primary buttons,
+   active tabs, toasts — and --on-deep is the text colour that sits on it.
+   --optic is the ball's green, used for calls to action and the ball motif.
+   --blue-deep is the FOREGROUND on --blue-wash (chips, badges, the live
+   pill, the running stage row), so it is darker than the wash. It was
+   lighter under the dark theme: same role, opposite direction. */
 
 :root{
-  --paper:#F5F8FC; --card:#FFFFFF; --sunk:#EDF2F8; --deep:#0F1B2D; --on-deep:#FFFFFF;
-  --line:#DDE5EF; --line-strong:#BCC9DA;
-  --ink:#0F1B2D; --ink-2:#48596E; --ink-3:#7A8899;
-  --blue:#1E62D0; --blue-deep:#164A9E; --blue-bright:#4F8DF5; --blue-wash:#E8F0FC;
-  --court:#2F7DD9;
-  --optic:#CFE23A; --optic-deep:#A9BC1E; --optic-ink:#1B1E06;
-  --score-bg:#FFFFFF; --scoreboard-num:#164A9E;
-  --good:#128A57; --good-wash:#E2F5EA;
-  --warn:#B0731A; --warn-wash:#FCF1DC;
-  --bad:#C43E2D; --bad-wash:#FCE9E5;
-  --night:#0F1B2D;
+  color-scheme:light;
+  --paper:#EDF1F7; --card:#FFFFFF; --sunk:#F4F7FB; --deep:#16A34A; --on-deep:#FFFFFF;
+  --line:#E3E9F2; --line-strong:#CBD5E1;
+  --ink:#0F172A; --ink-2:#475569; --ink-3:#64748B;
+  --blue:#16A34A; --blue-deep:#15803D; --blue-bright:#22C55E; --blue-wash:#E7F8ED;
+  --court:#2563EB;
+  --optic:#22C55E; --optic-deep:#15803D; --optic-ink:#04210F;
 
-  --display:"Bricolage Grotesque","Archivo","Helvetica Neue",Arial,sans-serif;
-  --score:"Big Shoulders Display","Archivo Black",Impact,sans-serif;
-  --ui:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  /* The scoreboard stays dark. Its ink tokens are its own, because --ink-*
+     are tuned for the light ground and would vanish on it. */
+  --score-bg:#0F172A; --score-line:#1E293B; --score-ink:#94A3B8; --scoreboard-num:#4ADE80;
+
+  --good:#047857; --good-wash:#E7F8ED;
+  --warn:#B45309; --warn-wash:#FEF6E7;
+  --bad:#BE123C;  --bad-wash:#FEECEF;
+  --night:#0F172A;
+
+  /* Validated categorical series. Fixed order, never cycled. */
+  --c1:#2563EB; --c2:#E11D48; --c3:#7C3AED; --c4:#047857; --c5:#C2410C;
+  /* Each series hue's wash, for chips and area fills under a line. */
+  --c1-wash:#E8F0FE; --c2-wash:#FEECEF; --c3-wash:#F3EDFE; --c4-wash:#E7F8ED; --c5-wash:#FDEDE6;
+  /* Gradient tiles. Deep stop first — that is the half text may sit on. */
+  --g1:linear-gradient(135deg,#1D4ED8 0%,#22D3EE 100%);
+  --g2:linear-gradient(135deg,#BE123C 0%,#FB923C 100%);
+  --g3:linear-gradient(135deg,#6D28D9 0%,#C084FC 100%);
+  --g4:linear-gradient(135deg,#047857 0%,#34D399 100%);
+  --g5:linear-gradient(135deg,#C2410C 0%,#FBBF24 100%);
+
+  --display:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --score:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --ui:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   --data:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
 
   --a1:4px;--a2:8px;--a3:12px;--a4:16px;--a5:24px;--a6:32px;--a7:48px;--a8:72px;
   --r1:6px;--r2:10px;--r3:14px;--r4:20px;--rf:999px;
-  --lift:0 1px 2px rgba(15,27,45,.05), 0 8px 24px -14px rgba(15,27,45,.18);
-  --lift-2:0 2px 6px rgba(15,27,45,.08), 0 22px 48px -18px rgba(15,27,45,.28);
+  /* Paper shadows: soft, blue-tinted, close to the surface. The dark theme
+     needed near-black and deep to lift a card off the page; here that reads
+     as dirt. */
+  --lift:0 1px 2px rgba(15,23,42,.05), 0 6px 18px -10px rgba(15,23,42,.18);
+  --lift-2:0 2px 5px rgba(15,23,42,.07), 0 20px 42px -18px rgba(15,23,42,.28);
+  --lift-tile:0 10px 26px -12px rgba(15,23,42,.42);
 }
+
 body{background:var(--paper);color:var(--ink);font-family:var(--ui)}
 h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;text-wrap:balance}
 .mono,code{font-family:var(--data)}
@@ -60,8 +105,9 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .row{display:flex;align-items:center;flex-wrap:wrap}
 .g1{gap:4px}.g2{gap:8px}.g3{gap:12px}.g4{gap:16px}.g5{gap:24px}.g6{gap:32px}.g7{gap:48px}
 .mla{margin-left:auto}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 
-.topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:var(--a5);height:62px;padding:0 var(--a5);background:rgba(255,255,255,.86);backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line)}
+.topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:var(--a5);height:62px;padding:0 var(--a5);background:rgba(255,255,255,.82);backdrop-filter:saturate(1.5) blur(12px);border-bottom:1px solid var(--line)}
 .logo{display:flex;align-items:center;gap:9px;text-decoration:none;color:inherit}
 .logo .wm{font-family:var(--display);font-weight:800;font-size:19px;letter-spacing:-.03em}
 .topnav{display:flex;gap:2px;margin-left:auto;align-items:center;min-width:0}
@@ -74,7 +120,7 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .topnav a[data-active="true"]{color:var(--ink);background:var(--sunk)}
 .topnav .div{width:1px;height:22px;background:var(--line);margin:0 var(--a2)}
 .topnav a.btn-optic,.topnav a.btn-optic:hover{color:var(--optic-ink)}
-.topnav a.btn-optic:hover{background:#DBEB55}
+.topnav a.btn-optic:hover{background:var(--blue-bright)}
 .page{max-width:1140px;margin:0 auto;padding:var(--a6) var(--a5) var(--a8);display:flex;flex-direction:column;gap:var(--a6)}
 .spin-ball{animation:spin 2.4s linear infinite;transform-origin:center}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -87,9 +133,9 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .btn{font-size:14px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:7px;height:42px;padding:0 20px;border-radius:var(--rf);border:1px solid transparent;cursor:pointer;text-decoration:none;transition:transform .12s ease,background .12s ease}
 .btn:active{transform:translateY(1px)}
 .btn-primary{background:var(--deep);color:var(--on-deep)}
-.btn-primary:hover{background:#1A2B45}
+.btn-primary:hover{background:var(--blue-bright)}
 .btn-optic{background:var(--optic);color:var(--optic-ink);box-shadow:0 2px 0 var(--optic-deep)}
-.btn-optic:hover{background:#DBEB55}
+.btn-optic:hover{background:var(--blue-bright)}
 .btn-soft{background:var(--card);color:var(--ink);border-color:var(--line-strong);box-shadow:var(--lift)}
 .btn-soft:hover{background:var(--sunk)}
 .btn-ghost{background:transparent;color:var(--ink-2)}
@@ -118,14 +164,14 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
    wherever a number is the point (Home's stat row, Practice's overall
    rating, a detail-page headline stat) instead of the quieter .fig
    treatment. */
-.scoreboard{background:var(--score-bg);border-radius:var(--r3);padding:var(--a4) var(--a5);display:flex;flex-direction:column;gap:2px;border:1px solid var(--line)}
-.scoreboard .lbl{font-family:var(--data);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+.scoreboard{background:var(--score-bg);border-radius:var(--r3);padding:var(--a4) var(--a5);display:flex;flex-direction:column;gap:2px;border:1px solid var(--score-line)}
+.scoreboard .lbl{font-family:var(--data);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--score-ink)}
 .scoreboard .num{font-family:var(--score);font-weight:800;font-size:27px;color:var(--scoreboard-num);line-height:1;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
-.scoreboard .num small{font-family:var(--score);font-size:.5em;color:var(--ink-3);font-weight:700}
-.scoreboard-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:2px;background:var(--line);border-radius:var(--r3);overflow:hidden;border:1px solid var(--line)}
+.scoreboard .num small{font-family:var(--score);font-size:.5em;color:var(--score-ink);font-weight:700}
+.scoreboard-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:2px;background:var(--score-line);border-radius:var(--r3);overflow:hidden;border:1px solid var(--score-line)}
 .scoreboard-row .cell{background:var(--score-bg);padding:var(--a4) var(--a3)}
 .scoreboard-row .cell .num{font-family:var(--score);font-weight:800;font-size:26px;color:var(--scoreboard-num);line-height:1;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
-.scoreboard-row .cell .lbl{font-family:var(--data);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin-top:4px}
+.scoreboard-row .cell .lbl{font-family:var(--data);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--score-ink);margin-top:4px}
 
 /* A dashed divider styled after a court's own line markings. */
 .dashline{height:1px;background-image:repeating-linear-gradient(90deg,var(--line-strong) 0 8px,transparent 8px 15px)}
@@ -136,7 +182,7 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .meter-top .sc{margin-left:auto;font-family:var(--display);font-size:19px;font-weight:700;letter-spacing:-.02em}
 .meter-top .sc small{font-size:12px;font-weight:500;color:var(--ink-3);font-family:var(--ui)}
 .track{height:8px;background:var(--sunk);border-radius:var(--rf);overflow:hidden}
-.fill{height:100%;border-radius:var(--rf);background:linear-gradient(90deg,var(--blue-bright),var(--blue))}
+.fill{height:100%;border-radius:var(--rf);background:linear-gradient(90deg,#1D4ED8,#22D3EE)}
 .meter-foot{display:flex;gap:12px;font-size:12px;color:var(--ink-3);flex-wrap:wrap}
 
 .trend{display:inline-flex;align-items:center;gap:3px;font-family:var(--data);font-size:12px;font-weight:600}
@@ -148,8 +194,8 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .weak .stripe{background:var(--bad)}.weak.med .stripe{background:var(--warn)}.weak.strength .stripe{background:var(--good)}
 .weak .in{padding:var(--a5);display:flex;flex-direction:column;gap:var(--a3)}
 .evid{display:flex;gap:8px;flex-wrap:wrap}
-.evid a,.evid button{font-family:var(--data);font-size:12px;font-weight:500;color:var(--blue-deep);background:var(--blue-wash);border:0;padding:5px 11px;border-radius:var(--rf);cursor:pointer;text-decoration:none}
-.evid a:hover,.evid button:hover{background:#D5E4FA}
+.evid a,.evid button{font-family:var(--data);font-size:12px;font-weight:500;color:var(--blue-bright);background:var(--blue-wash);border:0;padding:5px 11px;border-radius:var(--rf);cursor:pointer;text-decoration:none}
+.evid a:hover,.evid button:hover{background:var(--blue-wash)}
 .dismissed{opacity:.5}
 
 .player{background:var(--night);border-radius:var(--r3);overflow:hidden;box-shadow:var(--lift-2)}
@@ -168,7 +214,7 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .ctl:hover{background:rgba(255,255,255,.16);color:#fff}
 .ctl:disabled{opacity:.35;cursor:not-allowed}
 .ctl-play{background:var(--optic);color:var(--optic-ink);width:44px;height:44px;padding:0}
-.ctl-play:hover{background:#DBEB55;color:var(--optic-ink)}
+.ctl-play:hover{background:var(--blue-bright);color:var(--optic-ink)}
 .tc{font-family:var(--data);font-variant-numeric:tabular-nums;font-size:13px;color:rgba(255,255,255,.72)}
 .rnav{display:flex;align-items:center;gap:2px;margin-left:auto;background:rgba(255,255,255,.08);border-radius:var(--rf);padding:3px}
 .rnav .lbl{font-family:var(--data);font-size:13px;color:#fff;padding:0 8px;min-width:74px;text-align:center}
@@ -176,10 +222,8 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .rmeta .k{font-family:var(--data);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.45)}
 .rmeta .v{font-family:var(--data);font-variant-numeric:tabular-nums;font-size:14px;color:#fff}
 
-.tabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
-.tabs a,.tabs button{background:transparent;border:0;cursor:pointer;font-size:14px;font-weight:600;color:var(--ink-2);padding:9px 16px;border-radius:var(--rf);white-space:nowrap;text-decoration:none}
-.tabs a:hover,.tabs button:hover{background:var(--sunk);color:var(--ink)}
-.tabs a.on,.tabs button.on{background:var(--deep);color:var(--on-deep)}
+/* .tabs removed with the six-tab analysis page — the workspace replaced it,
+   and no other view uses tabs. */
 
 .tbl{width:100%;border-collapse:collapse;font-size:14px}
 .tbl th{text-align:left;font-family:var(--data);font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);font-weight:600;padding:0 var(--a4) var(--a3) 0}
@@ -190,8 +234,8 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .bp-step{display:grid;grid-template-columns:34px 1fr;gap:var(--a4);align-items:start;background:var(--card);border-radius:var(--r2);padding:var(--a4);box-shadow:var(--lift);border:1px solid var(--line)}
 .bp-step.next{outline:2px solid var(--blue)}
 .bp-mk{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-family:var(--data);font-size:12px;font-weight:600;background:var(--sunk);color:var(--ink-3);border:0;cursor:pointer}
-.bp-step.done .bp-mk{background:var(--good);color:#fff}
-.bp-step.next .bp-mk{background:var(--blue);color:#fff}
+.bp-step.done .bp-mk{background:var(--good);color:var(--optic-ink)}
+.bp-step.next .bp-mk{background:var(--blue);color:var(--optic-ink)}
 .bp-body{display:flex;flex-direction:column;gap:3px;min-width:0}
 .bp-body .focus{font-family:var(--data);font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3)}
 .bp-body .dn{font-family:var(--display);font-size:17px;font-weight:600;letter-spacing:-.015em}
@@ -229,9 +273,9 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .field .hint{font-size:12px;font-weight:400;color:var(--ink-3)}
 .input,.select,.textarea{width:100%;font:inherit;font-size:14px;color:var(--ink);background:var(--card);border:1px solid var(--line-strong);border-radius:var(--r2);padding:0 12px;height:42px;outline:none;transition:border-color .12s ease,box-shadow .12s ease}
 .textarea{height:auto;min-height:74px;padding:10px 12px;resize:vertical;line-height:1.45}
-.select{appearance:none;-webkit-appearance:none;padding-right:34px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%2348596E' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+.select{appearance:none;-webkit-appearance:none;padding-right:34px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%238494AA' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
 .input::placeholder,.textarea::placeholder{color:var(--ink-3)}
-.input:focus,.select:focus,.textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(30,98,208,.16)}
+.input:focus,.select:focus,.textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(34,197,94,.22)}
 .input:disabled,.select:disabled,.textarea:disabled{opacity:.5;cursor:not-allowed}
 .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--a4)}
 :where(.btn,.ctl,.chip,.tabs a,.evid a,.evid button,.bp-mk,.crumb):focus-visible{outline:2px solid var(--blue);outline-offset:2px}
@@ -256,9 +300,9 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .stepbar{display:flex;gap:var(--a2);flex-wrap:wrap}
 .step{display:inline-flex;align-items:center;gap:8px;font-family:var(--data);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
 .step .n{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:var(--sunk);color:var(--ink-3);font-size:11px;font-weight:600;letter-spacing:0}
-.step.done .n{background:var(--good);color:#fff}
+.step.done .n{background:var(--good);color:var(--optic-ink)}
 .step.cur{color:var(--ink)}
-.step.cur .n{background:var(--blue);color:#fff}
+.step.cur .n{background:var(--blue);color:var(--optic-ink)}
 .step .sep{width:18px;height:1px;background:var(--line-strong)}
 .panel-live{display:grid;grid-template-columns:auto 1fr;gap:var(--a4);align-items:start;background:var(--card);border:1px solid var(--line);border-radius:var(--r3);padding:var(--a5);box-shadow:var(--lift)}
 .panel-live .ic{width:44px;height:44px;border-radius:50%;background:var(--blue-wash);display:grid;place-items:center}
@@ -278,11 +322,11 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 /* ---- Coaching read --------------------------------------------------- */
 .read-head{display:flex;flex-direction:column;gap:var(--a3);padding:var(--a5) 0 var(--a4);border-bottom:1px solid var(--line)}
 .strengths{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:var(--a3)}
-.strength{display:grid;grid-template-columns:34px 1fr;gap:var(--a3);align-items:start;background:var(--good-wash);border:1px solid #C6E9D5;border-radius:var(--r3);padding:var(--a4)}
-.strength .ic{width:34px;height:34px;border-radius:50%;background:var(--good);color:#fff;display:grid;place-items:center;font-weight:700;font-size:15px}
+.strength{display:grid;grid-template-columns:34px 1fr;gap:var(--a3);align-items:start;background:var(--good-wash);border:1px solid rgba(34,197,94,.3);border-radius:var(--r3);padding:var(--a4)}
+.strength .ic{width:34px;height:34px;border-radius:50%;background:var(--good);color:var(--optic-ink);display:grid;place-items:center;font-weight:700;font-size:15px}
 .strength .tx{font-size:15px;font-weight:500;color:var(--ink);line-height:1.45}
 .read-hero{border-radius:var(--r4);overflow:hidden;background:var(--card);border:1px solid var(--line);box-shadow:var(--lift-2)}
-.read-hero .band{display:flex;align-items:center;gap:var(--a3);padding:var(--a3) var(--a5);background:linear-gradient(90deg,var(--blue-deep),var(--blue));color:#fff}
+.read-hero .band{display:flex;align-items:center;gap:var(--a3);padding:var(--a3) var(--a5);background:linear-gradient(90deg,var(--blue-deep),var(--blue));color:var(--optic-ink)}
 .read-hero .band .no{font-family:var(--score);font-size:26px;font-weight:800;letter-spacing:.02em;line-height:1}
 .read-hero .band .lb{font-family:var(--data);font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;opacity:.9}
 .read-hero .bd{padding:var(--a5);display:flex;flex-direction:column;gap:var(--a4)}
@@ -295,7 +339,7 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .noting .no{font-family:var(--score);font-size:24px;font-weight:800;color:var(--warn);line-height:1.1}
 .noting .issue{font-size:16px;font-weight:600;color:var(--ink);line-height:1.4}
 .noting .ev{font-size:14px;color:var(--ink-2);margin-top:4px;line-height:1.5}
-.drill-rec{display:grid;grid-template-columns:auto 1fr;gap:var(--a5);align-items:start;background:linear-gradient(135deg,#FBFDE9,#F3F8CF);border:1px solid #DDE69C;border-radius:var(--r4);padding:var(--a5)}
+.drill-rec{display:grid;grid-template-columns:auto 1fr;gap:var(--a5);align-items:start;background:linear-gradient(135deg,#F0FBF4,#E7F8ED);border:1px solid rgba(4,120,87,.22);border-radius:var(--r4);padding:var(--a5)}
 .drill-rec .ic{width:56px;height:56px;border-radius:var(--r3);background:var(--optic);color:var(--optic-ink);display:grid;place-items:center;box-shadow:0 2px 0 var(--optic-deep)}
 .drill-rec .nm{font-family:var(--display);font-size:22px;font-weight:700;letter-spacing:-.02em;line-height:1.15}
 .drill-rec .kv{display:grid;grid-template-columns:auto 1fr;gap:6px var(--a4);font-size:14px;color:var(--ink-2)}
@@ -305,9 +349,454 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 
 /* ---- Dialog ---------------------------------------------------------- */
 .dialog{border:0;padding:0;background:transparent;width:calc(100vw - 32px);max-height:calc(100vh - 32px);margin:auto}
-.dialog::backdrop{background:rgba(15,27,45,.45);backdrop-filter:blur(3px)}
+.dialog::backdrop{background:rgba(2,6,23,.72);backdrop-filter:blur(3px)}
 .dialog-in{background:var(--card);border-radius:var(--r4);box-shadow:var(--lift-2);padding:var(--a5);display:flex;flex-direction:column;gap:var(--a5);max-height:calc(100vh - 32px);overflow-y:auto}
 .dialog-head{display:flex;align-items:flex-start;gap:var(--a4)}
 .dialog-x{margin-left:auto;background:var(--sunk);border:0;color:var(--ink-2);width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:14px;display:grid;place-items:center;flex:none}
 .dialog-x:hover{background:var(--line);color:var(--ink)}
 @media(max-width:640px){.dialog-in{padding:var(--a4);border-radius:var(--r3)}}
+
+/* ==========================================================================
+   ANALYSIS WORKSPACE
+   --------------------------------------------------------------------------
+   The analysis page was six tabs, each a server round-trip. Watching a rally
+   then reading its coaching meant leaving the video, and the two never sat
+   on screen together — which is the one thing the product is for.
+   This is one workspace instead: video left, rallies under it, the selected
+   rally's detail alongside. Everything below extends the existing token set;
+   no new colours were introduced.
+   ========================================================================== */
+
+.ws{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(360px,1fr);gap:var(--a5);align-items:start}
+.ws-main{min-width:0;display:flex;flex-direction:column;gap:var(--a4)}
+.ws-side{min-width:0;position:sticky;top:var(--a4);display:flex;flex-direction:column;gap:var(--a4)}
+@media (max-width:1080px){
+  .ws{grid-template-columns:1fr}
+  /* On a phone the video must stay put while the rest scrolls under it —
+     losing sight of the shot you are reading about defeats the layout. */
+  .ws-side{position:static}
+  .ws-video{position:sticky;top:0;z-index:5;margin-inline:calc(var(--a4) * -1);border-radius:0}
+}
+
+/* ---- Rally rail ---------------------------------------------------------
+   Horizontal, scrollable, and every chip carries its real duration. Rally
+   length is the one number that tells you at a glance whether a point was a
+   scramble or a grind, and it costs nothing to show. */
+.rrail{display:flex;gap:var(--a2);overflow-x:auto;padding:var(--a1) 0 var(--a3);scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+.rrail::-webkit-scrollbar{height:6px}
+.rrail::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:var(--rf)}
+.rchip{flex:0 0 auto;scroll-snap-align:start;display:flex;flex-direction:column;gap:2px;min-width:92px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r2);background:var(--card);cursor:pointer;text-align:left;transition:border-color .12s ease,box-shadow .12s ease,transform .12s ease}
+.rchip:hover{border-color:var(--line-strong);transform:translateY(-1px)}
+.rchip[aria-selected="true"]{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue) inset;background:var(--blue-wash)}
+.rchip-n{font-family:var(--data);font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.rchip[aria-selected="true"] .rchip-n{color:var(--blue-deep)}
+.rchip-d{font-family:var(--score);font-size:22px;line-height:1;color:var(--ink)}
+.rchip-s{font-size:12px;color:var(--ink-3)}
+.rchip-v{width:6px;height:6px;border-radius:var(--rf);background:var(--ink-3)}
+
+/* ---- Shot sequence ------------------------------------------------------
+   A vertical chain, because a rally IS a sequence and reading it top to
+   bottom is how people describe one out loud. */
+.seq{display:flex;flex-direction:column;gap:0}
+.seq-row{display:grid;grid-template-columns:26px 1fr;gap:var(--a3);align-items:start}
+.seq-line{display:flex;flex-direction:column;align-items:center;gap:2px;padding-top:6px}
+.seq-dot{width:9px;height:9px;border-radius:var(--rf);background:var(--line-strong);flex:0 0 auto}
+.seq-row[aria-selected="true"] .seq-dot{background:var(--blue);box-shadow:0 0 0 3px var(--blue-wash)}
+.seq-stem{width:2px;flex:1 1 auto;min-height:18px;background:var(--line)}
+.seq-btn{width:100%;text-align:left;background:none;border:1px solid transparent;border-radius:var(--r1);padding:6px 8px;margin-bottom:2px;cursor:pointer;transition:background .12s ease,border-color .12s ease}
+.seq-btn:hover{background:var(--sunk)}
+.seq-row[aria-selected="true"] .seq-btn{background:var(--blue-wash);border-color:var(--blue)}
+.seq-t{font-family:var(--data);font-size:11px;color:var(--ink-3)}
+.seq-name{font-size:14px;font-weight:600;color:var(--ink)}
+.seq-meta{font-size:12px;color:var(--ink-3)}
+
+/* ---- Shot badge --------------------------------------------------------- */
+.sbadge{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:var(--rf);font-size:12px;font-weight:600;border:1px solid var(--line);background:var(--card);color:var(--ink-2);white-space:nowrap}
+.sbadge-self{border-color:var(--blue);background:var(--blue-wash);color:var(--blue-deep)}
+.sbadge-out{border-color:var(--bad);background:var(--bad-wash);color:var(--bad)}
+.sbadge-net{border-color:var(--warn);background:var(--warn-wash);color:var(--warn)}
+
+/* ---- Confidence ---------------------------------------------------------
+   Three filled pips out of three, not a percentage. A number implies a
+   precision the pipeline does not have, and everything here is a heuristic
+   with a confidence attached — the point is "how much weight should you put
+   on this", which three pips answer honestly and a percentage does not. */
+.conf{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-3)}
+.conf-pips{display:inline-flex;gap:2px}
+.conf-pip{width:5px;height:5px;border-radius:var(--rf);background:var(--line-strong)}
+.conf-pip.on{background:var(--ink-3)}
+.conf.low .conf-pip.on{background:var(--warn)}
+.conf.high .conf-pip.on{background:var(--good)}
+
+/* ---- Metric -------------------------------------------------------------
+   .metric-na is the whole reason this class exists. A measurement that could
+   not be made renders as "Not available" in muted type, never as 0 — a knee
+   angle of zero is a claim, absence is not. */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:var(--a2)}
+.metric{border:1px solid var(--line);border-radius:var(--r2);padding:10px 12px;background:var(--card);min-width:0}
+.metric-k{font-family:var(--data);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin-bottom:4px}
+.metric-v{font-family:var(--score);font-size:26px;line-height:1;color:var(--ink)}
+.metric-u{font-family:var(--ui);font-size:12px;font-weight:500;color:var(--ink-3);margin-left:3px}
+.metric-na .metric-v{font-family:var(--ui);font-size:13px;font-weight:500;color:var(--ink-3);font-style:italic}
+.metric-why{font-size:11px;color:var(--ink-3);margin-top:4px}
+
+/* ---- Coaching insight ---------------------------------------------------
+   The four parts are visually distinct because they answer different
+   questions, and a wall of identical paragraphs hides that. Absent parts
+   are simply not rendered — there is no empty slot to fill. */
+.insight-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:var(--a4);align-items:start}
+.insight{border:1px solid var(--line);border-radius:var(--r3);background:var(--card);padding:var(--a4);display:flex;flex-direction:column;gap:var(--a3)}
+.insight-hero{border-color:var(--blue);box-shadow:var(--lift)}
+.insight-top{display:flex;align-items:flex-start;gap:var(--a3);justify-content:space-between}
+.insight-title{font-family:var(--display);font-size:18px;font-weight:700;letter-spacing:-.015em;color:var(--ink);margin:0}
+.insight-part{display:flex;flex-direction:column;gap:3px}
+.insight-lbl{font-family:var(--data);font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+.insight-txt{font-size:14px;line-height:1.5;color:var(--ink-2);max-width:68ch}
+.insight-fix{border-left:2px solid var(--optic);padding-left:var(--a3)}
+.insight-drill{display:flex;align-items:center;gap:var(--a2);padding:10px 12px;border-radius:var(--r2);background:var(--sunk);font-size:13px;color:var(--ink-2)}
+
+/* ---- Processing stages --------------------------------------------------
+   Stages tick off as they actually complete. There is deliberately NO
+   percentage anywhere: the pipeline does not know how far through it is,
+   and a bar that invented one would be the exact dishonesty this product is
+   built against. */
+.stages{display:flex;flex-direction:column;gap:1px;border:1px solid var(--line);border-radius:var(--r2);overflow:hidden;background:var(--line)}
+.stage-row{display:flex;align-items:center;gap:var(--a3);padding:9px 12px;background:var(--card);font-size:14px;color:var(--ink-3)}
+.stage-row.done{color:var(--ink-2)}
+.stage-row.now{background:var(--blue-wash);color:var(--blue-deep);font-weight:600}
+.stage-mk{width:16px;height:16px;flex:0 0 auto;border-radius:var(--rf);border:1.5px solid var(--line-strong);display:grid;place-items:center}
+.stage-row.done .stage-mk{border-color:var(--good);background:var(--good)}
+.stage-row.now .stage-mk{border-color:var(--blue);border-right-color:transparent;animation:spin 900ms linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.stage-row.now .stage-mk{animation:none;border-right-color:var(--blue)}}
+.stage-msg{margin-left:auto;font-family:var(--data);font-size:11px;color:var(--ink-3);text-align:right;max-width:46%}
+
+/* ---- Empty & error ------------------------------------------------------ */
+.blank{border:1px dashed var(--line-strong);border-radius:var(--r3);padding:var(--a6) var(--a5);text-align:center;background:var(--card)}
+.blank-t{font-family:var(--display);font-size:19px;font-weight:700;color:var(--ink);margin:0 0 6px}
+.blank-b{font-size:14px;color:var(--ink-3);max-width:44ch;margin:0 auto}
+.blank-a{margin-top:var(--a4)}
+.errbox{border:1px solid var(--bad);border-left-width:3px;border-radius:var(--r2);background:var(--bad-wash);padding:var(--a4);display:flex;flex-direction:column;gap:6px}
+.errbox-t{font-weight:700;color:var(--ink);font-size:15px}
+.errbox-b{font-size:14px;color:var(--ink-2)}
+.errbox-a{margin-top:var(--a2)}
+
+/* ---- Honesty note -------------------------------------------------------
+   Used wherever the UI is showing something the data only partly supports.
+   Quiet, but never hidden. */
+.caveat{display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--ink-3);line-height:1.45}
+.caveat-mk{flex:0 0 auto;width:14px;height:14px;border-radius:var(--rf);border:1.5px solid var(--line-strong);display:grid;place-items:center;font-size:9px;font-weight:700;margin-top:1px}
+
+/* ==========================================================================
+   APP SHELL — sidebar
+   --------------------------------------------------------------------------
+   The dashboard was a topbar. A left rail holds more destinations without
+   crowding, keeps them in one column the eye can scan, and gives the page
+   its full width back for the workspace — which is the layout the product
+   was heading towards anyway once the analysis page stopped being tabs.
+
+   The rail is fixed and independently scrollable, so a long page never
+   scrolls the navigation away, and it collapses to a horizontal strip under
+   900px rather than eating a phone's width.
+   ========================================================================== */
+.shell{display:grid;grid-template-columns:246px minmax(0,1fr);min-height:100vh;background:var(--paper)}
+.rail{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:var(--a5);padding:var(--a5) var(--a4);background:var(--card);border-right:1px solid var(--line);overflow-y:auto}
+.rail-brand{display:flex;align-items:center;gap:9px;text-decoration:none;color:inherit;padding:0 var(--a2)}
+.rail-brand img{display:block;height:30px;width:auto}
+.rail-brand .wm{font-family:var(--display);font-weight:800;font-size:19px;letter-spacing:-.03em;color:var(--ink)}
+.rail-nav{display:flex;flex-direction:column;gap:3px}
+.rail-nav a{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:var(--r2);font-size:14px;font-weight:500;color:var(--ink-2);text-decoration:none;transition:background .12s ease,color .12s ease}
+.rail-nav a:hover{background:var(--sunk);color:var(--ink)}
+.rail-nav a[data-active="true"]{background:var(--optic);color:var(--optic-ink);font-weight:600}
+.rail-nav a svg{flex:none}
+.rail-foot{margin-top:auto;display:flex;flex-direction:column;gap:var(--a3)}
+.rail-user{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--r2);background:var(--sunk);min-width:0}
+.rail-av{width:32px;height:32px;border-radius:50%;flex:none;display:grid;place-items:center;background:var(--blue-wash);color:var(--blue-deep);font-weight:700;font-size:13px}
+.rail-user .who{min-width:0;display:flex;flex-direction:column;line-height:1.25}
+.rail-user .nm{font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rail-user .sub{font-size:11px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shell-main{min-width:0;display:flex;flex-direction:column}
+.shell-page{max-width:1180px;width:100%;margin:0 auto;padding:var(--a6) var(--a5) var(--a8);display:flex;flex-direction:column;gap:var(--a6)}
+
+@media(max-width:900px){
+  .shell{grid-template-columns:1fr}
+  .rail{position:sticky;top:0;z-index:40;height:auto;flex-direction:row;align-items:center;gap:var(--a4);border-right:0;border-bottom:1px solid var(--line);padding:var(--a3) var(--a4)}
+  .rail-nav{flex-direction:row;overflow-x:auto;gap:2px}
+  .rail-nav a span{display:none}
+  .rail-nav a{padding:9px 11px}
+  .rail-foot{margin-top:0;margin-left:auto;flex-direction:row;align-items:center}
+  .rail-user .who{display:none}
+  .rail-user{background:none;padding:0}
+}
+
+/* ---- Dashboard home -----------------------------------------------------
+   Stat tiles, the latest analysis, and the three things people actually come
+   here to start. Every tile shows a MEASURED count; there is deliberately no
+   "average improvement" or composite rating, because nothing in this pipeline
+   computes one and a number that looks like a score is worse than no tile. */
+.greet{display:flex;flex-direction:column;gap:4px}
+.greet h1{font-size:clamp(24px,3vw,32px);font-weight:800;letter-spacing:-.03em}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0;background:var(--line);border:1px solid var(--line);border-radius:var(--r3);overflow:hidden}
+.tile{background:var(--card);padding:var(--a4) var(--a5);display:flex;flex-direction:column;gap:6px}
+.tile .k{font-size:12px;color:var(--ink-3)}
+.tile .v{font-family:var(--score);font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1;color:var(--ink)}
+.tile .v.accent{color:var(--optic)}
+.tile .v.na{font-size:15px;font-weight:500;font-style:italic;color:var(--ink-3);letter-spacing:0}
+
+.latest{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr);gap:var(--a5);align-items:center;background:var(--card);border:1px solid var(--line);border-radius:var(--r3);padding:var(--a4);box-shadow:var(--lift)}
+.latest-thumb{position:relative;aspect-ratio:16/9;border-radius:var(--r2);overflow:hidden;background:var(--night);display:grid;place-items:center}
+.latest-thumb video,.latest-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.latest-play{position:relative;width:44px;height:44px;border-radius:50%;background:var(--optic);color:var(--optic-ink);display:grid;place-items:center;box-shadow:var(--lift-2)}
+.latest-body{display:flex;flex-direction:column;gap:6px;min-width:0}
+@media(max-width:640px){.latest{grid-template-columns:1fr}}
+
+.qa{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:var(--a4)}
+.qa a{display:flex;flex-direction:column;gap:8px;padding:var(--a5);background:var(--card);border:1px solid var(--line);border-radius:var(--r3);text-decoration:none;color:inherit;transition:border-color .12s ease,transform .12s ease}
+.qa a:hover{border-color:var(--optic);transform:translateY(-2px)}
+.qa .ic{color:var(--optic)}
+.qa .t{font-size:15px;font-weight:600;color:var(--ink)}
+.qa .d{font-size:13px;color:var(--ink-3);line-height:1.4}
+
+/* ---- Analysis panel (tabbed, beside the video) --------------------------
+   Tabs are back, but they are NOT the six-tab page this replaced. There the
+   tabs owned the whole screen and watching a rally meant leaving the video
+   behind; here the video is persistent on the left and the tabs only switch
+   what you read next to it. That is the difference between navigation and
+   fragmentation. */
+.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--r3);box-shadow:var(--lift);display:flex;flex-direction:column;overflow:hidden}
+.panel-tabs{display:flex;gap:2px;padding:var(--a2);border-bottom:1px solid var(--line);overflow-x:auto}
+.panel-tabs button{flex:none;background:none;border:0;cursor:pointer;font:inherit;font-size:13px;font-weight:600;color:var(--ink-3);padding:8px 14px;border-radius:var(--rf);white-space:nowrap;transition:background .12s ease,color .12s ease}
+.panel-tabs button:hover{color:var(--ink);background:var(--sunk)}
+.panel-tabs button[aria-selected="true"]{background:var(--optic);color:var(--optic-ink)}
+.panel-tabs .cnt{font-family:var(--data);font-size:11px;opacity:.8;margin-left:5px}
+.panel-body{padding:var(--a5);display:flex;flex-direction:column;gap:var(--a4);min-height:280px}
+
+/* Key takeaways — a coloured chip carries the verdict so the list is
+   scannable without reading every line. */
+.take{display:grid;grid-template-columns:32px 1fr;gap:var(--a3);align-items:start}
+.take-ic{width:32px;height:32px;border-radius:var(--r2);display:grid;place-items:center;font-size:14px;font-weight:700;flex:none}
+.take-ic.good{background:var(--good-wash);color:var(--good)}
+.take-ic.warn{background:var(--warn-wash);color:var(--warn)}
+.take-ic.bad{background:var(--bad-wash);color:var(--bad)}
+.take-t{font-size:14px;font-weight:600;color:var(--ink);line-height:1.35}
+.take-d{font-size:13px;color:var(--ink-3);line-height:1.45;margin-top:2px}
+
+/* ---- Breakdown row (full width, under both columns) ---------------------
+   The reference had "8.5/10 Forehand · good swing path, slight grip issue".
+   These are the real equivalent: the coaching pass's 1-5 skill ratings, each
+   with the evidence it was rated on. No composite score, because none is
+   computed. */
+.breakdown{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:var(--a3)}
+.bd-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r3);padding:var(--a4);display:flex;flex-direction:column;gap:6px}
+.bd-score{display:flex;align-items:baseline;gap:3px}
+.bd-score .n{font-family:var(--score);font-size:26px;font-weight:800;line-height:1;color:var(--ink)}
+.bd-score .of{font-size:12px;color:var(--ink-3)}
+.bd-card.strong .bd-score .n{color:var(--good)}
+.bd-card.weak-rating .bd-score .n{color:var(--warn)}
+.bd-name{font-size:14px;font-weight:600;color:var(--ink)}
+.bd-basis{font-size:12px;color:var(--ink-3);line-height:1.45}
+
+/* ==========================================================================
+   LANDING — hero
+   --------------------------------------------------------------------------
+   One dark panel: nav, an oversized headline with the payoff word in the
+   accent, two calls to action, and a strip of four capability cards along the
+   bottom edge of the same panel rather than a separate section. Keeping the
+   strip inside the hero is what makes it read as one screen instead of a page
+   you have to scroll to understand.
+   ========================================================================== */
+.lp{position:relative;overflow:hidden;border-bottom:1px solid var(--line);background:var(--paper)}
+
+/* THE HERO IS A DARK ISLAND on an otherwise light site: a photograph with a
+   scrim over it, which is the one place on this page white type belongs.
+   Rather than rewrite every .lp-* rule to a second set of colour names, the
+   ink tokens are redefined for this subtree — the rules below then read
+   exactly as they did under the dark theme, and there is one place to look
+   when the hero's contrast is wrong. Everything below the hero uses the
+   page's own tokens and is light.
+
+   The topbar needs its own line here for the same reason: the global rule
+   is now white glass, which over a dark photograph would be a white bar
+   with white text in it. --paper is in the list because `.lp` paints it as
+   the ground behind the photo: without the override, a missing or slow hero
+   image leaves white type on a white slab.
+
+   `color:var(--ink)` is the non-obvious half and it is REQUIRED. Redefining
+   --ink on this element does not repaint anything that inherited its colour
+   from `body`: `color` inherits as a COMPUTED value, so body resolved
+   var(--ink) once against the page's dark navy and every child below
+   inherited that navy, override or not. Rules naming a token explicitly
+   (.lp-sub, .lp-note, .lp-feat .t) re-resolved correctly and looked fine,
+   which is what made the failure so selective: only .lp-h1 and the wordmark
+   — the two rules that rely on inheritance — came out dark on dark. This
+   line forces the subtree to re-resolve against the overridden token. */
+.lp{--paper:#080D18;--ink:#F8FAFC;--ink-2:#CBD5E1;--ink-3:#94A3B8;--line:rgba(248,250,252,.14);--card:rgba(248,250,252,.10);color:var(--ink)}
+.lp .topbar{background:rgba(8,13,24,.40);border-bottom:1px solid rgba(248,250,252,.12)}
+.lp .topnav a:hover,.lp .topnav a[data-active="true"]{background:rgba(248,250,252,.12)}
+.lp .btn-soft{background:rgba(248,250,252,.12);border-color:rgba(248,250,252,.28);color:#F8FAFC;box-shadow:none}
+.lp .btn-soft:hover{background:rgba(248,250,252,.20)}
+
+/* The photograph is the panel's background, not a picture beside the text —
+   the headline sits ON it, the way the reference does. */
+.lp-photo{position:absolute;inset:0;z-index:0}
+/* The panel is wider than the source frame, so cover crops top and bottom.
+   The subject's head sits high in the shot — pulling the window up keeps him
+   whole instead of decapitating him against the nav. */
+.lp-photo img{width:100%;height:100%;object-fit:cover;object-position:72% 26%}
+/* Two scrims, doing different jobs. The horizontal one buys contrast for the
+   headline on the left while leaving the lit half of the frame alone; the
+   vertical one darkens the very bottom so the capability strip is readable
+   over whatever the photo happens to be doing down there. Without the second
+   one the strip's legibility depends on the image, which is not something a
+   layout should gamble on. */
+/* The left stop is a LITERAL, not var(--paper), and that is the point. It was
+   --paper under the dark theme, where the scrim fading into the page colour
+   was exactly right. The moment the ground went light, that same declaration
+   faded the left third of the hero to near-white — underneath white headline
+   type, which disappeared. The hero is a dark island; its scrim has to stay
+   dark whatever the page around it does, so it names its own colour. */
+.lp-scrim{position:absolute;inset:0;background:
+  linear-gradient(90deg, rgba(8,13,24,.985) 0%, rgba(8,13,24,.94) 26%, rgba(8,13,24,.72) 48%, rgba(8,13,24,.30) 72%, rgba(8,13,24,.20) 100%),
+  linear-gradient(180deg, rgba(8,13,24,.55) 0%, transparent 22%, transparent 58%, rgba(8,13,24,.88) 100%)}
+/* No photo yet: the court-green glow keeps the panel from being a flat slab. */
+.lp-noart{position:absolute;inset:0;background:
+  radial-gradient(120% 130% at 82% 30%, rgba(34,197,94,.18), transparent 60%),
+  radial-gradient(90% 120% at 4% 96%, rgba(59,130,246,.10), transparent 62%)}
+
+.lp-in{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:0 var(--a5)}
+.lp-hero{display:flex;padding:var(--a8) 0 calc(var(--a8) + var(--a5));min-height:58vh;align-items:center}
+.lp-copy{display:flex;flex-direction:column;gap:var(--a4);min-width:0;max-width:min(600px,56%)}
+.lp-h1{font-size:clamp(38px,5.6vw,62px);font-weight:800;letter-spacing:-.038em;line-height:1.03;margin:0;text-wrap:balance}
+.lp-h1 em{font-style:normal;color:var(--optic)}
+.lp-sub{font-size:17px;line-height:1.55;color:var(--ink-2);max-width:44ch;margin:0}
+.lp-cta{display:flex;gap:var(--a3);flex-wrap:wrap;margin-top:var(--a2)}
+.lp-note{font-size:13px;color:var(--ink-3);margin:0}
+
+.lp-feats{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:0;border-top:1px solid rgba(248,250,252,.10);background:rgba(8,13,24,.55);backdrop-filter:blur(6px);border-radius:var(--r3) var(--r3) 0 0}
+.lp-feat{padding:var(--a5);display:flex;flex-direction:column;gap:9px;border-right:1px solid rgba(248,250,252,.10)}
+.lp-feat:last-child{border-right:0}
+.lp-feat .ic{width:38px;height:38px;border-radius:var(--r2);display:grid;place-items:center;color:var(--optic);border:1px solid rgba(34,197,94,.35);background:rgba(34,197,94,.16)}
+.lp-feat .t{font-size:15px;font-weight:700;color:var(--ink);letter-spacing:-.01em}
+.lp-feat .d{font-size:13px;line-height:1.5;color:var(--ink-2)}
+
+/* The landing nav is a topbar, which has a fixed height and no wrapping plan.
+   On a phone its two anchors pushed "Log in" and "Get started" onto their own
+   lines and straight through the logo. The anchors point at sections further
+   down the same page, so dropping them on small screens costs a scroll, not a
+   destination. */
+@media(max-width:640px){
+  .lp .topbar{height:auto;padding:var(--a3) 0;gap:var(--a3);flex-wrap:nowrap}
+  .lp .topnav{display:none}
+  .lp .topbar > .row{margin-left:auto;flex-wrap:nowrap}
+}
+
+@media(max-width:900px){
+  /* The frame is a wide shot with the subject right of centre; on a narrow
+     screen the crop has to follow him or the panel is a photo of a wall. */
+  .lp-photo img{object-position:64% 22%}
+  .lp-hero{padding:var(--a7) 0 var(--a8);min-height:0}
+  .lp-copy{max-width:100%}
+  .lp-scrim{background:
+    linear-gradient(180deg, rgba(8,13,24,.72) 0%, rgba(8,13,24,.86) 45%, rgba(8,13,24,.95) 100%)}
+  .lp-feat{border-right:0;border-bottom:1px solid rgba(248,250,252,.10)}
+  .lp-feat:last-child{border-bottom:0}
+}
+
+/* ---------------------------------------------------------------------------
+   Gradient stat tiles (.gtile).
+
+   NAMED .gtile, NOT .tile. `.tile` is the dashboard's plain KPI card and
+   was here first; a second rule under the same name repainted it white-on-
+   white and, by inheriting its flex-direction:column, stacked the ring under
+   the text instead of beside it. Both bugs were invisible in the component
+   under test and only showed up on another page.
+
+   The scrim is load-bearing, not styling. Each --g* runs from a deep stop to
+   a bright one, and white text on the bright end measures as low as 1.7:1 —
+   unreadable, and the reason most gradient-card designs fail their own
+   legibility check. `.gtile::before` lays a left-weighted dark wash over the
+   fill so the text half stays above 4.5:1 whichever hue it is. The ring's
+   numeral gets the same treatment from its own dark track. Move the text out
+   of the left half and this guarantee is gone.
+--------------------------------------------------------------------------- */
+.gtiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:var(--a4)}
+.gtile{position:relative;isolation:isolate;flex-direction:row;overflow:hidden;border-radius:var(--r3);padding:var(--a4) var(--a5);min-height:112px;display:flex;align-items:center;gap:var(--a4);color:#fff;box-shadow:var(--lift-tile)}
+.gtile::before{content:"";position:absolute;inset:0;z-index:-1;background:var(--tile-g)}
+.gtile::after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(100deg,rgba(3,7,18,.30) 0%,rgba(3,7,18,.14) 46%,transparent 78%)}
+.gtile.hue-1{--tile-g:var(--g1)}
+.gtile.hue-2{--tile-g:var(--g2)}
+.gtile.hue-3{--tile-g:var(--g3)}
+.gtile.hue-4{--tile-g:var(--g4)}
+.gtile.hue-5{--tile-g:var(--g5)}
+.gtile-txt{min-width:0;display:flex;flex-direction:column;gap:1px}
+.gtile-v{font-family:var(--display);font-size:31px;font-weight:800;letter-spacing:-.035em;line-height:1;margin:0;font-variant-numeric:tabular-nums}
+.gtile-l{font-size:14px;font-weight:700;margin:0;letter-spacing:-.01em}
+.gtile-c{font-size:12px;line-height:1.35;margin:1px 0 0;color:rgba(255,255,255,.82)}
+.gtile-ring{position:relative;margin-left:auto;align-self:center;flex:none;width:60px;height:60px;display:grid;place-items:center}
+.gtile-ring svg{position:absolute;inset:0;width:100%;height:100%}
+.gtile-ring circle{fill:none;stroke-width:5;stroke-linecap:round}
+.gtile-ring .tr{stroke:rgba(3,7,18,.30)}
+.gtile-ring .tv{stroke:#fff}
+.gtile-ring-n{font-family:var(--data);font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+.gtile-ring-n::after{content:"%";font-size:.68em;opacity:.72;margin-left:1px}
+@media(max-width:560px){
+  .gtiles{grid-template-columns:1fr 1fr;gap:var(--a3)}
+  .gtile{padding:var(--a3) var(--a4);min-height:96px;gap:var(--a3)}
+  .gtile-v{font-size:25px}
+  .gtile-ring{width:50px;height:50px}
+}
+
+/* ---------------------------------------------------------------------------
+   Wrong-vs-right setup examples.
+
+   The pair is a grid rather than two floated figures so both courts are
+   exactly the same width — the comparison is between two overlays on one
+   geometry, and a size difference between the panels would read as part of
+   what is being demonstrated.
+--------------------------------------------------------------------------- */
+.ex{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:var(--a5);align-items:center;padding:var(--a4);border:1px solid var(--line);border-radius:var(--r3);background:var(--sunk)}
+.ex-pair{display:grid;grid-template-columns:1fr 1fr;gap:var(--a3);min-width:0}
+.ex-txt strong{font-size:14px;letter-spacing:-.01em;display:block}
+.exd{margin:0;display:flex;flex-direction:column;gap:6px;min-width:0}
+.exd svg{width:100%;height:auto;display:block;background:var(--card);border-radius:var(--r2);border:1px solid var(--line)}
+.exd figcaption{display:flex;align-items:flex-start;gap:5px;font-size:11.5px;line-height:1.3;color:var(--ink-2)}
+.exd-mk{flex:none;width:14px;height:14px;border-radius:50%;display:grid;place-items:center;font-size:9px;font-weight:800;color:#fff;margin-top:1px}
+.exd.bad .exd-mk{background:var(--c2)}
+.exd.good .exd-mk{background:var(--c4)}
+.exd.bad svg{border-color:rgba(225,29,72,.35)}
+.exd.good svg{border-color:rgba(4,120,87,.35)}
+@media(max-width:820px){
+  .ex{grid-template-columns:1fr;gap:var(--a4)}
+}
+
+/* ---------------------------------------------------------------------------
+   The post-analysis action bar.
+
+   Two buttons and a paragraph read as an unfinished form. This reads as a
+   footer you arrive at: an icon that says "again", a short question, and the
+   two ways to answer it, on one line at desktop width.
+
+   The icon carries the accent gradient rather than the buttons, so the bar
+   sits under the breakdown without competing with the gradient tiles at the
+   top of it. Only ONE button is the accent green — re-running is the action
+   with a cost (minutes of compute, a rewritten coaching read), so it should
+   not look identical to a link that opens an editor.
+--------------------------------------------------------------------------- */
+.actionbar{display:flex;align-items:center;gap:var(--a4);padding:var(--a4) var(--a5);background:var(--sunk);border:1px solid var(--line);border-radius:var(--r3);box-shadow:var(--lift)}
+.actionbar-ic{flex:none;width:42px;height:42px;border-radius:var(--r2);display:grid;place-items:center;color:#fff;background:var(--g1)}
+.actionbar-ic svg{width:21px;height:21px}
+.actionbar-txt{flex:1;min-width:0}
+.actionbar-t{margin:0;font-size:15px;font-weight:700;letter-spacing:-.01em}
+.actionbar-d{margin:2px 0 0;font-size:13px;line-height:1.45;color:var(--ink-2)}
+.actionbar-do{flex:none;display:flex;gap:var(--a2);flex-wrap:wrap}
+@media(max-width:720px){
+  /* Stacked, and the actions go full width — two half-width buttons side by
+     side on a phone are two things nobody can hit. */
+  .actionbar{flex-direction:column;align-items:stretch;gap:var(--a3)}
+  .actionbar-ic{display:none}
+  /* `flex:none` is right on one row and wrong once stacked: it holds the group
+     at the widest button's content width, so a long label pushes it past the
+     card edge. Reset it and let the column own the full width. */
+  .actionbar-do{flex:1 1 auto;flex-direction:column;width:100%;min-width:0}
+  .actionbar-do .btn{width:100%}
+}

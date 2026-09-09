@@ -15,8 +15,7 @@ export default async function LandingPage() {
 
   return (
     <div className="min-h-screen" style={{ background: "var(--paper)" }}>
-      <Nav isAuthed={Boolean(user)} />
-      <Hero analyzeHref={analyzeHref} />
+      <Hero analyzeHref={analyzeHref} nav={<Nav isAuthed={Boolean(user)} />} />
       <HowItWorks />
       <Features />
       <Footer />

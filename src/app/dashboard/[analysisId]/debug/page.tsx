@@ -1,3 +1,4 @@
+
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -5,7 +6,9 @@ import { createClient } from "@/lib/supabase/server";
 import { getAnalysisForUser } from "@/lib/db/analyses";
 import { getPhase2Data } from "@/lib/db/vision";
 import type { PlayerTrackRow } from "@/lib/db/types";
+import { debugVideoUrl as resolveDebugVideoUrl } from "@/lib/vision/debug-video-store";
 import { colorForPlayer } from "@/lib/vision/player-colors";
+import { LIMB_COLOUR, visibleBones, type KeypointLike } from "@/lib/vision/skeleton";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +54,15 @@ export default async function DebugPage({ params }: { params: Promise<{ analysis
 
   const trackColorIndex = new Map(phase2.tracks.map((t, i) => [t.player_label, i]));
 
+  // The annotated video rally_seg renders when RALLY_SEG_DEBUG=1. Everything
+  // the pipeline believed, drawn on the real footage and playing at speed --
+  // which catches the failures that sampled stills and summary numbers both
+  // hide: a track that swaps between two players, a ball that jitters onto the
+  // neighbouring court, a cut landing two seconds late.
+  // Resolved through the storage abstraction rather than a filesystem check, so
+  // this page keeps working when the overlay moves to object storage.
+  const debugVideo = await resolveDebugVideoUrl(analysis);
+
   return (
     <div>
       <Link
@@ -59,6 +71,37 @@ export default async function DebugPage({ params }: { params: Promise<{ analysis
       >
         ← Back to analysis
       </Link>
+
+      {debugVideo ? (
+        <section style={{ margin: "24px 0" }}>
+          <h2 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 4px" }}>
+            Tracking overlay
+          </h2>
+          <p style={{ fontSize: 13, opacity: 0.7, margin: "0 0 10px", maxWidth: "62ch" }}>
+            Everything here is what this run actually used, after every
+            fallback resolved — not a preview from a component that lost.
+            Cyan is the court it measured with; magenta is the net line rally
+            boundaries were read from. A filled ball marker is a real
+            detection, hollow means the track is coasting between them. A
+            magenta banner flashes on every confirmed net crossing, and the bar
+            above the status line is every rally across the clip.
+          </p>
+          <video
+            src={debugVideo}
+            controls
+            preload="metadata"
+            style={{ width: "100%", maxWidth: 960, borderRadius: 8, background: "#000" }}
+          />
+        </section>
+      ) : (
+        <p style={{ fontSize: 13, opacity: 0.6, margin: "20px 0", maxWidth: "62ch" }}>
+          No tracking overlay for this analysis. Set{" "}
+          <code>RALLY_SEG_DEBUG=1</code> in <code>.env.local</code> and re-run —
+          it is rendered at the end of a run, so analyses from before it was
+          switched on will not have one. Rendering costs a full decode and
+          re-encode (a minute or two), which is why it is off by default.
+        </p>
+      )}
 
       <h1 className="h1" style={{ marginTop: "var(--a3)" }}>Developer debug view</h1>
       <p className="sm measure" style={{ marginTop: "var(--a2)" }}>
@@ -219,13 +262,29 @@ function FrameOverlay({
             );
           })}
 
+          {/* Skeleton first, joints on top, so a bone never covers a joint. */}
+          {keypoints.map((k) => {
+            const kps = k.keypoints as KeypointLike[];
+            return visibleBones(kps).map((b, i) => (
+              <line
+                key={`${k.id}-b${i}`}
+                x1={b.from[0] * width} y1={b.from[1] * height}
+                x2={b.to[0] * width} y2={b.to[1] * height}
+                stroke={LIMB_COLOUR[b.group]}
+                strokeWidth={b.group === "armLeft" || b.group === "armRight" ? 5 : 4}
+                strokeLinecap="round"
+                opacity={0.95}
+              />
+            ));
+          })}
           {keypoints.map((k) => {
             const color = colorForPlayer(k.player_label, trackColorIndex.get(k.player_label) ?? 0);
             const kps = k.keypoints as Array<{ xNorm: number | null; yNorm: number | null; confidence: number | null }>;
             return kps
               .filter((p) => p.xNorm !== null && p.yNorm !== null && (p.confidence ?? 0) >= 0.3)
               .map((p, i) => (
-                <circle key={`${k.id}-${i}`} cx={p.xNorm! * width} cy={p.yNorm! * height} r={6} fill={color} opacity={0.85} />
+                <circle key={`${k.id}-${i}`} cx={p.xNorm! * width} cy={p.yNorm! * height} r={4} fill={color}
+                  stroke="#0b0f14" strokeWidth={1.5} opacity={0.95} />
               ));
           })}
         </svg>

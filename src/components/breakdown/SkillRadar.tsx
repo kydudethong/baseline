@@ -96,7 +96,7 @@ export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
           {groups.map((g, i) => {
             const [x, y] = pointFor(i, g.avg ?? 0);
             return g.avg !== null ? (
-              <circle key={g.group} cx={x} cy={y} r={4.5} fill={GROUP_COLOR[g.group]} stroke="#fff" strokeWidth={1.5} />
+              <circle key={g.group} cx={x} cy={y} r={4.5} fill={GROUP_COLOR[g.group]} stroke="var(--card)" strokeWidth={1.5} />
             ) : null;
           })}
           {groups.map((g, i) => {

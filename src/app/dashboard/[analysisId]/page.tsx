@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { getSignedDownloadUrl } from "@/lib/storage/r2";
+import { getSetup } from "@/lib/db/setup";
 import { getAnalysisForUser, type AnalysisWithVideo } from "@/lib/db/analyses";
 import { getPhase2Data } from "@/lib/db/vision";
 import { getProfile } from "@/lib/db/profiles";
@@ -20,22 +21,17 @@ import type { CourtCalibrationRow } from "@/lib/db/types";
 import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
 import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
 import { ShotsPanel } from "@/components/dashboard/ShotsPanel";
-import Player, { type RallyMark } from "@/components/breakdown/Player";
-import { SkillMeter } from "@/components/breakdown/SkillMeter";
+import { AnalysisWorkspace } from "@/components/analysis/AnalysisWorkspace";
+import { EmptyState } from "@/components/analysis/EmptyState";
+import { ErrorState } from "@/components/analysis/ErrorState";
+import { getAnalysisView, type ViewRally } from "@/lib/db/analysis-view";
+import { getAllDrills } from "@/lib/coaching/drills";
+import { topPriorityObservation } from "@/lib/coaching/ranking";
 import { SkillRadar } from "@/components/breakdown/SkillRadar";
-import { skillName } from "@/lib/coaching/types";
-import type { AnalysisFrameRow, CoachingObservationRow, PlayerTrackRow } from "@/lib/db/types";
+import type { AnalysisFrameRow, PlayerTrackRow } from "@/lib/db/types";
 
 export const dynamic = "force-dynamic";
 
-const TABS = [
-  { key: "summary", label: "Summary" },
-  { key: "movement", label: "Movement" },
-  { key: "shots", label: "Shots" },
-  { key: "rallies", label: "Rallies" },
-  { key: "skills", label: "Skills" },
-  { key: "plan", label: "Plan" },
-];
 
 export async function generateMetadata({
   params,
@@ -50,14 +46,10 @@ export async function generateMetadata({
 
 export default async function AnalysisDetailPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ analysisId: string }>;
-  searchParams: Promise<{ tab?: string }>;
 }) {
   const { analysisId } = await params;
-  const { tab: tabParam } = await searchParams;
-  const tab = TABS.some((t) => t.key === tabParam) ? tabParam! : "summary";
 
   const supabase = await createClient();
   const {
@@ -69,6 +61,15 @@ export default async function AnalysisDetailPage({
   if (!analysis) notFound();
 
   const video = analysis.video;
+  const setup = await getSetup(supabase, analysisId);
+
+  const controls = (
+    <ProcessingControls
+      analysisId={analysis.id}
+      status={analysis.status}
+      hasSetup={Boolean(setup && (setup.court || setup.players.length > 0))}
+    />
+  );
 
   return (
     <>
@@ -98,10 +99,25 @@ export default async function AnalysisDetailPage({
         </div>
       ) : null}
 
-      <ProcessingControls analysisId={analysis.id} status={analysis.status} />
+      {/* Where these controls belong depends on whether there is anything to
+          look at yet.
 
-      {analysis.status === "completed" && analysis.result ? (
-        <AnalysisBreakdown supabase={supabase} analysis={analysis} tab={tab} />
+          Before a run they ARE the page: setup and "start processing" are the
+          only things to do, so they lead. After one, the breakdown is what the
+          user came for, and "the court was wrong, fix it and run again" is a
+          conclusion they reach by watching the video — so the controls follow
+          it rather than pushing it below the fold. Same component, two
+          positions, decided here rather than by the component guessing. */}
+      {analysis.status !== "completed" ? controls : null}
+
+      {analysis.status === "completed" ? (
+        <>
+          {/* The breakdown needs a result; the controls do not. A completed
+              run with no result row is rare but it is exactly when someone
+              needs the re-run button, so the two conditions stay separate. */}
+          {analysis.result ? <AnalysisBreakdown supabase={supabase} analysis={analysis} /> : null}
+          {controls}
+        </>
       ) : null}
     </>
   );
@@ -110,33 +126,30 @@ export default async function AnalysisDetailPage({
 async function AnalysisBreakdown({
   supabase,
   analysis,
-  tab,
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   analysis: AnalysisWithVideo;
-  tab: string;
 }) {
-  const [phase2, profile, coachingData, blueprints] = await Promise.all([
+  const [phase2, profile, coachingData, blueprints, view, drills] = await Promise.all([
     getPhase2Data(supabase, analysis.id),
     getProfile(supabase, analysis.user_id),
     getCoachingData(supabase, analysis.id),
     getBlueprintsForAnalysis(supabase, analysis.id),
+    getAnalysisView(supabase, analysis),
+    getAllDrills(supabase),
   ]);
   const skillKeysWithBlueprint = new Set(blueprints.map((b) => b.blueprint.skill_key));
+  const drillNames: Record<string, string> = {};
+  for (const d of drills) drillNames[d.slug] = d.name;
+  // Computed once and shared, so the workspace and the read below cannot
+  // disagree about which point leads — if they did, it would print twice.
+  const hero = topPriorityObservation(coachingData.observations);
 
   const video = analysis.video;
   let videoUrl: string | null = null;
   if (video) {
     videoUrl = await getSignedDownloadUrl(video.storage_path).catch(() => null);
   }
-
-  const rallies: RallyMark[] = coachingData.rallies.map((r) => ({
-    idx: r.idx,
-    start_s: r.start_s,
-    end_s: r.end_s,
-    shots: r.shots,
-    note: noteForRally(coachingData.observations, r.idx),
-  }));
 
   const hasRead = coachingData.read !== null;
   const selfLabels = (analysis.self_player_label ?? "")
@@ -157,10 +170,6 @@ async function AnalysisBreakdown({
 
   return (
     <div className="stack g6">
-      {videoUrl ? (
-        <Player videoUrl={videoUrl} rallies={rallies} durationS={video?.duration_seconds ?? 0} />
-      ) : null}
-
       {!hasRead ? (
         <div className="stack g4">
           <div className="stepbar">
@@ -181,12 +190,10 @@ async function AnalysisBreakdown({
       ) : null}
 
       <div className="row g3" style={{ justifyContent: "space-between" }}>
-        <div className="tabs">
-          {TABS.map((t) => (
-            <Link key={t.key} href={`/dashboard/${analysis.id}?tab=${t.key}`} className={t.key === tab ? "on" : ""}>
-              {t.label}
-            </Link>
-          ))}
+        <div className="row g2">
+          {view.rallies.length > 0 ? (
+            <p className="eyebrow" style={{ margin: 0 }}>Film room</p>
+          ) : null}
         </div>
         <div className="row g2">
           <CourtDialog supabase={supabase} analysis={analysis} calibration={phase2.calibration} frames={phase2.frames} />
@@ -215,150 +222,103 @@ async function AnalysisBreakdown({
         </div>
       ) : null}
 
-      {tab === "summary" ? (
-        <div className="stack g6">
-          {rallies.length > 0 ? (
-            <div className="scoreboard-row">
-              <div className="cell">
-                <div className="num">{rallies.length}</div>
-                <div className="lbl">Rallies</div>
-              </div>
-              <div className="cell">
-                <div className="num">
-                  {rallies.some((r) => r.shots > 0) ? rallies.reduce((sum, r) => sum + r.shots, 0) : "—"}
-                </div>
-                <div className="lbl">Paddle contacts</div>
-              </div>
-              <div className="cell">
-                <div className="num">{median(rallies.map((r) => r.shots)) || "—"}</div>
-                <div className="lbl">Contacts / rally</div>
-              </div>
-              <div className="cell">
-                <div className="num">{longestRally(rallies)}</div>
-                <div className="lbl">Longest rally</div>
-              </div>
-            </div>
-          ) : null}
-          {coachingData.read ? (
-            <CoachingReadPanel
-              read={coachingData.read}
-              observations={coachingData.observations}
-              skills={coachingData.skills}
-              analysisId={analysis.id}
-              skillKeysWithBlueprint={skillKeysWithBlueprint}
-            />
-          ) : (
-            <div className="empty">
-              <h3 className="h2">Your coaching read goes here</h3>
-              <p className="body measure">
-                Tag which player is you above and Baseline will write it — strengths, the one fix that matters
-                most, and a drill to start with.
-              </p>
-            </div>
-          )}
+      {view.rallies.length > 0 ? (
+        <div className="scoreboard-row">
+          <div className="cell">
+            <div className="num">{view.rallies.length}</div>
+            <div className="lbl">Rallies</div>
+          </div>
+          <div className="cell">
+            <div className="num">{totalContacts(view.rallies) || "—"}</div>
+            <div className="lbl">Paddle contacts</div>
+          </div>
+          <div className="cell">
+            <div className="num">{median(view.rallies.map((r) => r.contactCount)) || "—"}</div>
+            <div className="lbl">Contacts / rally</div>
+          </div>
+          <div className="cell">
+            <div className="num">{longestRally(view.rallies)}</div>
+            <div className="lbl">Longest rally</div>
+          </div>
         </div>
       ) : null}
 
-      {tab === "movement" ? (
-        <div className="stack g5">
+      {/* The workspace itself: video, rallies, shots and the coaching on each,
+          sharing one selection. It owns the Player, so nothing above renders one. */}
+      {videoUrl ? (
+        <AnalysisWorkspace
+          view={view}
+          videoUrl={videoUrl}
+          drillNames={drillNames}
+          heroObservationId={hero?.id ?? null}
+        />
+      ) : (
+        <ErrorState
+          title="The video for this clip couldn't be loaded"
+          body="Everything Baseline measured is still below, but the film itself is unavailable right now. This is usually temporary — reloading the page often fixes it."
+        />
+      )}
+
+      {coachingData.read ? (
+        <section className="stack g4">
+          <CoachingReadPanel
+            read={coachingData.read}
+            observations={coachingData.observations}
+            skills={coachingData.skills}
+            analysisId={analysis.id}
+            skillKeysWithBlueprint={skillKeysWithBlueprint}
+            drillNames={drillNames}
+          />
+        </section>
+      ) : (
+        <EmptyState
+          title="Your coaching read goes here"
+          body="Tag which player is you above and Baseline will write it — strengths, the one fix that matters most, and a drill to start with."
+        />
+      )}
+
+      {coachingData.skills.length > 0 ? (
+        <section className="stack g4">
+          <h2 className="eyebrow">Where those ratings sit against each other</h2>
+          <div className="card">
+            <SkillRadar skills={coachingData.skills} />
+          </div>
+          <p className="note">
+            The numbers themselves are in the breakdown above. This is the shape they make.{" "}
+            <Link href="/dashboard/practice" className="crumb" style={{ color: "var(--blue)" }}>
+              See how each skill is trending across your games →
+            </Link>
+          </p>
+        </section>
+      ) : null}
+
+      {blueprints.length > 0 ? (
+        <section className="stack g4">
+          <h2 className="eyebrow">Your practice plan</h2>
+          {blueprints.map(({ blueprint, steps }) => (
+            <BlueprintPanel key={blueprint.id} analysisId={analysis.id} blueprint={blueprint} steps={steps} />
+          ))}
+        </section>
+      ) : null}
+
+      {/* Movement, the raw shot table and the tracker's own output. Collapsed
+          because it is evidence for the read above, not the read itself. */}
+      <details className="card">
+        <summary className="sm" style={{ cursor: "pointer" }}>
+          The measurements behind this page
+        </summary>
+        <div className="stack g5" style={{ marginTop: 16 }}>
           <AnalysisResultPanel result={analysis.result!} />
           <MovementMetricsPanel calibration={phase2.calibration} movement={phase2.movement} selfLabels={selfLabels} />
+          {phase2.shots.length > 0 ? (
+            <ShotsPanel shots={phase2.shots} ballTrack={phase2.ballTrack} selfLabels={selfLabels} />
+          ) : null}
           <p className="dev-note">
             Want to see what the tracker actually detected?{" "}
             <Link href={`/dashboard/${analysis.id}/debug`}>Open the raw detections view</Link>.
           </p>
         </div>
-      ) : null}
-
-      {tab === "shots" ? (
-        phase2.shots.length > 0 ? (
-          <ShotsPanel shots={phase2.shots} ballTrack={phase2.ballTrack} selfLabels={selfLabels} />
-        ) : (
-          <div className="empty">
-            <h3 className="h2">No shot data for this game</h3>
-            <p className="body measure">
-              Shot types (dink, drive, drop, reset…) come from tracking the ball, which needs a ball-detector model
-              configured for this deployment. Once one is set up, re-run processing on this game and this tab fills in.
-            </p>
-          </div>
-        )
-      ) : null}
-
-      {tab === "rallies" ? (
-        <div className="card" style={{ overflowX: "auto" }}>
-          {rallies.length > 0 ? (
-            <table className="tbl" style={{ minWidth: 560 }}>
-              <thead>
-                <tr><th>Rally</th><th>Start</th><th>Length</th><th>Contacts</th><th>Note</th></tr>
-              </thead>
-              <tbody>
-                {rallies.map((r) => (
-                  <tr key={r.idx}>
-                    <td className="n"><a href={`#t=${r.start_s.toFixed(1)}`}>R{r.idx}</a></td>
-                    <td className="n">{mmss(r.start_s)}</td>
-                    <td className="n">{(r.end_s - r.start_s).toFixed(1)}s</td>
-                    <td className="n">{r.shots}</td>
-                    <td style={{ minWidth: 260 }}>{r.note ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <p className="sm">No rallies were detected from player movement for this clip.</p>
-          )}
-        </div>
-      ) : null}
-
-      {tab === "skills" ? (
-        <div className="stack g5">
-          {coachingData.skills.length > 0 ? (
-            <>
-              <div className="card">
-                <SkillRadar skills={coachingData.skills} />
-              </div>
-              <section className="sec">
-                <h3 className="eyebrow">Every rated skill</h3>
-                <div className="grid2">
-                  {coachingData.skills.map((s) => (
-                    <div key={s.id} className="card">
-                      <SkillMeter name={skillName(s.skill_key)} raw={s.raw} basis={s.basis} />
-                    </div>
-                  ))}
-                </div>
-              </section>
-              <p className="note">
-                These are the coach&rsquo;s read of what this one clip shows.{" "}
-                <Link href="/dashboard/practice" className="crumb" style={{ color: "var(--blue)" }}>
-                  See how each skill is trending across your games →
-                </Link>
-              </p>
-            </>
-          ) : (
-            <div className="empty">
-              <h3 className="h2">No skill ratings yet</h3>
-              <p className="body measure">These appear once a coaching read has been generated.</p>
-            </div>
-          )}
-        </div>
-      ) : null}
-
-      {tab === "plan" ? (
-        <div className="stack g4">
-          {blueprints.length > 0 ? (
-            blueprints.map(({ blueprint, steps }) => (
-              <BlueprintPanel key={blueprint.id} analysisId={analysis.id} blueprint={blueprint} steps={steps} />
-            ))
-          ) : (
-            <div className="empty">
-              <h3 className="h2">No practice plan yet</h3>
-              <p className="body measure">
-                Build one from a tagged weakness on the Summary tab, once a coaching read exists.
-              </p>
-            </div>
-          )}
-        </div>
-      ) : null}
-
+      </details>
     </div>
   );
 }
@@ -447,7 +407,9 @@ function initialFullCourtCorners(calibration: CourtCalibrationRow | null, width:
 
 const REFERENCE_FRAME_COUNT = 3;
 
-/** Player self-tagging — see PlayerTagPicker.tsx. Kept as its own section below the tabs since it drives (re)generating the read itself, not one tab's content.
+/** Player self-tagging — see PlayerTagPicker.tsx. Kept as its own section, and
+ * in a dialog once a read exists, because it drives (re)generating the read
+ * itself rather than showing any part of it.
  *
  * phase2Tracks/phase2Frames are passed in from AnalysisBreakdown's own Phase2Data
  * fetch rather than re-queried here — this section used to call getPhase2Data a
@@ -511,14 +473,13 @@ async function TagSection({
   );
 }
 
-function noteForRally(observations: CoachingObservationRow[], rallyIdx: number): string | null {
-  const match = observations.find((o) => o.rally_idx === rallyIdx);
-  return match ? match.title : null;
+function totalContacts(rallies: ViewRally[]): number {
+  return rallies.reduce((sum, r) => sum + r.contactCount, 0);
 }
 
-function longestRally(rallies: RallyMark[]): string {
+function longestRally(rallies: ViewRally[]): string {
   if (rallies.length === 0) return "—";
-  const longest = Math.max(...rallies.map((r) => r.end_s - r.start_s));
+  const longest = Math.max(...rallies.map((r) => r.endS - r.startS));
   return `${longest.toFixed(1)}s`;
 }
 
@@ -554,10 +515,6 @@ function boxesAtTimestamp(
     if (point) boxes.push({ playerLabel: t.player_label, box: point.boxImageNorm });
   }
   return boxes;
-}
-
-function mmss(s: number): string {
-  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 }
 
 function formatDuration(seconds: number): string {

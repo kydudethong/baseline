@@ -1,8 +1,8 @@
 import Link from "next/link";
+import Image from "next/image";
 import type { Metadata } from "next";
 import { signup } from "@/app/actions/auth";
 import { AuthForm } from "@/components/auth/AuthForm";
-import { Ball } from "@/components/motifs/Motifs";
 
 export const metadata: Metadata = { title: "Sign up — Baseline" };
 
@@ -14,7 +14,13 @@ export default function SignupPage() {
     >
       <div style={{ width: "100%", maxWidth: 340 }} className="stack g5">
         <Link href="/" className="logo" style={{ justifyContent: "center" }}>
-          <Ball size={22} />
+{/* The DARK mark. There are two files and the choice is not cosmetic:
+          baseline-mark.png is a white B with a white speed-trail, so on the
+          light ground it is white on near-white and only the green ball
+          survives. The dark variant recolours exactly the achromatic pixels
+          and leaves the ball untouched, so it is the same logo rather than a
+          second one. White stays on the landing hero, which is still dark. */}
+          <Image src="/brand/baseline-mark-dark.png" alt="" width={494} height={420} style={{ height: 24, width: "auto" }} priority />
           <span className="wm">Baseline</span>
         </Link>
         <div className="card stack g4">

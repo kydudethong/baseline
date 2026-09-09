@@ -68,13 +68,19 @@ export function CourtWatermark({ className, opacity = 0.07 }: { className?: stri
       aria-hidden="true"
       style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
     >
+      {/* Multipliers track the ground --ink sits on, and they have now moved
+          twice. On paper (dark ink) *6 is a faint grid. Under the dark theme
+          --ink inverted to near-white and the same *6 became a bright grid
+          cutting through the hero headline, so it dropped to *1.6. The theme
+          is light again and they go back up. If the ground ever flips a third
+          time, this is the knob — a watermark has to sit under the type. */}
       <rect x="1" y="1" width="438" height="198" fill="none" stroke="var(--ink)" strokeOpacity={opacity * 6} strokeWidth="2" />
       <line x1="220" y1="0" x2="220" y2="200" stroke="var(--ink)" strokeOpacity={opacity * 8} strokeWidth="3" />
       <line x1="150" y1="0" x2="150" y2="200" stroke="var(--ink)" strokeOpacity={opacity * 6} strokeWidth="2" />
       <line x1="290" y1="0" x2="290" y2="200" stroke="var(--ink)" strokeOpacity={opacity * 6} strokeWidth="2" />
       <line x1="0" y1="100" x2="150" y2="100" stroke="var(--ink)" strokeOpacity={opacity * 6} strokeWidth="2" />
       <line x1="290" y1="100" x2="440" y2="100" stroke="var(--ink)" strokeOpacity={opacity * 6} strokeWidth="2" />
-      <rect x="150" y="0" width="140" height="200" fill="var(--optic)" fillOpacity={opacity} />
+      <rect x="150" y="0" width="140" height="200" fill="var(--optic)" fillOpacity={opacity * 2.2} />
     </svg>
   );
 }
