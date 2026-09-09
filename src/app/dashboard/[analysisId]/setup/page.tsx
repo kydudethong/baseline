@@ -92,6 +92,8 @@ export default async function SetupPage({
                       }
                     : null,
                   players: setup.players.map((p) => ({ x: p.x, y: p.y, isSelf: p.isSelf })),
+                  lineColorHex: setup.lineColorHex,
+                  matchMode: setup.matchMode,
                 }
               : null
           }

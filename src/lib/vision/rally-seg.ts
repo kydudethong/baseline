@@ -107,6 +107,13 @@ export interface RallySegInput {
    * four corners on the painted lines is more reliable than either.
    */
   courtOverride?: object | null;
+  /**
+   * Dotted `--set` pairs from the user's setup: the colour of the painted
+   * lines, and how many players to expect. Passed as pairs rather than an
+   * object so the caller decides what is worth overriding and this stays a
+   * dumb conduit.
+   */
+  configOverrides?: Array<[string, string]>;
   onLog?: (line: string) => void;
 }
 
@@ -216,6 +223,17 @@ export async function segmentRalliesViaRallySeg(
       "--set", `ball.replay_path=${detPath}`,
       "--no-cache",
     );
+
+    // Whatever the user told us on the setup screen. Line colour changes what
+    // the court fitter looks for; player count changes how many people the
+    // tracker keeps. Both are things only the user knows, and both are wrong
+    // by default on a court that is not white-lined doubles.
+    for (const [key, value] of input.configOverrides ?? []) {
+      args.push("--set", `${key}=${value}`);
+    }
+    if ((input.configOverrides ?? []).some(([k]) => k === "court.line_color_hex")) {
+      input.onLog?.("fitting the court to the line colour you picked, not white");
+    }
 
     // A hand-made calibration for this camera position beats anything either
     // app can fit automatically, so it wins outright when one exists. Four

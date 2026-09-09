@@ -32,6 +32,8 @@ import { useRouter } from "next/navigation";
 
 import { computeHomography, applyHomography } from "@/lib/vision/homography";
 import { courtSegments, type CourtLineRole } from "@/lib/vision/court-model";
+import { sampleLineColor } from "@/lib/vision/sample-color";
+import { playersForMode, type MatchMode } from "@/lib/db/setup";
 import { SetupExamples } from "./SetupExamples";
 
 type Corner = { x: number; y: number };
@@ -42,7 +44,7 @@ type Corner = { x: number; y: number };
  * whole person rather than a dot at their shoes.
  */
 type Player = { x: number; y: number; isSelf: boolean; box?: [number, number, number, number] };
-type Stage = "court" | "players";
+type Stage = "court" | "players" | "line-colour";
 
 /**
  * Blank margin drawn around the video, as a fraction of its short side.
@@ -114,6 +116,8 @@ export interface SetupCanvasProps {
     frameTimestampSeconds: number;
     court: SetupCourt | null;
     players: Player[];
+    lineColorHex?: string | null;
+    matchMode?: MatchMode;
   } | null;
   /**
    * Rendered inside the upload flow rather than on its own page. The canvas
@@ -152,17 +156,38 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   const [auto, setAuto] = useState<"idle" | "running" | "done" | "failed">("idle");
   const [autoNote, setAutoNote] = useState<string | null>(null);
   const [showLines, setShowLines] = useState(true);
+  /**
+   * The colour of the painted lines, sampled off this frame.
+   *
+   * Null means white, which is what the fitter assumes anyway -- so a user on
+   * a normal court never has to touch this. It exists for the courts where
+   * the lines are blue, yellow or black, where the fitter previously could
+   * not see them at all: its mask tested for "bright and unsaturated", which
+   * excludes a coloured line by construction rather than by degree, so no
+   * amount of retrying or threshold-nudging would ever have found one.
+   */
+  const [lineColor, setLineColor] = useState<string | null>(initial?.lineColorHex ?? null);
+  const [matchMode, setMatchMode] = useState<MatchMode>(initial?.matchMode ?? "doubles");
+  const [colourNote, setColourNote] = useState<string | null>(null);
 
   /* ---------------------------------------------------------------------
    * Finding the frame.
    * ------------------------------------------------------------------- */
 
-  const findFrame = useCallback(async () => {
+  const findFrame = useCallback(async (colour?: string | null) => {
     setAuto("running");
     setAutoNote(null);
     setError(null);
     try {
-      const res = await fetch(`/api/analyses/${analysisId}/setup-frame`, { method: "POST" });
+      // The colour goes to the server, not just into the saved setup. A court
+      // that would not fit against white paint gets a second attempt against
+      // the colour actually on the ground -- which is the only way picking one
+      // can help before the analysis runs.
+      const res = await fetch(`/api/analyses/${analysisId}/setup-frame`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lineColorHex: colour ?? null }),
+      });
       const json = (await res.json()) as AutoSetup & { error?: string };
       if (!res.ok) {
         setAuto("failed");
@@ -235,7 +260,10 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     // every corner in the wrong space.
     if (startedRef.current || initial || !videoReady) return;
     startedRef.current = true;
-    void findFrame();
+    // No colour on this path by construction: it only runs when there is no
+    // saved setup, so nothing has been sampled yet. The first pass looks for
+    // white, and the user picks a colour only if that comes back empty.
+    void findFrame(null);
   }, [findFrame, initial, videoReady]);
 
   /* ---------------------------------------------------------------------
@@ -286,6 +314,67 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     }
     return frameH * 0.14;
   }, [corners, quadKind]);
+
+  /**
+   * Sample the line colour from the pixel the user clicked.
+   *
+   * Read from the RAW video frame, never from the canvas. The canvas has the
+   * court overlay painted on top of it, so a click on a guide line would
+   * sample OUR blue rather than the paint underneath -- and the fitter would
+   * then be told to look for the colour of its own overlay.
+   */
+  const pickColourAt = useCallback((p: Corner) => {
+    const video = videoRef.current;
+    if (!video?.videoWidth) return;
+    const x = Math.round(p.x);
+    const y = Math.round(p.y);
+    if (x < 0 || y < 0 || x >= video.videoWidth || y >= video.videoHeight) {
+      setColourNote("That was in the margin, outside the footage. Click a painted line inside the frame.");
+      return;
+    }
+
+    const R = 2;
+    const side = R * 2 + 1;
+    // Clamped so a click near an edge still yields a full patch, rather than
+    // drawImage silently handing back transparent pixels off the frame.
+    const sx = Math.max(0, Math.min(video.videoWidth - side, x - R));
+    const sy = Math.max(0, Math.min(video.videoHeight - side, y - R));
+
+    const off = document.createElement("canvas");
+    off.width = side;
+    off.height = side;
+    const octx = off.getContext("2d", { willReadFrequently: true });
+    if (!octx) return;
+    octx.drawImage(video, sx, sy, side, side, 0, 0, side, side);
+
+    let data: Uint8ClampedArray;
+    try {
+      data = octx.getImageData(0, 0, side, side).data;
+    } catch {
+      // A cross-origin video with no CORS headers taints the canvas and
+      // getImageData throws. Nothing the user can do about it, so say what
+      // it means rather than showing them a SecurityError.
+      setColourNote(
+        "This video is served without the permissions a browser needs to read its pixels, "
+        + "so the colour can't be sampled here. The analysis still works — it will look for white lines."
+      );
+      return;
+    }
+
+    const got = sampleLineColor(data, side, side, x - sx, y - sy, R);
+    if (!got) return;
+    setLineColor(got.hex);
+    setStage(corners.length === 4 ? "players" : "court");
+    // Agreement is how much of the 5x5 patch matched the clicked pixel. A
+    // painted line is thin, so a genuine hit agrees only partly; near-total
+    // agreement means the click landed in the middle of something large,
+    // which on a court is the surface, not a line.
+    setColourNote(
+      got.agreement > 0.9
+        ? `Sampled ${got.hex}, but that click looks like it landed on open court rather than a line — the whole area around it is the same colour. Try again right on the paint.`
+        : `Line colour set to ${got.hex}. Re-detect to fit the court against it.`
+    );
+  }, [corners.length]);
 
   /** The rectangle that represents this player on screen, box or not. */
   const playerRect = useCallback((q: Player): [number, number, number, number] => {
@@ -490,6 +579,10 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     const canvas = canvasRef.current!;
     const scale = canvas.width / canvas.getBoundingClientRect().width;
     const grab = 16 * scale;
+    if (stage === "line-colour") {
+      pickColourAt(p);
+      return;
+    }
     if (stage === "court") {
       const hit = corners.findIndex((c) => Math.hypot(c.x - p.x, c.y - p.y) < grab);
       if (hit >= 0) { setDragging(hit); return; }
@@ -553,6 +646,9 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       // The box was only ever a click target on this one frame; what matters
       // downstream is the feet, which is what the tracker matches against.
       players: players.map(({ x, y, isSelf }) => ({ x, y, isSelf })),
+      // Null means white, which is what the fitter assumes on its own.
+      lineColorHex: lineColor,
+      matchMode,
     };
     // Everything from here is wrapped: an unhandled rejection (offline, a
     // proxy returning non-JSON, an aborted connection) used to leave `saving`
@@ -654,7 +750,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
           onMouseLeave={() => setDragging(null)}
           style={{
             width: "100%", display: "block",
-            cursor: stage === "court" ? "crosshair" : "pointer",
+            cursor: stage === "line-colour" ? "cell" : stage === "court" ? "crosshair" : "pointer",
             opacity: videoReady ? 1 : 0,
             transition: "opacity .2s ease",
           }}
@@ -708,6 +804,21 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             {" "}If a corner sits outside the video, click out in the dark
             margin where it would be — the dashed line marks the edge of the
             footage, and a corner beyond it works exactly the same.
+          </p>
+          <p className="sm" style={{ margin: 0, opacity: 0.65 }}>
+            {matchMode === "singles" ? "Singles" : "Doubles"} ·{" "}
+            {lineColor ? (
+              <>
+                lines sampled as{" "}
+                <span style={{
+                  display: "inline-block", width: 10, height: 10, borderRadius: 3,
+                  background: lineColor, border: "1px solid var(--line)",
+                  verticalAlign: "middle",
+                }} />{" "}
+                {lineColor}
+              </>
+            ) : "white lines"}
+            {" — change either under “Something’s wrong”."}
           </p>
           <div className="row g2">
             <button
@@ -771,6 +882,93 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             </div>
 
             <div className="stack g2">
+              <strong style={{ fontSize: 14 }}>The lines are not white</strong>
+              <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
+                The court fitter looks for white paint. If yours is blue,
+                yellow or black it will not find the court at all — no amount
+                of retrying helps, because it is testing for
+                &ldquo;bright and colourless&rdquo;. Click a line to sample its
+                real colour, then re-detect.
+              </p>
+              <div className="row g2" style={{ alignItems: "center" }}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${stage === "line-colour" ? "btn-primary" : "btn-soft"}`}
+                  onClick={() => {
+                    setStage(stage === "line-colour" ? "court" : "line-colour");
+                    setColourNote(stage === "line-colour" ? null : "Click straight down the middle of a painted line.");
+                  }}
+                >
+                  {stage === "line-colour" ? "Cancel" : lineColor ? "Pick again" : "Pick the line colour"}
+                </button>
+                {lineColor ? (
+                  <>
+                    <span
+                      aria-label={`Sampled line colour ${lineColor}`}
+                      style={{
+                        width: 22, height: 22, borderRadius: 6, background: lineColor,
+                        border: "1px solid var(--line)", flex: "0 0 auto",
+                      }}
+                    />
+                    <code className="num sm" style={{ opacity: 0.8 }}>{lineColor}</code>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => { setLineColor(null); setColourNote("Back to looking for white lines."); }}
+                    >
+                      Clear
+                    </button>
+                  </>
+                ) : (
+                  <span className="sm" style={{ opacity: 0.6 }}>Assuming white</span>
+                )}
+              </div>
+              {lineColor ? (
+                <button
+                  type="button"
+                  className="btn btn-soft btn-sm"
+                  disabled={auto === "running"}
+                  onClick={() => void findFrame(lineColor)}
+                  style={{ alignSelf: "flex-start" }}
+                >
+                  {auto === "running" ? "Re-detecting…" : "Re-detect with this colour"}
+                </button>
+              ) : null}
+              {colourNote ? (
+                <p className="sm" style={{ margin: 0, opacity: 0.75 }}>{colourNote}</p>
+              ) : null}
+            </div>
+
+            <div className="stack g2">
+              <strong style={{ fontSize: 14 }}>Singles or doubles</strong>
+              <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
+                Both are played on the same 20×44 court with the same lines, so
+                this changes nothing about the geometry. What it changes is how
+                many people the tracker expects to find — set it wrong and it
+                either drops a player or goes looking for one who is not there.
+              </p>
+              <div className="row g2">
+                {(["doubles", "singles"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={`btn btn-sm ${matchMode === m ? "btn-primary" : "btn-soft"}`}
+                    onClick={() => setMatchMode(m)}
+                  >
+                    {m === "doubles" ? "Doubles · 4" : "Singles · 2"}
+                  </button>
+                ))}
+              </div>
+              {players.length > 0 && players.length !== playersForMode(matchMode) ? (
+                <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
+                  {players.length} marked, {playersForMode(matchMode)} expected for{" "}
+                  {matchMode}. That is allowed — someone may be off camera — but
+                  it is worth a look.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="stack g2">
               <strong style={{ fontSize: 14 }}>The players are wrong</strong>
               <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
                 Click anywhere on a player to tag them as you. Click empty court
@@ -810,7 +1008,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                 if (willClobber && !window.confirm(
                   "Replace the court corners and players you have marked with a fresh detection?"
                 )) return;
-                void findFrame();
+                void findFrame(lineColor);
               }}
             >
               {auto === "running" ? "Looking…" : "Try a different frame"}

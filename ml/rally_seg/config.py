@@ -200,6 +200,26 @@ class CourtConfig:
     refit_interval_s: float = 0.0    # 0 = fit once (static camera)
     min_line_support: float = 0.35
     white_threshold: int = 165
+    #: Court lines are assumed white, which is what ``white_threshold`` above
+    #: gates.  Set this to a ``"#rrggbb"`` sampled from the footage itself to
+    #: fit courts whose lines are painted some other colour -- blue on a green
+    #: surface, yellow on blue, black on concrete.  Empty means white, and
+    #: takes the original bright-and-unsaturated path unchanged.
+    #:
+    #: A sampled colour beats a named one: paint fades, gym lighting is
+    #: green-ish, and a phone camera white-balances the whole frame, so the
+    #: "yellow" line in the footage is frequently nothing a colour picker
+    #: would call yellow.
+    line_color_hex: str = ""
+    #: Lab distance within which a pixel counts as line paint.  Raise it for
+    #: uneven lighting, lower it when the surface colour is close to the line
+    #: colour.  Only used when ``line_color_hex`` is set.
+    line_color_tolerance: float = 26.0
+    #: How much lightness counts toward that distance, against a/b at 1.0.
+    #: Below 1.0 because the same paint is darker in the net post's shadow
+    #: than in sun while its a/b barely move; above 0 because lightness is
+    #: the only thing separating white paint from grey concrete.
+    line_color_lightness_weight: float = 0.5
     canny_low: int = 50
     canny_high: int = 150
     hough_threshold: int = 70
@@ -256,8 +276,12 @@ class CourtConfig:
     #: near-left baseline corner.  Used by ``backend: fixed``; also a rescue
     #: hatch when automatic fitting fails on unusual camera angles.
     manual_points_path: Optional[str] = None
-    #: Singles courts share the same outer dimensions in pickleball, so this
-    #: only affects which reference lines are scored during fitting.
+    #: Singles and doubles are played on the same 20x44 court in pickleball,
+    #: with the same lines -- there is no singles sideline as there is in
+    #: tennis.  So this changes nothing about court fitting, and nothing here
+    #: reads it.  What the distinction does change is how many people are on
+    #: court, which is ``players.max_players``, not a court setting at all.
+    #: Kept only so an existing config naming it does not fail to load.
     doubles: bool = True
 
 

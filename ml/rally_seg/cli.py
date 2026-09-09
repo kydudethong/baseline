@@ -223,7 +223,7 @@ def _court_payload(court) -> dict:
 
 def cmd_court(args) -> int:
     import cv2
-    from .detect.court import CourtDetector, FallbackCourt, white_line_mask
+    from .detect.court import CourtDetector, FallbackCourt, line_mask
     from .debug_video import _draw_court
     from .video import VideoSource
 
@@ -234,7 +234,9 @@ def cmd_court(args) -> int:
     court = detector.fit([f.image for f in frames], (source.out_width, source.out_height))
     if isinstance(court, FallbackCourt):
         reason = getattr(detector, "last_rejection", None) or (
-            "no quad scored well enough. Try court.white_threshold, court.hough_threshold, "
+            "no quad scored well enough. If the lines are not white, set "
+            "court.line_color_hex to a colour sampled from the footage. "
+            "Otherwise try court.white_threshold, court.hough_threshold, "
             "or set court.manual_points_path with four corners.")
         print(f"court NOT detected. {reason}", file=sys.stderr)
         if args.json:
@@ -258,7 +260,7 @@ def cmd_court(args) -> int:
     # wrong, this says whether the lines were there to be found at all -- a
     # different question from whether the search picked the right quad.
     if args.mask and mid is not None:
-        cv2.imwrite(args.mask, white_line_mask(mid.image, cfg.court))
+        cv2.imwrite(args.mask, line_mask(mid.image, cfg.court))
         print(f"wrote {args.mask}", file=sys.stderr)
     if args.json:
         with open(args.json, "w", encoding="utf-8") as fh:
@@ -482,7 +484,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = common(sub.add_parser("court", help="fit and inspect the court homography"))
     s.add_argument("--out", help="write an annotated still")
-    s.add_argument("--mask", help="write the white-line mask the fit is searching")
+    s.add_argument("--mask", help="write the line mask the fit is searching")
     s.add_argument("--json", help="write corners, confidence and projected lines here")
     s.add_argument("--save-points", help="write the fitted corners for court.manual_points_path")
     s.set_defaults(func=cmd_court)

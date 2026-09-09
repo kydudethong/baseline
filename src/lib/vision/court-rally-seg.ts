@@ -179,14 +179,17 @@ function toCalibration(
 export async function detectCourtViaRallySeg(
   videoPath: string,
   frameSize: [number, number],
-  onLog?: (line: string) => void
+  onLog?: (line: string) => void,
+  configOverrides?: Array<[string, string]>
 ): Promise<CourtCalibration | null> {
   if (!rallySegInstalled()) return null;
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "rsc-"));
   const jsonPath = path.join(work, "court.json");
   try {
-    await run(pythonBin(), ["-m", "rally_seg", "court", path.resolve(videoPath),
-                            "--json", jsonPath, "--quiet"], rallySegDir(), onLog);
+    const args = ["-m", "rally_seg", "court", path.resolve(videoPath),
+                  "--json", jsonPath, "--quiet"];
+    for (const [key, value] of configOverrides ?? []) args.push("--set", `${key}=${value}`);
+    await run(pythonBin(), args, rallySegDir(), onLog);
     const raw = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
     if (!raw?.court) {
       if (raw?.reason) onLog?.(`rally_seg could not fit the court: ${raw.reason}`);
@@ -216,13 +219,19 @@ export async function setupFrameViaRallySeg(
   videoPath: string,
   frameSize: [number, number],
   outFramePath: string | null,
-  onLog?: (line: string) => void
+  onLog?: (line: string) => void,
+  configOverrides?: Array<[string, string]>
 ): Promise<RallySegSetup | null> {
   if (!rallySegInstalled()) return null;
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "rss-"));
   const jsonPath = path.join(work, "setup.json");
   try {
     const args = ["-m", "rally_seg", "setup", path.resolve(videoPath), "--json", jsonPath, "--quiet"];
+    // The setup screen re-runs detection after the user picks a line colour,
+    // which is the only way picking one can pay off before the analysis: a
+    // court that would not fit against white gets another go against the
+    // colour that is actually painted on it.
+    for (const [key, value] of configOverrides ?? []) args.push("--set", `${key}=${value}`);
     if (outFramePath) {
       fs.mkdirSync(path.dirname(outFramePath), { recursive: true });
       args.push("--out-frame", outFramePath);

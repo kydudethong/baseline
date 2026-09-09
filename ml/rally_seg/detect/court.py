@@ -263,19 +263,99 @@ class FallbackCourt:
 # --- fitting -----------------------------------------------------------------
 
 
-def white_line_mask(image: np.ndarray, cfg: CourtConfig) -> np.ndarray:
+def parse_hex_color(value: str) -> Optional[Tuple[int, int, int]]:
+    """``"#rrggbb"`` -> a BGR triple, or None for anything unparseable.
+
+    None means "no colour given, use the white path". Returning None rather
+    than raising is deliberate: a malformed colour should cost the run its
+    colour hint, not the run.
+    """
+    if not value:
+        return None
+    s = str(value).strip().lstrip("#")
+    if len(s) == 3:
+        s = "".join(ch * 2 for ch in s)
+    if len(s) != 6:
+        return None
+    try:
+        r, g, b = int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16)
+    except ValueError:
+        return None
+    return (b, g, r)
+
+
+def _white_mask(image: np.ndarray, cfg: CourtConfig) -> np.ndarray:
     """Court lines are bright and unsaturated; the court surface is neither."""
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     v = hsv[:, :, 2]
     s = hsv[:, :, 1]
-    mask = ((v >= cfg.white_threshold) & (s <= 90)).astype(np.uint8) * 255
-    # A painted line is thin: a top-hat keeps lines and discards bright regions
-    # like a sunlit fence or a white shirt.
+    return ((v >= cfg.white_threshold) & (s <= 90)).astype(np.uint8) * 255
+
+
+def _color_distance(image: np.ndarray, bgr: Tuple[int, int, int],
+                    cfg: CourtConfig) -> np.ndarray:
+    """Per-pixel distance to the sampled line colour, in CIE Lab.
+
+    Lab rather than HSV, for two reasons that both bite in practice. Hue is
+    undefined at low saturation, so a grey-blue line has no stable hue to
+    threshold; and hue wraps at red, so a red line straddles the 0/179
+    boundary and any symmetric window around it is wrong on one side. Lab has
+    neither problem, and its distances are near enough perceptual that a
+    single tolerance behaves the same across colours.
+
+    Lightness is down-weighted rather than dropped. The same paint is darker
+    in the net post's shadow than in sun while its a/b barely move -- but
+    lightness is also the only thing separating white paint from grey
+    concrete, so removing it entirely would make white unmatchable.
+    """
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB).astype(np.float32)
+    swatch = np.zeros((1, 1, 3), np.uint8)
+    swatch[0, 0] = bgr
+    target = cv2.cvtColor(swatch, cv2.COLOR_BGR2LAB).astype(np.float32)[0, 0]
+    wl = max(0.0, float(cfg.line_color_lightness_weight))
+    dl = (lab[:, :, 0] - target[0]) * wl
+    da = lab[:, :, 1] - target[1]
+    db = lab[:, :, 2] - target[2]
+    return np.sqrt(dl * dl + da * da + db * db)
+
+
+def line_mask(image: np.ndarray, cfg: CourtConfig) -> np.ndarray:
+    """The painted lines, whatever colour they are painted.
+
+    With no ``line_color_hex`` this is the original white detector, unchanged.
+    With one, membership comes from Lab distance to that colour instead.
+
+    Either way the same thinness test follows, and it is doing most of the
+    work: a painted line is a few pixels wide, so a top-hat keeps it and
+    discards every large region of the same colour -- a white shirt, a sunlit
+    fence, a blue court under a blue line. The top-hat runs on whichever
+    image makes the line a local peak: brightness for white, and closeness to
+    the target colour otherwise, since a blue line on a green court is not a
+    peak in brightness at all.
+    """
+    bgr = parse_hex_color(getattr(cfg, "line_color_hex", ""))
+    if bgr is None:
+        mask = _white_mask(image, cfg)
+        peaked = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        tol = max(1.0, float(cfg.line_color_tolerance))
+        dist = _color_distance(image, bgr, cfg)
+        mask = (dist <= tol).astype(np.uint8) * 255
+        # Closeness on the same 0-255 scale the white path's grayscale uses,
+        # so the top-hat threshold below keeps its meaning. Saturating at 3x
+        # the tolerance keeps the gradient across the line's own edge steep
+        # instead of flattening it against far-away colours.
+        peaked = np.clip(255.0 - dist * (255.0 / (tol * 3.0)), 0.0, 255.0).astype(np.uint8)
+
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
-    tophat = cv2.morphologyEx(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY),
-                              cv2.MORPH_TOPHAT, kernel)
+    tophat = cv2.morphologyEx(peaked, cv2.MORPH_TOPHAT, kernel)
     _, thin = cv2.threshold(tophat, 18, 255, cv2.THRESH_BINARY)
     return cv2.bitwise_and(mask, thin)
+
+
+def white_line_mask(image: np.ndarray, cfg: CourtConfig) -> np.ndarray:
+    """Kept for callers that predate coloured lines. Same function now."""
+    return line_mask(image, cfg)
 
 
 def _segments(mask: np.ndarray, cfg: CourtConfig) -> np.ndarray:
@@ -457,7 +537,7 @@ def fit_court_from_image(image: np.ndarray, cfg: CourtConfig) -> Optional[CourtM
     orientation depends entirely on where the camera is standing.
     """
     h, w = image.shape[:2]
-    mask = white_line_mask(image, cfg)
+    mask = line_mask(image, cfg)
     min_len = max(20.0, cfg.hough_min_line_frac * max(h, w))
     segs = _segments(mask, cfg)
     if len(segs) < 4:
@@ -713,7 +793,7 @@ class CourtDetector:
                 if not _plausible_quad(quad, image_size):
                     continue
                 model = CourtModel.from_corners(quad, image_size, confidence=0.9, source="keypoint")
-                mask = white_line_mask(frames[0], self.cfg)
+                mask = line_mask(frames[0], self.cfg)
                 model.confidence = _score_homography(model.H, mask, self.cfg)
                 if best is None or model.confidence > best.confidence:
                     best = model

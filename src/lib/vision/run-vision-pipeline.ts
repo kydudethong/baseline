@@ -18,7 +18,10 @@ import { paddleFromPoseEnabled, paddlesFromPoses } from "./paddle-from-pose";
 import { rallySegEnabled, segmentRalliesViaRallySeg } from "./rally-seg";
 import { describeError } from "@/lib/analysis/describe-error";
 import { detectCourtViaRallySeg, rallySegCourtEnabled } from "./court-rally-seg";
-import { matchTracksToSetup, setupCourtForRallySeg, type PreAnalysisSetup } from "@/lib/db/setup";
+import {
+  matchTracksToSetup, setupCourtForRallySeg, rallySegOverridesForSetup,
+  type PreAnalysisSetup,
+} from "@/lib/db/setup";
 import type {
   AnalysisEvent,
   BoundingBoxNorm,
@@ -168,7 +171,8 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   //    of hand-marked corners on the same clip.
   if (!courtCalibration && rallySegCourtEnabled()) {
     courtCalibration = await detectCourtViaRallySeg(
-      input.videoPath, [input.frameWidthPx, input.frameHeightPx], (l) => log(`  court: ${l}`)
+      input.videoPath, [input.frameWidthPx, input.frameHeightPx], (l) => log(`  court: ${l}`),
+      rallySegOverridesForSetup(input.setup ?? null)
     );
     if (courtCalibration) {
       const d = courtCalibration.diagnostics as { agreement?: number };
@@ -807,6 +811,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
           calibration: courtCalibration,
           debugId: input.debugId,
           courtOverride: setupCourtForRallySeg(input.setup ?? null),
+          configOverrides: rallySegOverridesForSetup(input.setup ?? null),
           onLog: (line) => log(`  rally_seg: ${line}`),
         });
         if (seg && seg.rallies.length > 0) {

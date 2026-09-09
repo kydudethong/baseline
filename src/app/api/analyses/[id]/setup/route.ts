@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
 import { getAnalysisForUser } from "@/lib/db/analyses";
-import { getSetup, saveSetup, type PreAnalysisSetup, type SetupPlayer } from "@/lib/db/setup";
+import {
+  getSetup, saveSetup, normaliseLineColor,
+  type PreAnalysisSetup, type SetupPlayer, type MatchMode,
+} from "@/lib/db/setup";
 
 export const runtime = "nodejs";
 
@@ -69,12 +72,24 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "Only one player can be marked as you." }, { status: 400 });
   }
 
+  // A malformed colour is dropped rather than rejected. It is a hint to the
+  // court fitter, and the run is perfectly valid without one -- failing the
+  // save would lose the corners and players over a cosmetic field.
+  const lineColorHex = normaliseLineColor(body.lineColorHex);
+
+  // Anything that is not "singles" is doubles, which is both the commoner
+  // game and the safer default: it expects four players and the tracker
+  // prunes down, where guessing singles would cap a doubles match at two.
+  const matchMode: MatchMode = body.matchMode === "singles" ? "singles" : "doubles";
+
   const setup: PreAnalysisSetup = {
     frameTimestampSeconds: body.frameTimestampSeconds!,
     frameWidthPx: body.frameWidthPx!,
     frameHeightPx: body.frameHeightPx!,
     court: c ?? null,
     players,
+    lineColorHex,
+    matchMode,
     savedAt: new Date().toISOString(),
   };
 

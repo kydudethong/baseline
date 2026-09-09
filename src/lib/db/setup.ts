@@ -20,6 +20,37 @@ export interface SetupPlayer extends SetupPoint {
   label?: string;
 }
 
+/**
+ * How many people are on court. Pickleball singles and doubles are played on
+ * the SAME 20x44 court, with the same lines -- there is no singles sideline as
+ * there is in tennis -- so this says nothing about geometry. What it says is
+ * how many players the tracker should expect, which is the whole of its job.
+ */
+export type MatchMode = "singles" | "doubles";
+
+export function playersForMode(mode: MatchMode | null | undefined): number {
+  return mode === "singles" ? 2 : 4;
+}
+
+/** `#rrggbb`, lowercase. Anything else is not a colour we will pass along. */
+const HEX_RE = /^#[0-9a-f]{6}$/;
+
+/**
+ * A line colour, normalised, or null.
+ *
+ * Null means white, which is what the fitter assumes with nothing set. Bad
+ * input becomes null rather than an error: a colour is a hint, and losing the
+ * hint should cost the run its hint, not the run.
+ */
+export function normaliseLineColor(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  let s = value.trim().toLowerCase();
+  if (!s) return null;
+  if (!s.startsWith("#")) s = `#${s}`;
+  if (/^#[0-9a-f]{3}$/.test(s)) s = `#${s[1]}${s[1]}${s[2]}${s[2]}${s[3]}${s[3]}`;
+  return HEX_RE.test(s) ? s : null;
+}
+
 export interface PreAnalysisSetup {
   /** Which frame the user clicked on — every coordinate below is in its space. */
   frameTimestampSeconds: number;
@@ -39,7 +70,38 @@ export interface PreAnalysisSetup {
   } | null;
   /** Feet positions of the people to track. Anyone else is ignored. */
   players: SetupPlayer[];
+  /**
+   * The colour of the painted lines, sampled off this frame by the user.
+   *
+   * Null means white, which is what the fitter assumes on its own. It is
+   * sampled rather than named because paint fades, gyms are lit green, and a
+   * phone white-balances the whole frame -- so the "yellow" line in the
+   * footage is frequently nothing a colour picker would call yellow, and a
+   * preset would be confidently wrong where a sampled pixel is simply right.
+   */
+  lineColorHex: string | null;
+  /** Singles or doubles. See MatchMode: this is a player count, not geometry. */
+  matchMode: MatchMode;
   savedAt: string;
+}
+
+/**
+ * The rally_seg config overrides this setup implies, as dotted key/value
+ * pairs ready for `--set`.
+ *
+ * Only what the user actually chose. An unset line colour must not become
+ * `court.line_color_hex=` -- an empty override still takes the colour path
+ * and would break the white default it is meant to preserve.
+ */
+export function rallySegOverridesForSetup(
+  setup: PreAnalysisSetup | null
+): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  if (!setup) return out;
+  const colour = normaliseLineColor(setup.lineColorHex);
+  if (colour) out.push(["court.line_color_hex", colour]);
+  if (setup.matchMode === "singles") out.push(["players.max_players", "2"]);
+  return out;
 }
 
 export function isCompleteSetup(s: PreAnalysisSetup | null): boolean {
@@ -56,7 +118,18 @@ export async function getSetup(
     .eq("id", analysisId)
     .maybeSingle();
   if (error || !data) return null;
-  return (data.pre_analysis_setup as PreAnalysisSetup | null) ?? null;
+  const raw = (data.pre_analysis_setup as Partial<PreAnalysisSetup> | null) ?? null;
+  if (!raw) return null;
+  // Rows saved before line colour and match mode existed have neither field.
+  // The column is JSONB, so nothing migrated them and nothing will -- filling
+  // the defaults on read is what keeps every caller from having to remember
+  // that `matchMode` is sometimes undefined despite what the type says.
+  return {
+    ...raw,
+    lineColorHex: normaliseLineColor(raw.lineColorHex),
+    matchMode: raw.matchMode === "singles" ? "singles" : "doubles",
+    players: Array.isArray(raw.players) ? raw.players : [],
+  } as PreAnalysisSetup;
 }
 
 export async function saveSetup(

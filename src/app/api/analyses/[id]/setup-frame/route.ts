@@ -9,6 +9,7 @@ import { getAnalysisForUser } from "@/lib/db/analyses";
 import { downloadToFile } from "@/lib/storage/r2";
 import { setupFrameViaRallySeg, rallySegInstalled } from "@/lib/vision/court-rally-seg";
 import { describeError } from "@/lib/analysis/describe-error";
+import { normaliseLineColor } from "@/lib/db/setup";
 
 export const runtime = "nodejs";
 export const maxDuration = 600;
@@ -48,6 +49,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     );
   }
 
+  // The line colour the user sampled, if they have got that far. A court
+  // that will not fit against white paint gets a second chance against the
+  // colour that is actually on the ground, which is the whole point of
+  // asking -- so this has to reach the fitter, not just the saved setup.
+  let lineColorHex: string | null = null;
+  try {
+    const body = (await request.json()) as { lineColorHex?: unknown };
+    lineColorHex = normaliseLineColor(body?.lineColorHex);
+  } catch {
+    // No body, or not JSON. The frame finder has always worked without one.
+  }
+
   const refresh = new URL(request.url).searchParams.get("refresh") === "1";
   const dir = cacheDir();
   const jpegPath = path.join(dir, `${id}.jpg`);
@@ -61,8 +74,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const knownSize = (analysis.video.width ?? 0) > 0 && (analysis.video.height ?? 0) > 0;
   if (!refresh && knownSize && fs.existsSync(jpegPath) && fs.existsSync(metaPath)) {
     try {
-      const cached = JSON.parse(await fsp.readFile(metaPath, "utf8")) as { imageSize?: [number, number] };
-      if (cached.imageSize?.[0] === analysis.video.width && cached.imageSize?.[1] === analysis.video.height) {
+      const cached = JSON.parse(await fsp.readFile(metaPath, "utf8")) as {
+        imageSize?: [number, number]; lineColorHex?: string | null;
+      };
+      // The colour is part of the cache key, not a detail. A payload fitted
+      // against white paint is the wrong answer to "fit it against blue",
+      // and serving it would make picking a colour look like it did nothing.
+      const sameColour = (cached.lineColorHex ?? null) === lineColorHex;
+      if (sameColour
+          && cached.imageSize?.[0] === analysis.video.width
+          && cached.imageSize?.[1] === analysis.video.height) {
         return NextResponse.json({ ...cached, cached: true });
       }
     } catch {
@@ -86,7 +107,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const result = await setupFrameViaRallySeg(localPath, [width, height], jpegPath, (line) => {
       logs.push(line);
       console.warn(`[setup-frame ${id}] ${line}`);
-    });
+    }, lineColorHex ? [["court.line_color_hex", lineColorHex]] : []);
     if (!result) {
       const why = logs.length ? logs[logs.length - 1] : "no diagnostic was produced";
       return NextResponse.json(
@@ -113,6 +134,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         : null,
       courtReason: result.courtReason,
       imageSize: result.imageSize,
+      // Recorded so the cache check above can tell which colour this was
+      // fitted against, rather than assuming every payload is comparable.
+      lineColorHex,
     };
     await fsp.mkdir(dir, { recursive: true });
     await fsp.writeFile(metaPath, JSON.stringify(payload), "utf8");
