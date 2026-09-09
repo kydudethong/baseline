@@ -14,13 +14,20 @@ returns its mean HSV. This is intentionally coarse: it is a tie-breaker for
 "does this new detection plausibly continue that lost track", not a
 biometric identifier.
 
-Usage: appearance_signature.py <image_path> <boxes_json>
-  boxes_json: JSON array of {"x","y","width","height"} in 0-1 normalized,
-  top-left-origin image coordinates (same convention as BoundingBoxNorm in
-  phase2-types.ts).
-Prints JSON to stdout: array of {"h","s","v"} (h in degrees 0-360, s/v in
-0-1) aligned by index to the input boxes, or null for a box that couldn't
-be sampled (e.g. it fell entirely outside the frame).
+Batched across every frame in ONE process (mirrors estimate_pose.py) —
+this is classical CV (numpy/cv2), so nearly all of the previous per-frame
+cost was Python-interpreter-plus-import startup, not the actual work;
+doing that once for the whole clip instead of once per frame is a real
+speedup with no change in output.
+
+Usage: appearance_signature.py < requests_json  (reads JSON from stdin)
+  requests_json: JSON array of {"imagePath": str, "boxes": [{"x","y","width","height"}, ...]}
+  boxes are 0-1 normalized, top-left-origin image coordinates (same
+  convention as BoundingBoxNorm in phase2-types.ts).
+Prints one JSON line per request to stdout, in the same order:
+  {"imagePath": str, "signatures": [{"h","s","v"} | null, ...]}
+  (h in degrees 0-360, s/v in 0-1; null for a box that couldn't be sampled,
+  e.g. it fell entirely outside the frame, or the image failed to load.)
 """
 import sys
 import json
@@ -78,20 +85,24 @@ def signature_for_box(hsv, w, h, box):
     }
 
 
-def main():
-    image_path = sys.argv[1]
-    boxes = json.loads(sys.argv[2])
-
+def signatures_for_image(image_path, boxes):
     img = cv2.imread(image_path)
     if img is None:
-        print(json.dumps([None] * len(boxes)))
-        return
-
+        return [None] * len(boxes)
     h, w = img.shape[:2]
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    return [signature_for_box(hsv, w, h, box) for box in boxes]
 
-    out = [signature_for_box(hsv, w, h, box) for box in boxes]
-    print(json.dumps(out))
+
+def main():
+    requests = json.loads(sys.stdin.read())
+    for req in requests:
+        try:
+            sigs = signatures_for_image(req["imagePath"], req["boxes"])
+        except Exception as exc:  # noqa: BLE001 -- surface as data per-frame, not a crash
+            print(json.dumps({"imagePath": req["imagePath"], "error": str(exc), "signatures": [None] * len(req["boxes"])}))
+            continue
+        print(json.dumps({"imagePath": req["imagePath"], "signatures": sigs}))
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { runVisionPipeline } from "../src/lib/vision/run-vision-pipeline";
@@ -83,6 +84,19 @@ async function main() {
   console.log(`${frames.length} frames at ${visionFps} fps · ${meta.width}x${meta.height} · ${meta.durationSeconds.toFixed(1)}s`);
 
   const t0 = Date.now();
+  // debugId and tempDir are what switch on the two things this harness was
+  // silently missing. Without a debugId the overlay is skipped even with
+  // RALLY_SEG_DEBUG=1 -- the render is guarded on having a name to file it
+  // under -- so the flag appeared to do nothing. Without a tempDir the pose
+  // bursts around each contact are skipped, which is the "no scratch
+  // directory was available" limitation in the output.
+  //
+  // Both are derived from the output directory, so re-running into the same
+  // folder overwrites the same overlay rather than filling the debug folder
+  // with a copy per run.
+  const debugId = path.basename(path.resolve(outDir)).replace(/[^\w.-]/g, "_");
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pb-run-shots-"));
+
   const result = await runVisionPipeline({
     videoPath,
     frames,
@@ -90,7 +104,13 @@ async function main() {
     frameHeightPx: meta.height,
     visionFps,
     videoDurationSeconds: meta.durationSeconds,
+    debugId,
+    tempDir,
   });
+  const overlay = path.join(process.cwd(), "public", "rally-debug", `${debugId}.mp4`);
+  if (existsSync(overlay)) console.log(`debug overlay: ${overlay}`);
+  else if (process.env.RALLY_SEG_DEBUG) console.log("RALLY_SEG_DEBUG was set but no overlay was written — see the log above for why");
+
   console.log(`pipeline done in ${((Date.now() - t0) / 1000).toFixed(0)}s — ${result.shots.length} shots, ball coverage ${result.quality.ballCoverage ?? "n/a"}`);
 
   await fs.writeFile(path.join(outDir, "shots.json"), JSON.stringify(result.shots, null, 2));
