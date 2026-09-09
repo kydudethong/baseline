@@ -44,3 +44,21 @@ next-env.d.ts
 # Phase 2 CV scratch
 scripts/cv/__pycache__/
 benchmark-results/
+
+# Generated at runtime by the vision pipeline and the setup page
+public/rally-debug/
+public/setup-frames/
+.vision-test-build/
+
+# CV experiment + debug-run scratch (regenerated on demand, never an input)
+scripts/__pycache__/
+ml-experiments/__pycache__/
+ml-experiments/detector-compare/
+ml-experiments/detector-compare-indoor/
+ml-experiments/paddle-debug/
+ml-experiments/*.json
+shot-results/
+ball_debug_*.txt
+tracknet_result.json
+/_*.png
+_to_delete/
