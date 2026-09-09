@@ -81,19 +81,98 @@ function parseFrameRate(rFrameRate: string): number | null {
  * benchmark-video testing) because ffmpeg re-opens/re-seeks the container
  * on every call; one pass through the video decodes it exactly once.
  */
+/**
+ * Frames inside specific time windows, at a chosen rate — for looking closely
+ * at moments rather than sampling the whole clip evenly.
+ *
+ * Why this is separate from extractFrames(): a swing lasts about a third of a
+ * second, so at the 5 fps the rest of the pipeline runs at, a contact is
+ * covered by one or two frames and there is no swing in the data to measure.
+ * Sampling the WHOLE video fast enough to see a swing would be ~6x the pose
+ * work for footage that is mostly players standing around. Bursts around the
+ * contacts cost a fraction of that and put the frames where the information
+ * is.
+ *
+ * Overlapping windows are merged first, so contacts a few tenths apart share
+ * one decode instead of extracting the same frames twice. Each window is its
+ * own ffmpeg call with input seeking (-ss before -i), which is a keyframe jump
+ * rather than a decode of everything preceding it.
+ */
+export async function extractFrameWindows(
+  filePath: string,
+  outputDir: string,
+  windows: Array<{ startSeconds: number; endSeconds: number }>,
+  opts: { fps: number; maxDimension?: number }
+): Promise<Array<{ path: string; timestampSeconds: number }>> {
+  const { fps, maxDimension } = opts;
+  if (fps <= 0 || windows.length === 0) return [];
+
+  const sorted = windows
+    .filter((w) => Number.isFinite(w.startSeconds) && Number.isFinite(w.endSeconds) && w.endSeconds > w.startSeconds)
+    .map((w) => ({ startSeconds: Math.max(0, w.startSeconds), endSeconds: w.endSeconds }))
+    .sort((a, b) => a.startSeconds - b.startSeconds);
+  if (sorted.length === 0) return [];
+
+  const merged: Array<{ startSeconds: number; endSeconds: number }> = [sorted[0]];
+  for (const w of sorted.slice(1)) {
+    const last = merged[merged.length - 1];
+    if (w.startSeconds <= last.endSeconds) last.endSeconds = Math.max(last.endSeconds, w.endSeconds);
+    else merged.push({ ...w });
+  }
+
+  const fsp = await import("node:fs/promises");
+  const vf = maxDimension ? `fps=${fps},scale='min(${maxDimension},iw)':-2` : `fps=${fps}`;
+  const out: Array<{ path: string; timestampSeconds: number }> = [];
+
+  for (let w = 0; w < merged.length; w++) {
+    const win = merged[w];
+    const dur = win.endSeconds - win.startSeconds;
+    const prefix = `burst-${String(w).padStart(3, "0")}-`;
+    await execFileAsync(
+      "ffmpeg",
+      ["-y", "-ss", win.startSeconds.toFixed(3), "-i", filePath, "-t", dur.toFixed(3),
+       "-vf", vf, "-q:v", "3", `${outputDir}/${prefix}%04d.jpg`],
+      { maxBuffer: 20 * 1024 * 1024 }
+    );
+    const files = (await fsp.readdir(outputDir))
+      .filter((f) => f.startsWith(prefix) && f.endsWith(".jpg"))
+      .sort();
+    // ffmpeg's fps filter emits the first frame at the window start and then
+    // one every 1/fps, so the index IS the offset. Deriving the timestamp
+    // instead of parsing showinfo keeps this off stderr-format parsing.
+    for (let i = 0; i < files.length; i++) {
+      out.push({
+        path: `${outputDir}/${files[i]}`,
+        timestampSeconds: Math.round((win.startSeconds + i / fps) * 1000) / 1000,
+      });
+    }
+  }
+  return out;
+}
+
 export async function extractFrames(
   filePath: string,
   outputDir: string,
-  opts: { count: number; durationSeconds: number }
+  opts: { count: number; durationSeconds: number; maxDimension?: number }
 ): Promise<Array<{ path: string; timestampSeconds: number }>> {
-  const { count, durationSeconds } = opts;
+  const { count, durationSeconds, maxDimension } = opts;
   if (count <= 0 || durationSeconds <= 0) return [];
 
   const fps = count / durationSeconds;
   const pattern = `${outputDir}/frame-%04d.jpg`;
+  // These frames feed player/court detection only -- ball detection reads
+  // the source video directly (detect_ball.py / cv2.VideoCapture) and never
+  // sees this resize, so a 4K source still gives the ball detector every
+  // pixel it has. Player detection just needs to spot a person-sized box,
+  // which a generic detector does fine well below source resolution -- so
+  // capping the long edge here (maxDimension, e.g. 1280) means uploading a
+  // 4K clip to the hosted API costs the same per-frame bandwidth/time as a
+  // 720p one instead of ~9x more, with no accuracy trade-off for THIS step.
+  // scale='min(N,iw)':-2 only shrinks when the source is actually larger.
+  const vf = maxDimension ? `fps=${fps},scale='min(${maxDimension},iw)':-2` : `fps=${fps}`;
   await execFileAsync(
     "ffmpeg",
-    ["-y", "-i", filePath, "-vf", `fps=${fps}`, "-q:v", "3", pattern],
+    ["-y", "-i", filePath, "-vf", vf, "-q:v", "3", pattern],
     { maxBuffer: 20 * 1024 * 1024 }
   );
 

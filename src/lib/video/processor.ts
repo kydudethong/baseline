@@ -53,9 +53,16 @@ export class VideoProcessor {
     count = 6
   ): Promise<Array<{ path: string; timestampSeconds: number }>> {
     if (!metadata.durationSeconds) return [];
+    // 1280 matches the resolution this pipeline's player-detection accuracy
+    // has actually been validated at -- capping here means a 4K source
+    // upload costs the same as 720p for this step, regardless of the
+    // source file's real resolution. Override via VISION_FRAME_MAX_DIMENSION
+    // if a future camera setup needs different framing.
+    const maxDimension = Number(process.env.VISION_FRAME_MAX_DIMENSION ?? "1280");
     return extractFrames(this.filePath, outputDir, {
       count,
       durationSeconds: metadata.durationSeconds,
+      maxDimension,
     });
   }
 

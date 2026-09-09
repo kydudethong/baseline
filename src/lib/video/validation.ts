@@ -14,10 +14,20 @@ export const ALLOWED_VIDEO_MIME_TYPES = [
 
 export const ALLOWED_VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm", ".avi", ".mkv"];
 
-// Keep in sync with the storage bucket's file_size_limit in
-// supabase/migrations/0002_storage.sql.
+// App-level ceiling — actually enforced now that video lives in R2, unlike
+// Supabase Storage, whose project-wide file-size cap silently overrode
+// whatever a bucket's own file_size_limit said (50MB on the Free plan).
 export const MAX_VIDEO_SIZE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GiB
 export const MIN_VIDEO_SIZE_BYTES = 100 * 1024; // 100 KiB — filters out empty/corrupt uploads
+
+// R2's (S3-compatible) per-part minimum is 5MiB; the last part may be
+// smaller. Used to split an upload into presigned per-part PUTs — see
+// src/lib/storage/r2.ts and the upload-init route.
+export const UPLOAD_PART_SIZE_BYTES = 10 * 1024 * 1024;
+
+export function partCountFor(sizeBytes: number): number {
+  return Math.max(1, Math.ceil(sizeBytes / UPLOAD_PART_SIZE_BYTES));
+}
 
 export type FileLike = { name: string; type: string; size: number };
 
