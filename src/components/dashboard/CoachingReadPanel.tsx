@@ -1,21 +1,40 @@
 import Link from "next/link";
 import type { CoachingObservationRow, CoachingReadRow, CoachingSkillRatingRow } from "@/lib/db/types";
-import { COACHING_DIMENSION_LABELS, skillName, type CoachingDimension, type CoachingRead } from "@/lib/coaching/types";
+import { skillName, type CoachingRead } from "@/lib/coaching/types";
+import { rankObservations, topPriorityObservation } from "@/lib/coaching/ranking";
 import { SkillMeter } from "@/components/breakdown/SkillMeter";
 import { Check, Paddle } from "@/components/motifs/Motifs";
+import { CoachingInsight } from "@/components/analysis/CoachingInsight";
 import { BuildBlueprintButton } from "./BuildBlueprintButton";
 
 /**
- * Renders one coaching_reads row plus its tagged observations and skill
- * ratings. Deliberately shows only what run-coaching.ts actually persisted —
- * coaching_json is null on the "not enough data" path (see its comment in
- * run-coaching.ts), so this falls back to just the headline/summary/quality
- * section rather than rendering an empty strengths/fix/drill block.
+ * The coaching read, with every point said ONCE.
  *
- * Visual hierarchy is the point: one fix leads (the hero band), strengths
- * are quick green confirmations, "also worth noting" is numbered 02/03…
- * so it reads as a ranked list, and the drill sits on the ball's color so
- * the eye lands on "what do I do next".
+ * This used to render the same coaching four times over. The model is asked to
+ * write a narrative read (strengths / top_priority_fix / secondary_observations
+ * / drill_recommendation) and then to re-express that same read as tagged
+ * observations — so `coaching_json.top_priority_fix` and the highest-severity
+ * weakness observation are the same point in different words, as are each
+ * strength and each secondary issue. This panel rendered both sets, and the
+ * new workspace above rendered the rally-tagged ones a third time. Reading
+ * your own analysis three times is not thoroughness, it is noise.
+ *
+ * So the observations win: they are the structured records, they carry
+ * why_it_matters / what_to_change / drill_slug, they are tied to a rally, and
+ * they are what skills, trends and practice plans are built from. The
+ * narrative blob now contributes only what observations do not have — the
+ * headline, the summary, the footage-quality note and data_gaps.
+ *
+ * Division of labour with the workspace above:
+ *   - the top priority fix leads HERE, once
+ *   - observations tied to a rally appear beside the video, when that rally is
+ *     selected (the workspace skips the priority one, since it leads here)
+ *   - observations tied to no rally appear here, because nothing above can
+ *     ever show them
+ *
+ * The old narrative sections are still rendered, but ONLY on the fallback path
+ * where the tagging call produced no observations at all — there, the blob is
+ * the only coaching that exists, and showing it is not a repeat of anything.
  */
 export function CoachingReadPanel({
   read,
@@ -23,6 +42,7 @@ export function CoachingReadPanel({
   skills,
   analysisId,
   skillKeysWithBlueprint,
+  drillNames = {},
 }: {
   read: CoachingReadRow;
   observations: CoachingObservationRow[];
@@ -30,9 +50,22 @@ export function CoachingReadPanel({
   analysisId: string;
   /** skill_keys that already have a practice plan for this analysis — hide the build button rather than invite a duplicate. */
   skillKeysWithBlueprint: Set<string>;
+  /** slug → human name, so an insight can name its drill. */
+  drillNames?: Record<string, string>;
 }) {
   const coaching = parseCoaching(read.coaching_json);
   const quality = read.quality as { usable: boolean; issues: string[] } | null;
+
+  const hero = topPriorityObservation(observations);
+  // Everything the workspace above cannot show, because it has no rally to be
+  // selected under. Ranked, so the order matches the priority order.
+  const clipWide = rankObservations(observations).filter(
+    (o) => o.rally_idx === null && o.id !== hero?.id
+  );
+  const inWorkspace = observations.filter((o) => o.rally_idx !== null && o.id !== hero?.id).length;
+  // The narrative blob is the ONLY coaching on the fallback path. Anywhere else
+  // it is the observations reworded, so it is not rendered.
+  const narrativeOnly = observations.length === 0;
 
   return (
     <div className="stack g6">
@@ -55,7 +88,9 @@ export function CoachingReadPanel({
         </div>
       ) : null}
 
-      {coaching ? (
+      {/* The narrative read, ONLY when the tagging call produced no observations
+          to say the same thing better. Anywhere else this is a reworded repeat. */}
+      {coaching && narrativeOnly ? (
         <>
           {coaching.strengths.length > 0 ? (
             <section className="sec">
@@ -137,8 +172,64 @@ export function CoachingReadPanel({
             </div>
           </section>
 
-          {coaching.data_gaps ? <p className="xs measure">What the footage couldn&apos;t show: {coaching.data_gaps}</p> : null}
         </>
+      ) : null}
+
+      {/* One point, once. The priority leads here; rally-tagged points live
+          beside the video above; points with no rally follow below. */}
+      {hero ? (
+        <section className="sec">
+          <div className="sec-head">
+            <h3 className="h2">The one thing to work on</h3>
+            <span className="xs">Start here</span>
+          </div>
+          <CoachingInsight
+            observation={hero}
+            drillName={hero.drill_slug ? drillNames[hero.drill_slug] : null}
+            hero
+            eyebrow="Top priority"
+            action={
+              !skillKeysWithBlueprint.has(hero.skill_key)
+                ? <BuildBlueprintButton analysisId={analysisId} observationId={hero.id} />
+                : null
+            }
+          />
+        </section>
+      ) : null}
+
+      {clipWide.length > 0 ? (
+        <section className="sec">
+          <div className="sec-head">
+            <h3 className="h2">Across the whole clip</h3>
+            <span className="xs">Not tied to one rally</span>
+          </div>
+          <div className="stack g4">
+            {clipWide.map((o) => (
+              <CoachingInsight
+                key={o.id}
+                observation={o}
+                drillName={o.drill_slug ? drillNames[o.drill_slug] : null}
+                action={
+                  o.valence === "weakness" && !skillKeysWithBlueprint.has(o.skill_key)
+                    ? <BuildBlueprintButton analysisId={analysisId} observationId={o.id} />
+                    : null
+                }
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {inWorkspace > 0 ? (
+        <p className="xs measure">
+          {inWorkspace} more point{inWorkspace === 1 ? "" : "s"} {inWorkspace === 1 ? "is" : "are"} tied
+          to a specific rally. Pick that rally in the film room above and it appears next to the video,
+          so you can watch the thing being described.
+        </p>
+      ) : null}
+
+      {coaching?.data_gaps ? (
+        <p className="xs measure">What the footage couldn&apos;t show: {coaching.data_gaps}</p>
       ) : null}
 
       {skills.length > 0 ? (
@@ -154,47 +245,8 @@ export function CoachingReadPanel({
         </section>
       ) : null}
 
-      {observations.length > 0 ? (
-        <section className="sec">
-          <h3 className="h2">What the coach saw, rally by rally</h3>
-          <div className="stack g4">
-            {observations.map((o) => (
-              <div key={o.id} className={`weak${o.severity <= 3 ? " med" : ""}${o.valence === "strength" ? " strength" : ""}`}>
-                <div className="stripe" />
-                <div className="in">
-                  <div className="row g3">
-                    <span className="eyebrow">
-                      {COACHING_DIMENSION_LABELS[o.coaching_dimension as CoachingDimension] ?? o.coaching_dimension}
-                    </span>
-                    {o.valence === "strength" ? (
-                      <span className="pill p-good"><span className="dot" />Working</span>
-                    ) : (
-                      <span className="pill p-warn"><span className="dot" />Needs work</span>
-                    )}
-                    {o.rally_idx !== null ? <span className="pill p-neutral mono">Rally {o.rally_idx}</span> : null}
-                  </div>
-                  <h3 className="h2">{o.title}</h3>
-                  <p className="body">{o.detail}</p>
-                  <div className="evid">
-                    {o.t_s !== null ? <a href={`#t=${Math.max(0, o.t_s).toFixed(1)}`}>watch {mmss(o.t_s)}</a> : null}
-                    {o.valence === "weakness" && !skillKeysWithBlueprint.has(o.skill_key) ? (
-                      <BuildBlueprintButton analysisId={analysisId} observationId={o.id} />
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
     </div>
   );
-}
-
-function mmss(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function parseCoaching(json: string | null): CoachingRead | null {

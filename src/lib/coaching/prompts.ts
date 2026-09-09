@@ -67,11 +67,39 @@ below actually supports — never guess or invent a detail it doesn't contain.
    - movement_summary gives this player's total distance covered, average
      and max speed, and court-coverage bounds for the whole clip.
 
-DO NOT attempt to assess swing path or contact-point mechanics — nothing
-below sees the paddle. Shot TYPE and shot SELECTION may be discussed only
-when a shot_summary is present (the ball was tracked); without it, limit
-yourself to what the contacts array gives you: count, timing and (low-
-confidence) which side produced them — never what kind of shot they were.`;
+4. SWING MECHANICS, PER SHOT (only where "mechanics" is present)
+   - A shot_sequence entry may carry a "mechanics" object. It is measured
+     from body pose sampled densely around that one contact, so unlike
+     self_stance it describes THAT shot rather than a rally average.
+   - Units, and they matter: angles in degrees, where knee_angle_at_contact_deg
+     of 180 is a straight leg and 140 is a real bend. Everything spatial is in
+     the player's OWN body — shoulder widths, or torsos for height — never
+     pixels, so a shot at the far baseline is directly comparable with one at
+     the near baseline. contact_height_torsos is 0 at the shoulder line and
+     negative below it, so a dink contact is expected to be strongly negative.
+   - What each field licenses you to say: knee angle -> whether they loaded
+     their legs on that ball. contact_height_torsos and contact_reach_shoulders
+     -> whether they took it high or low, close in or reaching. backswing and
+     follow_through (shoulder widths) -> whether it was a compact stroke or a
+     big one. wrist_speed_into_contact -> how hard they swung, relative to
+     their own body. shoulder_rotation_deg -> whether they turned or armed it.
+   - "mechanics" is ABSENT whenever the measurement could not be made. An
+     absent object means unknown; it never means "average" or "fine". Never
+     write about the mechanics of a shot that does not carry one.
+   - This is WRIST-derived. You may discuss swing size, speed, contact height
+     and body position. You may NOT claim anything about the PADDLE itself —
+     its face angle, its path through the ball, spin, or where on the face
+     contact was made. No paddle is detected. Phrase mechanics as what the
+     body did.
+   - Prefer patterns over single shots: three dinks all taken with straight
+     legs is a coaching point; one is noise. Say which rally and shot number.
+
+DO NOT attempt to assess paddle face, paddle path, spin, or contact point on
+the paddle — nothing below sees the paddle. Shot TYPE and shot SELECTION may
+be discussed only when a shot_summary is present (the ball was tracked);
+without it, limit yourself to what the contacts array gives you: count,
+timing and (low-confidence) which side produced them — never what kind of
+shot they were.`;
 
 function frameworkFor(facts: CoachingFacts): string {
   return facts.shot_summary ? COACHING_FRAMEWORK + SHOT_FRAMEWORK : COACHING_FRAMEWORK;
@@ -235,8 +263,17 @@ ${measuredFacts(opts.facts)}`;
 export const TAGGING_SCHEMA: Schema = {
   type: "object",
   properties: {
-    headline: { type: "string", description: "One specific sentence about this session." },
-    summary: { type: "string", description: "2–4 sentences of context for the headline." },
+    headline: {
+      type: "string",
+      description: "One specific sentence naming the through-line of this session. "
+        + "NOT a restatement of the first observation — the player sees both at once.",
+    },
+    summary: {
+      type: "string",
+      description: "2–4 sentences of context the individual observations cannot give: "
+        + "how the session went overall, how readable the footage was, the pattern "
+        + "underneath the separate points. Never a précis of the observations.",
+    },
     footage_quality: {
       type: "object",
       properties: {
@@ -258,8 +295,32 @@ export const TAGGING_SCHEMA: Schema = {
           },
           valence: { type: "string", enum: ["strength", "weakness"] },
           title: { type: "string", description: "Short, concrete. Under 60 characters." },
-          detail: { type: "string", description: "What the data showed, why it matters, what to change." },
+          detail: {
+            type: "string",
+            description: "WHAT HAPPENED, from the data. The observable fact only — "
+              + "save the consequence and the fix for the fields below.",
+          },
           severity: { type: "integer", description: "1 minor to 5 match-losing." },
+          shot_idx: {
+            type: "integer",
+            description: "Position in the rally (0 = serve) when this is about one "
+              + "specific shot. OMIT for anything broader — never guess a number.",
+          },
+          why_it_matters: {
+            type: "string",
+            description: "WHY IT MATTERS: the consequence in a point. What it let the "
+              + "opponent do, or cost this player. Omit rather than pad.",
+          },
+          what_to_change: {
+            type: "string",
+            description: "WHAT TO DO DIFFERENTLY: one concrete, physical change. "
+              + "Not 'be more consistent' — something they could do on the next ball.",
+          },
+          drill_slug: {
+            type: "string",
+            description: "HOW TO PRACTISE IT: the slug of a drill from the list given "
+              + "in the prompt. Must be one of those exact slugs, or omitted.",
+          },
         },
         required: ["rally_idx", "skill_key", "coaching_dimension", "valence", "title", "detail", "severity"],
       },
@@ -271,9 +332,36 @@ export const TAGGING_SCHEMA: Schema = {
         properties: {
           skill_key: { type: "string" },
           rating: { type: "integer", description: "1–5." },
-          basis: { type: "string", description: "What justifies this, from the data or the read above." },
+          basis: {
+            type: "string",
+            description: "The EVIDENCE for the rating — the numbers or the count that "
+              + "justify it. Not a restatement of an observation.",
+          },
         },
         required: ["skill_key", "rating", "basis"],
+      },
+    },
+    rally_verdicts: {
+      type: "array",
+      description: "How each rally went for this player. Include ONLY rallies you can "
+        + "actually judge from the shot sequence — omitting a rally is correct and "
+        + "expected. Never guess to fill the list.",
+      items: {
+        type: "object",
+        properties: {
+          rally_number: { type: "integer", description: "The rally_number from the facts." },
+          verdict: {
+            type: "string",
+            enum: ["won", "lost", "unforced_error", "neutral", "unknown"],
+            description: "won/lost = the point ended that way for THIS player. "
+              + "unforced_error = they ended it themselves with nobody forcing them. "
+              + "neutral = it ended without either side clearly deciding it. "
+              + "unknown = the data does not say, which is a real and common answer.",
+          },
+          reason: { type: "string", description: "One short sentence, citing the shot that decided it." },
+          confidence: { type: "number", description: "0-1. Be honest; low is fine." },
+        },
+        required: ["rally_number", "verdict", "confidence"],
       },
     },
   },
@@ -287,6 +375,8 @@ export function taggingPrompt(opts: {
   notes: string | null;
   facts: CoachingFacts;
   coaching: CoachingRead;
+  /** The real drill catalogue. An observation may only cite a slug from here. */
+  drills: Array<{ slug: string; name: string; skill: string }>;
 }): string {
   return `You already wrote the coaching read below for this player, from the same
 measured facts you can see further down. Your job now is narrower: turn
@@ -319,6 +409,49 @@ GROUND RULES
   }
 4. Prefer few sharp observations over many vague ones. Six good ones beat twenty.
 5. Write to the player, in second person, plainly. No hype, no filler openers.
+6. Every observation has FOUR parts, and they are different things:
+     detail          WHAT HAPPENED — the observable fact, from the data.
+     why_it_matters  WHY IT MATTERS — the consequence in a point.
+     what_to_change  WHAT TO DO DIFFERENTLY — one concrete physical change.
+     drill_slug      HOW TO PRACTISE IT — a slug from the drill list below.
+   OMIT any of the last three you cannot answer honestly from the data. An
+   observation with two real parts is worth more than one with four where two
+   are padding. Never write "focus on consistency" to fill what_to_change.
+
+   NO PART MAY RESTATE ANOTHER. Each field must add information the previous
+   one does not contain. If why_it_matters is detail with "which means" in
+   front of it, or what_to_change is why_it_matters phrased as an
+   instruction, you have written one part, not three — cut it to the parts
+   that are actually different. Concretely:
+     BAD  detail: "You let the ball drop below your waist on most dinks."
+          why_it_matters: "Contacting below the waist on dinks hurts you."
+          what_to_change: "Stop letting the ball drop below your waist."
+     GOOD detail: "On 6 of 9 dinks you contacted the ball below waist height."
+          why_it_matters: "From down there the only safe ball is a high one,
+                           which is what your opponent kept attacking."
+          what_to_change: "Split-step earlier and meet it out in front, level
+                           with your hip."
+   The player reads all three in a row. Repetition reads as padding and makes
+   the specific parts harder to find.
+
+9. The headline and the summary are NOT a précis of the observations. The
+   player sees them on the same screen as every observation, so a headline
+   that restates observation 1 is the same sentence printed twice. The
+   headline names the through-line — the one thing that connects what you
+   found. The summary gives the context the individual observations cannot:
+   how the session went overall, how much of it was readable, what pattern
+   sits underneath the separate points. If your summary can be deleted with
+   nothing lost, delete it down to the sentence that would be lost.
+
+10. skills[].basis is the EVIDENCE for a rating — the numbers or the count
+   that justify it. It is not a third copy of the observation text. "3 of 9
+   dinks contacted below the waist" is a basis; "dinking needs work, as
+   noted above" is not.
+7. drill_slug must be one of the exact slugs listed below, or omitted. A slug
+   you invent will not resolve and the recommendation will be dropped.
+8. shot_idx only when the observation is about ONE identifiable shot in the
+   rally's shot_sequence. Omit it for anything broader — a guessed index points
+   the player at the wrong ball.
 
 ${frameworkFor(opts.facts)}
 
@@ -328,14 +461,33 @@ ${JSON.stringify(opts.coaching)}
 THE MEASURED FACTS (one entry per rally)
 ${measuredFacts(opts.facts)}
 
+AVAILABLE DRILLS — the ONLY valid values for drill_slug. Do not invent one.
+${opts.drills.map((d) => `- ${d.slug} — ${d.name} (${d.skill})`).join("\n")}
+
 KNOWN DATA LIMITATIONS FOR THIS ANALYSIS
 ${opts.facts.known_limitations.map((l) => `- ${l}`).join("\n")}
 
+RALLY VERDICTS
+Also judge each rally, but only where the shot sequence actually shows you how
+it ended. A rally whose last shot has outcome "unknown", or which has too few
+classified shots to read, gets verdict "unknown" or is left out entirely —
+both are correct. There is no penalty for judging three rallies out of twelve,
+and a fabricated verdict is worse than no verdict, because the timeline will
+show it as fact. "unforced_error" specifically means this player ended it
+themselves with nobody forcing them.
+
 YOUR TASK
-Produce a small set of tagged observations that reflect the read above — the
-top priority fix should become your highest-severity weakness observation,
-the secondary issues should become the rest, and the strengths above should
-become your strength observations. Rate skills only where the data actually
+Produce a small set of tagged observations covering the same ground as the
+read above — the top priority fix becomes your highest-severity weakness
+observation, the secondary issues become the rest, and the strengths become
+your strength observations.
+
+Write them in your own words, at the level of specificity the observation
+fields allow. These observations are what the player actually reads: the
+narrative read above is NOT shown alongside them, so do not write as though
+it were, do not refer back to it ("as mentioned above"), and do not preserve
+its phrasing for its own sake. Where the read was vague and the data lets you
+be exact, be exact. Rate skills only where the data actually
 supports it, on this scale:
   1 = a clear liability at their level
   2 = below the level they are playing at

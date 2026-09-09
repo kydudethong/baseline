@@ -53,9 +53,29 @@ export interface CoachingObservation {
   skill_key: string;
   coaching_dimension: CoachingDimension;
   valence: Valence;
+  /** WHAT HAPPENED. */
   title: string;
   detail: string;
   severity: number;
+  /**
+   * The rest of the coaching hierarchy: why it matters -> what to change ->
+   * how to practise it. All optional, and an observation that omits them is
+   * doing the right thing: a padded "focus on consistency" is worse than a
+   * missing field, because the UI renders it as advice.
+   */
+  why_it_matters?: string;
+  what_to_change?: string;
+  drill_slug?: string;
+  /** Only when the observation is about one identifiable shot in the rally. */
+  shot_idx?: number;
+}
+
+/** How a rally went, where the shot sequence actually shows it. */
+export interface RallyVerdict {
+  rally_number: number;
+  verdict: "won" | "lost" | "unforced_error" | "neutral" | "unknown";
+  reason?: string;
+  confidence: number;
 }
 
 /** Claude call 2's output — the tagged, per-skill records the app tracks over time. */
@@ -64,6 +84,8 @@ export interface CoachingTagging {
   summary: string;
   observations: CoachingObservation[];
   skills: Array<{ skill_key: string; rating: number; basis: string }>;
+  /** Absent or short is expected — only rallies the data can actually judge. */
+  rally_verdicts?: RallyVerdict[];
   footage_quality: { usable: boolean; issues: string[] };
 }
 

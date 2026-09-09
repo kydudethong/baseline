@@ -27,6 +27,9 @@ import { buildCoachingFacts } from "./facts";
 import { generateJSON, resolveModel, textPart } from "./claude";
 import { COACHING_READ_SCHEMA, TAGGING_SCHEMA, coachingReadPrompt, taggingPrompt } from "./prompts";
 import type { CoachingRead, CoachingTagging } from "./types";
+import { getAllDrills } from "./drills";
+import type { CoachingDrillRow } from "@/lib/db/types";
+import { describeError } from "@/lib/analysis/describe-error";
 
 type Client = SupabaseClient<Database>;
 
@@ -100,6 +103,21 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     ballTrack: (ballRes.data as BallTrackRow | null) ?? null,
   });
 
+  // Clear the previous read's derived rows before writing this one.
+  //
+  // These were upserted but never pruned, so a re-run that found fewer
+  // rallies or rated fewer skills left the extras behind, indistinguishable
+  // from fresh ones -- and the "not enough data" branch below returned early
+  // without touching them at all, so a failed re-run showed its own headline
+  // above a full set of observations and ratings from the run before.
+  const pruneStale = async () => {
+    for (const table of ["coaching_rallies", "coaching_skill_ratings"] as const) {
+      const { error } = await supabase.from(table).delete().eq("analysis_id", analysisId);
+      if (error) throw new Error(`clearing ${table}: ${describeError(error)}`);
+    }
+  };
+  await pruneStale();
+
   if (facts.rallies.length === 0) {
     // Still record an honest result rather than leaving the UI with
     // nothing to show — "we tried and there wasn't enough data" is itself
@@ -119,6 +137,11 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       { onConflict: "analysis_id" }
     );
     if (error) throw error;
+    // The observations belong to the read that is being replaced, so they go
+    // with it -- otherwise this headline sits above the previous run's list.
+    const { data: prior } = await supabase
+      .from("coaching_reads").select("id").eq("analysis_id", analysisId).maybeSingle();
+    if (prior?.id) await supabase.from("coaching_observations").delete().eq("read_id", prior.id);
     return;
   }
 
@@ -136,6 +159,9 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     0.4
   );
 
+  const allDrills: CoachingDrillRow[] = await getAllDrills(supabase);
+  const validSlugs = new Set(allDrills.map((d: CoachingDrillRow) => d.slug));
+
   const tagged = await generateJSON<CoachingTagging>(
     [
       textPart(
@@ -146,6 +172,9 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
           notes: analysis.coaching_notes,
           facts,
           coaching,
+          // The real catalogue, so a cited drill_slug resolves to a drill that
+          // exists. A slug the model invents is dropped on persist.
+          drills: allDrills.map((d: CoachingDrillRow) => ({ slug: d.slug, name: d.name, skill: d.skill_key })),
         })
       ),
     ],
@@ -203,9 +232,46 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       title: o.title,
       detail: o.detail,
       severity: Math.max(1, Math.min(5, Math.round(o.severity))),
+      // Absent stays absent: an empty string would render as an empty section
+      // rather than as "we did not say".
+      why_it_matters: o.why_it_matters?.trim() || null,
+      what_to_change: o.what_to_change?.trim() || null,
+      // A slug the model invented would break the foreign key AND point the
+      // player at a drill that does not exist. Drop it rather than fail.
+      drill_slug: o.drill_slug && validSlugs.has(o.drill_slug) ? o.drill_slug : null,
+      shot_idx: Number.isInteger(o.shot_idx) ? o.shot_idx : null,
     }));
     const { error: insertObsError } = await supabase.from("coaching_observations").insert(obsRows);
     if (insertObsError) throw insertObsError;
+  }
+
+  // Rally verdicts go onto the SEGMENTER's rallies (analysis_rallies), not
+  // coaching_rallies. The two disagree on numbering, so a verdict written
+  // against the wrong table would label the wrong rally in the timeline.
+  //
+  // The model is told to omit rallies it cannot judge, and a short list is the
+  // expected outcome. An UPDATE per verdict rather than an upsert, so a verdict
+  // for a rally index that does not exist quietly affects nothing instead of
+  // creating a phantom rally.
+  if (tagged.rally_verdicts?.length) {
+    let applied = 0;
+    for (const v of tagged.rally_verdicts) {
+      if (!Number.isInteger(v.rally_number)) continue;
+      const { error, count } = await supabase
+        .from("analysis_rallies")
+        .update({
+          verdict: v.verdict,
+          verdict_reason: v.reason?.trim() || null,
+          verdict_confidence: Math.max(0, Math.min(1, Number(v.confidence) || 0)),
+        }, { count: "exact" })
+        .eq("analysis_id", analysisId)
+        .eq("idx", v.rally_number);
+      // Non-fatal: a verdict is an enhancement to a rally that already exists
+      // and renders fine without one.
+      if (error) console.error(`[coaching] rally verdict not written: ${describeError(error)}`);
+      else applied += count ?? 0;
+    }
+    console.error(`[coaching] rally verdicts: ${applied} of ${tagged.rally_verdicts.length} matched a rally`);
   }
 
   if (tagged.skills.length > 0) {

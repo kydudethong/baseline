@@ -23,6 +23,8 @@ import type {
   PlayerTrackRow,
 } from "@/lib/db/types";
 import type { CocoKeypointName, PlayerTrackPoint, PoseKeypoint } from "@/lib/vision/phase2-types";
+import type { PlayerPoseFrame } from "@/lib/vision/phase2-types";
+import { measureSwing, type SwingMetrics } from "@/lib/vision/swing";
 import { clusterRalliesFromHits, HIT_CLUSTER_PARAMS } from "@/lib/vision/rallies";
 import { summarizeShots, shotFromRow, SHOT_LABEL, type Shot, type ShotMix } from "@/lib/vision/shots";
 
@@ -262,6 +264,58 @@ function poseSample(keypoints: PoseKeypoint[]): PoseSample | null {
 const PADDLE_RAISED_THRESHOLD = 0.03;
 const KNEE_BENT_THRESHOLD_DEG = 165;
 
+/**
+ * Body mechanics for one contact, or nothing at all.
+ *
+ * Returning `{}` rather than an object full of nulls is deliberate: a coach
+ * handed `{"knee_angle_deg": null, "backswing": null}` will write about
+ * technique anyway. An absent key cannot be mistaken for a measurement.
+ */
+function swingFor(frames: PlayerPoseFrame[], t: number): { mechanics?: ShotMechanics } {
+  const m: SwingMetrics = measureSwing(frames, t);
+  if (m.samples < 4 || m.confidence < 0.3) return {};
+  const anyField = m.kneeAngleAtContactDeg !== null || m.contactHeightTorsos !== null
+    || m.backswingShoulders !== null || m.wristSpeedIntoContact !== null;
+  if (!anyField) return {};
+  return {
+    mechanics: {
+      pose_samples: m.samples,
+      hitting_hand: m.hand,
+      knee_angle_at_contact_deg: m.kneeAngleAtContactDeg,
+      knee_angle_min_deg: m.kneeAngleMinDeg,
+      contact_height_torsos: m.contactHeightTorsos,
+      contact_reach_shoulders: m.contactReachShoulders,
+      backswing_shoulders: m.backswingShoulders,
+      wrist_speed_into_contact: m.wristSpeedIntoContact,
+      follow_through_shoulders: m.followThroughShoulders,
+      shoulder_rotation_deg: m.shoulderRotationDeg,
+      confidence: m.confidence,
+    },
+  };
+}
+
+/**
+ * Units, stated once: angles in degrees (180 = a straight leg); everything
+ * spatial in the player's OWN body widths, never pixels, so a shot at the far
+ * baseline is comparable with one at the near baseline.
+ */
+export interface ShotMechanics {
+  pose_samples: number;
+  hitting_hand: "left" | "right" | "unknown";
+  knee_angle_at_contact_deg: number | null;
+  knee_angle_min_deg: number | null;
+  /** 0 = at the shoulder line, negative = below it, 1 = a torso above it. */
+  contact_height_torsos: number | null;
+  /** Wrist distance from the shoulder line at contact, in shoulder widths. */
+  contact_reach_shoulders: number | null;
+  backswing_shoulders: number | null;
+  /** Shoulder widths per second, over the moments before contact. */
+  wrist_speed_into_contact: number | null;
+  follow_through_shoulders: number | null;
+  shoulder_rotation_deg: number | null;
+  confidence: number;
+}
+
 /* ------------------------------------------------------------------ */
 /* Public shapes                                                        */
 /* ------------------------------------------------------------------ */
@@ -284,6 +338,8 @@ export interface CoachingFactsRally {
     speed_mps: number | null;
     outcome: string;
     confidence: number;
+    /** Present only for the coached player, and only when it was measurable. */
+    mechanics?: ShotMechanics;
   }>;
   self_stance: { samples: number; avg_knee_bend_deg: number | null; bent_fraction: number | null } | null;
   self_paddle_proxy: { samples: number; raised_fraction: number | null; lowered_fraction: number | null } | null;
@@ -366,6 +422,11 @@ export function buildCoachingFacts(input: BuildCoachingFactsInput): CoachingFact
       "ends a rally); they are not read from game state or score.",
     "Paddle position is a PROXY — wrist height relative to shoulder from body pose — no paddle is ever " +
       "detected or tracked directly.",
+    "Per-shot mechanics (shot_sequence[].mechanics) are measured from BODY pose sampled densely around " +
+      "each contact, in the player's own shoulder widths and torsos rather than pixels, so far-court and " +
+      "near-court shots are comparable. They describe what the body did — swing size, speed, contact " +
+      "height, knee bend — and say nothing about the paddle's face, path or spin. The key is absent, not " +
+      "null, whenever it could not be measured.",
   ];
 
   const selfLabels = new Set(input.selfPlayerLabels);
@@ -424,6 +485,23 @@ export function buildCoachingFacts(input: BuildCoachingFactsInput): CoachingFact
     .map((k) => ({ tS: k.timestamp_s, sample: poseSample((k.keypoints as PoseKeypoint[] | null) ?? []) }))
     .filter((k): k is { tS: number; sample: PoseSample } => k.sample !== null);
 
+  // The same keypoints again, in the shape measureSwing() wants. The rally-level
+  // averages above answer "how did you carry yourself"; this answers "what did
+  // your body do on THIS shot", which is the only form a technique note can
+  // usefully take. Density decides whether it says anything: with pose sampled
+  // only at VISION_FPS a swing is one or two frames and every field comes back
+  // null, which is why the pipeline bursts around contacts.
+  const selfPoseFrames: PlayerPoseFrame[] = input.keypoints
+    .filter((k) => selfLabels.has(k.player_label))
+    .map((k) => ({
+      playerId: k.player_label,
+      timestampSeconds: k.timestamp_s,
+      detectionConfidence: 1,
+      keypoints: (k.keypoints as PoseKeypoint[] | null) ?? [],
+      modelSource: "yolov8n-pose",
+    }) as PlayerPoseFrame)
+    .sort((a, b) => a.timestampSeconds - b.timestampSeconds);
+
   const rallies: CoachingFactsRally[] = clustered.map((r) => {
     const contactAttrs = selfTrack
       ? attributeContacts(r.contacts, trackData, selfSide, opponentSide)
@@ -455,10 +533,26 @@ export function buildCoachingFacts(input: BuildCoachingFactsInput): CoachingFact
           }
         : null;
 
-    const rallyShots = allShots.filter((s) => s.rallyIdx === r.idx).sort((a, b) => a.shotIdx - b.shotIdx);
+    // Join shots to this rally by TIME, not by index.
+    //
+    // The two numbers were never the same scheme. clusterRalliesFromHits (used
+    // right here to rebuild rallies from the stored contacts) numbers from 1;
+    // rally_seg, which is what actually cut the shots when
+    // RALLY_SEGMENTER=rally_seg, numbers from 0 -- and it cuts on ball physics
+    // while this re-clusters on hit gaps, so the two do not even agree on how
+    // many rallies there are. Joining on the index silently attributed rally
+    // 1's shots to rally 2, dropped the last rally's entirely, and handed the
+    // coaching model a confident account of the wrong rally. A shot's
+    // timestamp is unambiguous and belongs to whichever window contains it.
+    const rallyShots = allShots
+      .filter((sh) => sh.t >= r.startS && sh.t <= r.endS)
+      .sort((a, b) => a.t - b.t);
     const shotSequence = rallyShots.length
-      ? rallyShots.map((s) => ({
-          n: s.shotIdx + 1,
+      ? rallyShots.map((s, n) => ({
+          // Numbered within THIS rally. s.shotIdx came from whichever
+          // segmenter cut the shots and does not restart at 0 per rally once
+          // the join is by time.
+          n: n + 1,
           t_s: Math.round(s.t * 10) / 10,
           by: (s.playerId === null ? "unknown" : selfLabels.has(s.playerId) ? "self" : "opponent") as "self" | "opponent" | "unknown",
           type: SHOT_LABEL[s.type],
@@ -467,6 +561,11 @@ export function buildCoachingFacts(input: BuildCoachingFactsInput): CoachingFact
           speed_mps: s.speedMpsApprox,
           outcome: s.outcome,
           confidence: s.confidence,
+          // Only for the player being coached, and only when the measurement
+          // actually found something -- an object of nulls reads as data.
+          ...(s.playerId !== null && selfLabels.has(s.playerId)
+            ? swingFor(selfPoseFrames, s.t)
+            : {}),
         }))
       : undefined;
 

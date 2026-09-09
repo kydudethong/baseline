@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AnalysisResult, AnalysisRow, AnalysisStatus, Database, VideoRow } from "./types";
+import { env } from "@/lib/env";
 
 type Client = SupabaseClient<Database>;
 
@@ -79,6 +80,9 @@ export async function attachVideo(
     .insert({
       analysis_id: video.analysisId,
       user_id: video.userId,
+      // Historical column name from the Supabase-Storage era; now records
+      // which R2 bucket the bytes actually live in, for debugging.
+      storage_bucket: env.r2Bucket,
       storage_path: video.storagePath,
       original_filename: video.originalFilename,
       mime_type: video.mimeType,
@@ -108,12 +112,26 @@ export async function updateAnalysisStatus(
   status: AnalysisStatus,
   extra: { errorMessage?: string | null; result?: AnalysisResult | null } = {}
 ) {
+  // Run timing is stamped here rather than at the call sites because this is
+  // the one place every status transition passes through, and an ETA built on
+  // history that is only sometimes recorded is worse than none.
+  //
+  // started_at is rewritten on every entry to 'processing', not written once.
+  // A re-run of the same analysis is a new run and should be timed as one; a
+  // first-write-wins rule would silently measure the re-run from the original
+  // upload and report a wildly long duration ever after.
+  const timing =
+    status === "processing" ? { started_at: new Date().toISOString(), finished_at: null }
+    : status === "completed" || status === "failed" ? { finished_at: new Date().toISOString() }
+    : {};
+
   const { error } = await supabase
     .from("analyses")
     .update({
       status,
       error_message: extra.errorMessage ?? null,
       ...(extra.result !== undefined ? { result: extra.result } : {}),
+      ...timing,
     })
     .eq("id", analysisId);
 

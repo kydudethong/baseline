@@ -76,10 +76,69 @@ export type AnalysisRow = {
   result: AnalysisResult | null;
   // Coaching-layer fields — mirrors 0005_coaching_layer.sql.
   self_player_label: string | null;
+  pre_analysis_setup: unknown | null;
   coaching_notes: string | null;
   coaching_kind: string;
+  // Frontend data model — 0009_frontend_data_model.sql.
+  // Live stage of a run in flight. Deliberately has no percentage: the pipeline
+  // does not know how far through it is, and inventing one would be the exact
+  // dishonesty this product is built against.
+  progress: AnalysisProgress | null;
+  // A storage KEY, never a URL and never a local path, so the debug renderer
+  // can move from public/rally-debug to object storage without the frontend
+  // changing.
+  debug_video_path: string | null;
+  debug_video_bucket: string | null;
+  /** Stamped on entry to 'processing'. Null for runs from before migration 0010. */
+  started_at: string | null;
+  /** Stamped on 'completed' or 'failed'. Null while running. */
+  finished_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+/** Stages in pipeline order. A UI shows these as done / running / not yet. */
+export type AnalysisStage =
+  | "preparing"
+  | "court"
+  | "players"
+  | "pose"
+  | "ball"
+  | "contacts"
+  | "rallies"
+  | "shots"
+  | "mechanics"
+  | "saving"
+  | "coaching"
+  | "overlay";
+
+export const ANALYSIS_STAGES: AnalysisStage[] = [
+  "preparing", "court", "players", "pose", "ball", "contacts",
+  "rallies", "shots", "mechanics", "saving", "coaching", "overlay",
+];
+
+export const ANALYSIS_STAGE_LABELS: Record<AnalysisStage, string> = {
+  preparing: "Preparing the video",
+  court: "Finding the court",
+  players: "Finding the players",
+  pose: "Reading body position",
+  ball: "Tracking the ball",
+  contacts: "Finding paddle contacts",
+  rallies: "Working out the rallies",
+  shots: "Classifying shots",
+  mechanics: "Measuring your swing",
+  saving: "Saving results",
+  coaching: "Writing your coaching read",
+  overlay: "Rendering the tracking overlay",
+};
+
+export type AnalysisProgress = {
+  stage: AnalysisStage;
+  /** The pipeline's own words for what it is doing right now. */
+  message: string;
+  /** Stages already finished, so a UI can tick them off. */
+  completedStages: AnalysisStage[];
+  updatedAt: string;
 };
 export type AnalysisInsert = {
   id?: string;
@@ -89,8 +148,14 @@ export type AnalysisInsert = {
   error_message?: string | null;
   result?: AnalysisResult | null;
   self_player_label?: string | null;
+  pre_analysis_setup?: unknown | null;
   coaching_notes?: string | null;
   coaching_kind?: string;
+  progress?: AnalysisProgress | null;
+  debug_video_path?: string | null;
+  debug_video_bucket?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -102,8 +167,14 @@ export type AnalysisUpdate = {
   error_message?: string | null;
   result?: AnalysisResult | null;
   self_player_label?: string | null;
+  pre_analysis_setup?: unknown | null;
   coaching_notes?: string | null;
   coaching_kind?: string;
+  progress?: AnalysisProgress | null;
+  debug_video_path?: string | null;
+  debug_video_bucket?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -277,6 +348,92 @@ export type BallTrackRow = {
 export type BallTrackInsert = Omit<BallTrackRow, "id" | "created_at"> & { id?: string; created_at?: string };
 export type BallTrackUpdate = Partial<BallTrackInsert>;
 
+/* ------------------------------------------------------------------------ */
+/* Frontend data model — 0009_frontend_data_model.sql                       */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The SEGMENTER's rallies, not the coaching pass's re-derivation.
+ *
+ * Written in the same persist as analysis_shots, from the same rallies array
+ * the shots were cut from — so analysis_shots.rally_idx IS a valid join key
+ * against this table. It remains unsafe against coaching_rallies, which
+ * re-clusters contact timestamps later and disagrees on numbering and count.
+ */
+export type AnalysisRallyRow = {
+  id: string;
+  analysis_id: string;
+  idx: number;
+  start_s: number;
+  end_s: number;
+  /** Which segmenter drew this boundary — a UI should say so. */
+  source: "net-crossings" | "hit-clustering" | "contacts" | "rally_seg" | "unknown";
+  /** Why it ended, where the segmenter knows. Null is honest. */
+  end_reason: string | null;
+  contact_count: number;
+  crossing_count: number | null;
+  /** Seconds keep-alive added past the last crossing. 0 = ended on its own. */
+  extended_seconds: number;
+  contacts: RallyContact[] | null;
+  /** Null until the coaching pass runs. Shown as "no verdict", never neutral. */
+  verdict: "won" | "lost" | "unforced_error" | "neutral" | "unknown" | null;
+  verdict_reason: string | null;
+  verdict_confidence: number | null;
+  created_at: string;
+};
+
+export type RallyContact = {
+  t_s: number;
+  side: "self" | "opponent" | "unknown";
+  confidence: number;
+};
+
+export type AnalysisRallyInsert =
+  Omit<AnalysisRallyRow, "id" | "created_at" | "verdict" | "verdict_reason" | "verdict_confidence">
+  & {
+    id?: string;
+    created_at?: string;
+    verdict?: AnalysisRallyRow["verdict"];
+    verdict_reason?: string | null;
+    verdict_confidence?: number | null;
+  };
+export type AnalysisRallyUpdate = Partial<AnalysisRallyInsert>;
+
+/**
+ * What the pipeline knows about its own reliability.
+ *
+ * Every field is nullable because every one of them can genuinely fail to be
+ * measured. A UI reads this to decide how confidently to present anything else.
+ */
+export type AnalysisQualityRow = {
+  analysis_id: string;
+  vision_fps: number | null;
+  video_duration_s: number | null;
+  frames_sampled: number | null;
+  players_per_frame: { min: number; max: number; mean: number } | null;
+  tracks_produced: number | null;
+  tracks_with_stable_id: number | null;
+  pose_frames_attempted: number | null;
+  pose_frames_succeeded: number | null;
+  ball_coverage: number | null;
+  ball_frames_processed: number | null;
+  ball_points_detected: number | null;
+  ball_points_interpolated: number | null;
+  court_confidence: number | null;
+  court_method: string | null;
+  contacts_found: number | null;
+  shots_classified: number | null;
+  /** Balls that crossed once and never came back — a serve into the net. */
+  dead_ball_count: number | null;
+  rally_source: string | null;
+  limitations: string[] | null;
+  created_at: string;
+};
+
+export type AnalysisQualityInsert =
+  Omit<AnalysisQualityRow, "created_at"> & { created_at?: string };
+export type AnalysisQualityUpdate = Partial<AnalysisQualityInsert>;
+
 export type AnalysisShotRow = {
   id: string;
   analysis_id: string;
@@ -296,9 +453,38 @@ export type AnalysisShotRow = {
   bounced_before: boolean | null;
   outcome: string;
   features: unknown;
+  /**
+   * Swing mechanics for this contact, or null when they could not be measured.
+   *
+   * NULL MEANS ABSENT, NOT ZERO. A knee angle of 0 is a claim; absence is not.
+   * Anything reading this must keep the distinction all the way to the screen.
+   */
+  mechanics: ShotMechanicsRow | null;
   created_at: string;
 };
-export type AnalysisShotInsert = Omit<AnalysisShotRow, "id" | "created_at"> & { id?: string; created_at?: string };
+
+/**
+ * Body-relative, never pixels: shoulder widths and torsos, so a shot at the far
+ * baseline is comparable with one at the near baseline. Every field is
+ * independently nullable — a measurement that could not be made is null on its
+ * own, not the whole object.
+ */
+export type ShotMechanicsRow = {
+  pose_samples: number;
+  hitting_hand: "left" | "right" | "unknown";
+  knee_angle_at_contact_deg: number | null;
+  knee_angle_min_deg: number | null;
+  contact_height_torsos: number | null;
+  contact_reach_shoulders: number | null;
+  backswing_shoulders: number | null;
+  wrist_speed_into_contact: number | null;
+  follow_through_shoulders: number | null;
+  shoulder_rotation_deg: number | null;
+  confidence: number;
+};
+export type AnalysisShotInsert =
+  Omit<AnalysisShotRow, "id" | "created_at" | "mechanics">
+  & { id?: string; created_at?: string; mechanics?: ShotMechanicsRow | null };
 export type AnalysisShotUpdate = Partial<AnalysisShotInsert>;
 
 export type AnalysisEventInsert = Omit<AnalysisEventRow, "id" | "created_at"> & {
@@ -355,11 +541,35 @@ export type CoachingObservationRow = {
   detail: string;
   severity: number;
   dismissed: boolean;
+  /**
+   * The coaching hierarchy: what happened (title/detail) -> why it matters ->
+   * what to change -> how to practise it.
+   *
+   * All nullable. Until 0009 this shape existed for exactly one thing per
+   * analysis (CoachingRead.top_priority_fix); every other observation carried
+   * title and detail only. An observation the model could not justify keeps
+   * these null, and the UI shows the halves that exist rather than an empty
+   * template.
+   */
+  why_it_matters: string | null;
+  what_to_change: string | null;
+  drill_slug: string | null;
+  /** Position in the rally, when the observation is about one specific shot. */
+  shot_idx: number | null;
 };
-export type CoachingObservationInsert = Omit<CoachingObservationRow, "id" | "dismissed"> & {
-  id?: string;
-  dismissed?: boolean;
-};
+export type CoachingObservationInsert =
+  Omit<CoachingObservationRow, "id" | "dismissed"
+       | "why_it_matters" | "what_to_change" | "drill_slug" | "shot_idx">
+  & {
+    id?: string;
+    dismissed?: boolean;
+    // Optional on insert: an observation without them is written without the
+    // keys, so a missing justification stays missing rather than becoming "".
+    why_it_matters?: string | null;
+    what_to_change?: string | null;
+    drill_slug?: string | null;
+    shot_idx?: number | null;
+  };
 export type CoachingObservationUpdate = Partial<CoachingObservationInsert>;
 
 export type CoachingSkillRatingRow = {
@@ -554,6 +764,34 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "ball_tracks_analysis_id_fkey";
+            columns: ["analysis_id"];
+            isOneToOne: true;
+            referencedRelation: "analyses";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      analysis_rallies: {
+        Row: AnalysisRallyRow;
+        Insert: AnalysisRallyInsert;
+        Update: AnalysisRallyUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "analysis_rallies_analysis_id_fkey";
+            columns: ["analysis_id"];
+            isOneToOne: false;
+            referencedRelation: "analyses";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      analysis_quality: {
+        Row: AnalysisQualityRow;
+        Insert: AnalysisQualityInsert;
+        Update: AnalysisQualityUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "analysis_quality_analysis_id_fkey";
             columns: ["analysis_id"];
             isOneToOne: true;
             referencedRelation: "analyses";

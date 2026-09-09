@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
+import { getSignedDownloadUrl } from "@/lib/storage/r2";
 import { listAnalysesForUser, type AnalysisWithVideo } from "@/lib/db/analyses";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { PlayIcon } from "@/components/motifs/Motifs";
@@ -19,10 +20,8 @@ async function withVideoUrls(
   return Promise.all(
     analyses.map(async (analysis) => {
       if (!analysis.video) return { analysis, videoUrl: null };
-      const { data } = await supabase.storage
-        .from(analysis.video.storage_bucket)
-        .createSignedUrl(analysis.video.storage_path, 3600);
-      return { analysis, videoUrl: data?.signedUrl ?? null };
+      const videoUrl = await getSignedDownloadUrl(analysis.video.storage_path).catch(() => null);
+      return { analysis, videoUrl };
     })
   );
 }
@@ -41,6 +40,9 @@ export default async function LibraryPage() {
   } = await supabase.auth.getUser();
   const analyses = user ? await listAnalysesForUser(supabase, user.id) : [];
   const rows = await withVideoUrls(supabase, analyses);
+  // "N games analyzed" counted uploads, including ones that failed or never
+  // ran. Say what is actually true of each group.
+  const readyCount = analyses.filter((a) => a.status === "completed").length;
 
   return (
     <div className="sec">
@@ -51,7 +53,7 @@ export default async function LibraryPage() {
           <p className="sm">
             {analyses.length === 0
               ? "Upload your first match to get started."
-              : `${analyses.length} game${analyses.length === 1 ? "" : "s"} analyzed`}
+              : `${analyses.length} uploaded · ${readyCount} with a finished breakdown`}
           </p>
         </div>
         <Link href="/dashboard/new" className="btn btn-optic mla">

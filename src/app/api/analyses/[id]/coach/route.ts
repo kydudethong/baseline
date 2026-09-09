@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { getAnalysisForUser } from "@/lib/db/analyses";
 import { CoachingPipelineError, runCoachingPipeline } from "@/lib/coaching/run-coaching";
+import { describeError } from "@/lib/analysis/describe-error";
 
 // Calls the Claude REST API directly (see lib/coaching/claude.ts) — no
 // fs/child_process dependency, but kept on the Node runtime for parity with
@@ -71,7 +72,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .eq("id", id)
     .eq("user_id", user.id);
   if (updateAnalysisError) {
-    return NextResponse.json({ error: updateAnalysisError.message }, { status: 500 });
+    return NextResponse.json({ error: describeError(updateAnalysisError) }, { status: 500 });
   }
 
   if (body.skillLevel !== undefined || body.paddleHand !== undefined) {
@@ -83,7 +84,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       })
       .eq("id", user.id);
     if (updateProfileError) {
-      return NextResponse.json({ error: updateProfileError.message }, { status: 500 });
+      return NextResponse.json({ error: describeError(updateProfileError) }, { status: 500 });
     }
   }
 
@@ -97,7 +98,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (err instanceof CoachingPipelineError) {
       return NextResponse.json({ error: err.message }, { status: 409 });
     }
-    const message = err instanceof Error ? err.message : "Coaching analysis failed.";
+    // Supabase errors are plain objects, not Error instances -- the whole
+    // reason describeError exists. Every DB failure in run-coaching.ts throws
+    // one, so this branch used to discard the message, the Postgres code and
+    // the hint and report a bare "Coaching analysis failed."
+    const message = describeError(err);
+    console.error(`[coach] analysis ${id} failed: ${message}`, err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
@@ -106,7 +112,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .select("*")
     .eq("analysis_id", id)
     .maybeSingle();
-  if (readError) return NextResponse.json({ error: readError.message }, { status: 500 });
+  if (readError) return NextResponse.json({ error: describeError(readError) }, { status: 500 });
 
   return NextResponse.json({ coachingRead: read });
 }
