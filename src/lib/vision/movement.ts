@@ -2,6 +2,12 @@ import { transformToCourtCoordinates } from "./court";
 import { courtFrameFor } from "./shots";
 import type { CourtCalibration, PlayerMovementMetrics, PlayerTrack, MovementSample } from "./phase2-types";
 
+/** Longest hole between two samples that can still be treated as one move. */
+const MAX_SAMPLE_GAP_S = 2;
+/** Court units per second beyond which a "move" is a tracking error, not a player. */
+const MAX_HUMAN_SPEED_MPS = 10;
+
+
 // Physical size of one court unit on each axis comes from what the
 // detector said the quad is (calibration.quadKind — see shots.ts
 // courtFrameFor()): 20 ft wide always; 15, 22 or 44 ft deep. Metres
@@ -18,6 +24,8 @@ export function analyzeMovement(
 
   const samples: MovementSample[] = [];
   let transformedCount = 0;
+  let skippedGapSegments = 0;
+  let implausibleSegments = 0;
   let prev: { t: number; x: number; y: number } | null = null;
   let distanceCourtUnits = 0;
   let maxSpeed = 0;
@@ -25,7 +33,13 @@ export function analyzeMovement(
 
   for (const point of track.points) {
     const court = transformToCourtCoordinates(point.boxImageNorm, calibration, frameWidthPx, frameHeightPx);
-    if (!court) continue;
+    // A rejected point breaks the chain. Keeping `prev` across it turns a hole
+    // in the track into a straight-line sprint: measured on a real clip, a
+    // 42-second gap was integrated as one continuous move, producing 100m of
+    // "distance covered" and a 23.9 m/s top speed -- 86 km/h, reported without
+    // a flag. The court transform already refuses points it cannot place; the
+    // distance sum has to respect that refusal.
+    if (!court) { prev = null; continue; }
     transformedCount += 1;
 
     let speed: number | null = null;
@@ -34,10 +48,21 @@ export function analyzeMovement(
       const dx = court.x - prev.x;
       const dy = court.y - prev.y;
       const dist = Math.hypot(dx, dy);
-      distanceCourtUnits += dist;
-      if (dt > 0) {
+      if (dt > 0 && dt <= MAX_SAMPLE_GAP_S) {
         speed = dist / dt;
-        maxSpeed = Math.max(maxSpeed, speed);
+        // A person does not run faster than this. A segment that implies they
+        // did is a tracking error -- an identity swap, a box jumping to
+        // another player -- not a fast player, and adding it to a total makes
+        // the total meaningless rather than slightly high.
+        if (speed <= MAX_HUMAN_SPEED_MPS) {
+          distanceCourtUnits += dist;
+          maxSpeed = Math.max(maxSpeed, speed);
+        } else {
+          speed = null;
+          implausibleSegments += 1;
+        }
+      } else if (dt > MAX_SAMPLE_GAP_S) {
+        skippedGapSegments += 1;
       }
     }
 
@@ -67,6 +92,7 @@ export function analyzeMovement(
       samples: [],
       transformedSampleCount: 0,
       totalSampleCount,
+      excludedSegments: { acrossGaps: skippedGapSegments, implausibleSpeed: implausibleSegments },
     };
   }
 
@@ -100,5 +126,6 @@ export function analyzeMovement(
     samples,
     transformedSampleCount: transformedCount,
     totalSampleCount,
+    excludedSegments: { acrossGaps: skippedGapSegments, implausibleSpeed: implausibleSegments },
   };
 }

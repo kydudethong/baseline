@@ -12,6 +12,18 @@ function iou(a: BoundingBoxNorm, b: BoundingBoxNorm): number {
   return union > 0 ? inter / union : 0;
 }
 
+/** The track's own box at (or nearest to) a time, within a tolerance. */
+function nearestPoint(track: PlayerTrack, t: number, toleranceS: number) {
+  if (toleranceS <= 0) return track.points.find((p) => p.timestampSeconds === t);
+  let best: PlayerTrack["points"][number] | undefined;
+  let bestDt = Infinity;
+  for (const p of track.points) {
+    const dt = Math.abs(p.timestampSeconds - t);
+    if (dt <= toleranceS && dt < bestDt) { bestDt = dt; best = p; }
+  }
+  return best;
+}
+
 /**
  * Runs YOLOv8n-pose on a batch of frames (one Python process, model loaded
  * once) and assigns each detected person to the track whose box at that
@@ -22,7 +34,15 @@ function iou(a: BoundingBoxNorm, b: BoundingBoxNorm): number {
  */
 export async function estimatePosesForFrames(
   frames: Array<{ path: string; timestampSeconds: number }>,
-  tracks: PlayerTrack[]
+  tracks: PlayerTrack[],
+  /**
+   * How far in time a track point may be from the frame and still be the one
+   * this pose belongs to. Zero keeps the original exact-timestamp rule, which
+   * is right for frames sampled on the track's own grid. Burst frames are
+   * extracted at contact times and land BETWEEN track samples, so they need a
+   * tolerance or every pose in a burst is silently dropped.
+   */
+  matchToleranceS = 0
 ): Promise<PlayerPoseFrame[]> {
   if (frames.length === 0) return [];
   const results = await estimatePoseViaPython(frames.map((f) => f.path));
@@ -38,7 +58,7 @@ export async function estimatePosesForFrames(
       let bestTrack: PlayerTrack | null = null;
       let bestScore = 0;
       for (const track of tracks) {
-        const point = track.points.find((p) => p.timestampSeconds === frame.timestampSeconds);
+        const point = nearestPoint(track, frame.timestampSeconds, matchToleranceS);
         if (!point) continue;
         const score = iou(point.boxImageNorm, person.boxImageNorm);
         if (score > bestScore) {

@@ -3,11 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/db/types";
+import { downloadToFile } from "@/lib/storage/r2";
 import { getAnalysisForUser, updateAnalysisStatus, updateVideoMetadata } from "@/lib/db/analyses";
 import { VideoProcessor } from "@/lib/video/processor";
 import { getVisionProvider } from "@/lib/vision";
 import type { VisionAnalysis } from "@/lib/vision/types";
 import { getAnalysisEngine } from "@/lib/analysis";
+import { describeError } from "./describe-error";
 
 const FRAME_SAMPLE_COUNT = 6;
 
@@ -42,7 +44,7 @@ export async function runPipeline(
       /* turbopackIgnore: true */ tempDir,
       video.original_filename.replace(/[^\w.-]/g, "_")
     );
-    await downloadToFile(supabase, video.storage_bucket, video.storage_path, localPath);
+    await downloadToFile(video.storage_path, localPath);
 
     const processor = new VideoProcessor(localPath);
     const metadata = await processor.getMetadata();
@@ -80,7 +82,8 @@ export async function runPipeline(
 
     await updateAnalysisStatus(supabase, analysisId, "completed", { result });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown processing error";
+    const message = describeError(err);
+    console.error(`[pipeline] analysis ${analysisId} failed: ${message}`, err);
     await updateAnalysisStatus(supabase, analysisId, "failed", { errorMessage: message });
     throw err;
   } finally {
@@ -90,16 +93,3 @@ export async function runPipeline(
   }
 }
 
-async function downloadToFile(
-  supabase: SupabaseClient<Database>,
-  bucket: string,
-  storagePath: string,
-  localPath: string
-): Promise<void> {
-  const { data, error } = await supabase.storage.from(bucket).download(storagePath);
-  if (error || !data) {
-    throw new Error(`Could not download video from storage: ${error?.message ?? "no data"}`);
-  }
-  const buffer = Buffer.from(await data.arrayBuffer());
-  await fs.writeFile(localPath, buffer);
-}

@@ -34,8 +34,20 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   if (!analysis.video) {
     return NextResponse.json({ error: "Upload a video before processing." }, { status: 400 });
   }
+  // A run lives only in this Node process's event loop, so a dev-server
+  // recompile, a deploy or an OOM kill leaves the row at "processing" with
+  // nothing left to finish it. Without a staleness window the row is stuck
+  // forever: the page polls a spinner that will never resolve and this route
+  // answers 409 to every retry. Anything older than the window is presumed
+  // dead and may be restarted.
+  const STALE_AFTER_MS = Number(process.env.PROCESSING_STALE_MS || 30 * 60 * 1000);
   if (analysis.status === "processing" || analysis.status === "queued") {
-    return NextResponse.json({ error: "Already processing." }, { status: 409 });
+    const startedAt = Date.parse(analysis.updated_at ?? analysis.created_at ?? "");
+    const age = Number.isFinite(startedAt) ? Date.now() - startedAt : Infinity;
+    if (age < STALE_AFTER_MS) {
+      return NextResponse.json({ error: "Already processing." }, { status: 409 });
+    }
+    console.warn(`[process] restarting analysis ${id}, stuck in ${analysis.status} for ${Math.round(age / 60000)} min`);
   }
 
   const useV2 = (process.env.PIPELINE_VERSION ?? "v2") !== "v1";

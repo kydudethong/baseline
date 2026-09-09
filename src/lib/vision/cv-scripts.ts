@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import fsSync from "node:fs";
+import fsp from "node:fs/promises";
+import os from "node:os";
 import { promisify } from "node:util";
 import path from "node:path";
 
@@ -6,6 +9,20 @@ const execFileAsync = promisify(execFile);
 
 // scripts/cv/*.py live at the repo root, two levels up from src/lib/vision.
 const SCRIPTS_DIR = path.join(process.cwd(), "scripts", "cv");
+
+/**
+ * Which Python runs the CV scripts.
+ *
+ * Hardcoding "python3" assumes the interpreter on PATH is the one carrying
+ * this app's dependencies, and on a machine with a venv for adjacent work it
+ * usually is not: one Python ends up with ultralytics, another with
+ * `inference`, and which script fails depends on which package landed where.
+ * Set CV_PYTHON to a specific interpreter (a venv's bin/python, say) to point
+ * every script at one environment.
+ */
+export function cvPython(): string {
+  return process.env.CV_PYTHON || "python3";
+}
 const POSE_MODEL_PATH = path.join(process.cwd(), "models", "yolov8n-pose.pt");
 
 export class PythonCvError extends Error {}
@@ -17,7 +34,7 @@ async function runPython(
 ): Promise<string> {
   const scriptPath = path.join(SCRIPTS_DIR, scriptName);
   try {
-    const child = execFileAsync("python3", [scriptPath, ...args], {
+    const child = execFileAsync(cvPython(), [scriptPath, ...args], {
       maxBuffer: opts.maxBuffer ?? 20 * 1024 * 1024,
     });
     // Long-running scripts report progress on stderr; forward it live so a
@@ -33,7 +50,26 @@ async function runPython(
     return stdout;
   } catch (err) {
     const stderr = (err as { stderr?: string })?.stderr ?? "";
-    throw new PythonCvError(`${scriptName} failed: ${(err as Error).message}\n${stderr}`);
+    // Name the interpreter. "ultralytics is not installed" is baffling when
+    // you have just installed it and watched it import -- because the shell
+    // you tested in and the shell this server inherited its PATH from are not
+    // the same, and `python3` resolves differently in each. Saying which
+    // binary ran turns that into a one-line fix.
+    // execFile puts the WHOLE command line in err.message, which for
+    // a windowed pass means a hundred-plus window pairs -- thousands of
+    // characters of coordinates burying the one line that says what actually
+    // went wrong. Keep the first line, which names the exit code, and drop the
+    // argument dump; the useful detail is always in stderr.
+    const firstLine = ((err as Error).message || "").split("\n")[0].slice(0, 200);
+    // Python tracebacks put the real cause last, not first.
+    const tail = stderr.trimEnd().split("\n").slice(-4).join("\n");
+    throw new PythonCvError(
+      `${scriptName} failed (interpreter: ${cvPython()}${process.env.CV_PYTHON ? "" : ", from PATH"}). `
+      + `${firstLine}\n${tail}`
+      + (process.env.CV_PYTHON ? "" :
+        "\nIf that package IS installed in your shell, the server is running a different python. "
+        + "Run `which python3` and set CV_PYTHON to that path in .env.local.")
+    );
   }
 }
 
@@ -154,9 +190,121 @@ export async function detectBallViaPython(
   windows: Array<[number, number]>
 ): Promise<RawBallDetections> {
   if (!ballModelConfigured()) throw new BallModelNotConfiguredError("No ball model configured (BALL_MODEL_ID / BALL_MODEL_PATH).");
-  const stdout = await runPython("detect_ball.py", [videoPath, "--windows", JSON.stringify(windows)], {
-    maxBuffer: 200 * 1024 * 1024,
-    streamStderr: true,
-  });
-  return JSON.parse(stdout) as RawBallDetections;
+
+  // Take the result through a file, not stdout.
+  //
+  // detect_ball.py is careful to keep stdout clean, but it does not own
+  // stdout: the `inference` package and its transitive dependencies print
+  // their own notices ("ModelDependencyMissing: ...", ONNX provider warnings),
+  // and anything of theirs that lands on stdout is glued to the front of the
+  // JSON. JSON.parse then throws on a run where detection actually worked --
+  // the detector reports finding the ball in hundreds of frames, and the app
+  // reports no ball at all. A file cannot be polluted by a library's chatter.
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "pb-ball-"));
+  const outPath = path.join(dir, "detections.json");
+  try {
+    await runPython("detect_ball.py",
+      [videoPath, "--windows", JSON.stringify(windows), "--out", outPath],
+      { maxBuffer: 8 * 1024 * 1024, streamStderr: true });
+    const text = await fsp.readFile(outPath, "utf8");
+    try {
+      return JSON.parse(text) as RawBallDetections;
+    } catch (err) {
+      throw new PythonCvError(
+        `detect_ball.py wrote output that is not valid JSON (${(err as Error).message}). `
+        + `First 200 characters: ${text.slice(0, 200)}`
+      );
+    }
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
+
+
+/* -------------------------------------------------------------------------
+ * Local player detection
+ * ------------------------------------------------------------------------- */
+
+export interface RawPlayerDetections {
+  frames: Array<{
+    imagePath: string;
+    players: Array<{ boxImageNorm: { x: number; y: number; width: number; height: number }; confidence: number }>;
+    error?: string;
+  }>;
+  model: string;
+}
+
+export class PlayerModelMissingError extends Error {}
+
+export function localPlayerModelPath(): string {
+  return process.env.PLAYER_MODEL_PATH || path.join(process.cwd(), "models", "yolov8n.pt");
+}
+
+/**
+ * Detect people in a batch of frames, locally.
+ *
+ * One Python process for the whole clip rather than one network call per
+ * frame. The hosted path this replaces spent a Roboflow credit per frame on
+ * `coco/50` -- a public COCO detector whose `person` class was the only thing
+ * ever read from it -- so a single 100-second clip at 5 fps was ~500 hosted
+ * inferences, and a few re-runs exhausted a free tier. The same weights class
+ * runs here for nothing.
+ */
+export async function detectPlayersViaPython(
+  framePaths: string[]
+): Promise<Map<string, Array<{ boxImageNorm: { x: number; y: number; width: number; height: number }; confidence: number }>>> {
+  const model = localPlayerModelPath();
+  if (!fsSync.existsSync(model)) {
+    throw new PlayerModelMissingError(
+      `Local player model not found at ${model}. Download yolov8n.pt into models/, or set PLAYER_MODEL_PATH.`
+    );
+  }
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "pb-players-"));
+  const framesJson = path.join(dir, "frames.json");
+  const outPath = path.join(dir, "players.json");
+  try {
+    await fsp.writeFile(framesJson, JSON.stringify(framePaths), "utf8");
+    await runPython("detect_players.py",
+      ["--frames-json", framesJson, "--model", model, "--out", outPath],
+      { streamStderr: true });
+    const raw = JSON.parse(await fsp.readFile(outPath, "utf8")) as RawPlayerDetections;
+    const byPath = new Map<string, RawPlayerDetections["frames"][number]["players"]>();
+    for (const f of raw.frames) byPath.set(f.imagePath, f.players);
+    return byPath;
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Paddle-contact ONSETS from the audio track — candidate instants, never
+ * contacts. Everything about whether one is real is decided in
+ * audio-contacts.ts against the ball's own behaviour, because a microphone on
+ * a public court hears the games either side just as clearly as this one.
+ *
+ * Failure here is never fatal: a clip with no audio track, or with audio the
+ * detector cannot use, simply contributes no candidates and the pipeline
+ * carries on with vision-only contacts.
+ */
+export async function detectAudioOnsetsViaPython(
+  videoPath: string,
+  minGapSeconds = 0.15
+): Promise<{ events: Array<{ timestampSeconds: number; strength: number }>; diagnostics: Record<string, unknown> }> {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "pb-audio-"));
+  const outPath = path.join(dir, "audio.json");
+  try {
+    await runPython("audio_events.py",
+      [videoPath, "--min-gap", String(minGapSeconds), "--out", outPath],
+      { streamStderr: true });
+    const raw = JSON.parse(await fsp.readFile(outPath, "utf8")) as {
+      events?: Array<{ timestampSeconds: number; strength: number }>;
+      diagnostics?: Record<string, unknown>;
+    };
+    return { events: raw.events ?? [], diagnostics: raw.diagnostics ?? {} };
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+export class PaddleModelNotConfiguredError extends Error {}
+

@@ -1,0 +1,144 @@
+/**
+ * Render the pipeline's own annotated video.
+ *
+ * Separate from rally_seg's debug render, and for a reason worth stating: that
+ * one draws rally_seg's court, rally_seg's ball track and rally_seg's rally
+ * boundaries. Once the net-crossing segmenter became the one that decides the
+ * answer, rally_seg's video became a picture of a component that no longer
+ * decides anything -- plausible, detailed, and about something else. When the
+ * numbers and the video disagree there is no way to tell which is lying.
+ *
+ * So this renders what was actually used, and nothing else.
+ *
+ * Never throws. A missing overlay is a missing overlay; it must not be able to
+ * fail an analysis that otherwise succeeded.
+ */
+
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { debugVideoDir, debugVideoKey } from "./debug-video-store";
+
+import { cvPython } from "./cv-scripts";
+import type { BallTrackPoint } from "./ball";
+import type { NetBand, NetCrossing } from "./rallies-net";
+import type { ClusteredRally } from "./rallies";
+import type { CourtCalibration, PlayerPoseFrame, PlayerTrack } from "./phase2-types";
+import { visibleBones } from "./skeleton";
+
+export function debugRenderEnabled(): boolean {
+  const v = (process.env.RALLY_SEG_DEBUG || "").toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+// Re-exported from the storage module so there is one definition of where an
+// overlay lives, and only one place to change when it stops being local.
+export { debugVideoDir, debugVideoKey, LOCAL_BUCKET } from "./debug-video-store";
+
+export interface DebugRenderInput {
+  videoPath: string;
+  analysisId: string;
+  durationSeconds: number;
+  frameWidthPx: number;
+  frameHeightPx: number;
+  calibration: CourtCalibration;
+  netLinePx: [[number, number], [number, number]] | null;
+  netBandPx: NetBand | null;
+  ballGatePx: Array<[number, number]> | null;
+  ballPoints: BallTrackPoint[];
+  crossings: NetCrossing[];
+  rallies: ClusteredRally[];
+  tracks: PlayerTrack[];
+  poses: PlayerPoseFrame[];
+  /** Paddle boxes, when a paddle model ran — drawn so a bad model is visible, not just reported. */
+  paddles?: Array<{ t: number; x: number; y: number; w?: number; h?: number; playerId: string | null; confidence: number; source?: "detected" | "pose"; angleDeg?: number }>;
+  /** Contacts confirmed from audio + ball agreement, flashed on the overlay. */
+  audioContacts?: Array<{ t: number; x: number; y: number; playerId: string | null }>;
+  selfPlayerId: string | null;
+  onLog?: (line: string) => void;
+}
+
+export async function renderDebugVideo(input: DebugRenderInput): Promise<string | null> {
+  const c = input.calibration.cornersImagePx;
+  const outDir = debugVideoDir();
+  const outPath = path.join(outDir, debugVideoKey(input.analysisId));
+  const work = await fsp.mkdtemp(path.join(os.tmpdir(), "pb-debug-"));
+  const dataPath = path.join(work, "overlay.json");
+
+  try {
+    await fsp.mkdir(outDir, { recursive: true });
+    await fsp.writeFile(dataPath, JSON.stringify({
+      durationS: input.durationSeconds,
+      courtCornersPx: c && input.calibration.confidence > 0
+        ? [c.bottomLeft, c.bottomRight, c.topRight, c.topLeft]
+        : null,
+      netLinePx: input.netLinePx,
+      netBandPx: input.netBandPx,
+      ballGatePx: input.ballGatePx,
+      // Only the trail matters, and a full track is megabytes of JSON.
+      ballPoints: input.ballPoints.map((p) => ({
+        t: Math.round(p.t * 1000) / 1000,
+        x: Math.round(p.x * 10000) / 10000,
+        y: Math.round(p.y * 10000) / 10000,
+        interpolated: p.interpolated,
+      })),
+      crossings: input.crossings,
+      rallies: input.rallies.map((r) => ({ idx: r.idx, startS: r.startS, endS: r.endS })),
+      // Bones resolved here rather than in Python: one skeleton definition,
+      // shared with the still-frame overlay, so the two views of the same pose
+      // can never disagree about what connects to what.
+      poses: input.poses.map((p) => ({
+        t: Math.round(p.timestampSeconds * 1000) / 1000,
+        playerId: p.playerId,
+        bones: visibleBones(p.keypoints).map((b) => [
+          Math.round(b.from[0] * 10000) / 10000, Math.round(b.from[1] * 10000) / 10000,
+          Math.round(b.to[0] * 10000) / 10000, Math.round(b.to[1] * 10000) / 10000,
+          b.group,
+        ]),
+        joints: p.keypoints
+          .filter((k) => k.xNorm !== null && k.yNorm !== null && (k.confidence ?? 0) >= 0.3)
+          .map((k) => [Math.round(k.xNorm! * 10000) / 10000, Math.round(k.yNorm! * 10000) / 10000]),
+      })),
+      paddles: (input.paddles ?? []).map((p) => ({
+        t: Math.round(p.t * 1000) / 1000,
+        x: Math.round(p.x * 10000) / 10000,
+        y: Math.round(p.y * 10000) / 10000,
+        w: p.w === undefined ? null : Math.round(p.w * 10000) / 10000,
+        h: p.h === undefined ? null : Math.round(p.h * 10000) / 10000,
+        playerId: p.playerId,
+        conf: Math.round(p.confidence * 100) / 100,
+        source: p.source ?? "detected",
+        angleDeg: p.angleDeg ?? null,
+      })),
+      audioContacts: (input.audioContacts ?? []).map((c) => ({
+        t: Math.round(c.t * 1000) / 1000,
+        x: Math.round(c.x * 10000) / 10000,
+        y: Math.round(c.y * 10000) / 10000,
+      })),
+      tracks: input.tracks.map((t) => ({
+        playerId: t.playerId,
+        isSelf: t.playerId === input.selfPlayerId,
+        points: t.points.map((p) => ({
+          t: Math.round(p.timestampSeconds * 1000) / 1000,
+          box: [p.boxImageNorm.x, p.boxImageNorm.y, p.boxImageNorm.width, p.boxImageNorm.height],
+        })),
+      })),
+    }), "utf8");
+
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const run = promisify(execFile);
+    const script = path.join(process.cwd(), "scripts", "cv", "render_debug.py");
+    await run(cvPython(), [script, path.resolve(input.videoPath), "--data", dataPath, "--out", outPath],
+      { maxBuffer: 8 * 1024 * 1024 });
+
+    if (!fs.existsSync(outPath)) return null;
+    return `/rally-debug/${debugVideoKey(input.analysisId)}`;
+  } catch (err) {
+    input.onLog?.(`debug overlay not rendered: ${(err as Error).message.split("\n")[0]}`);
+    return null;
+  } finally {
+    await fsp.rm(work, { recursive: true, force: true }).catch(() => {});
+  }
+}

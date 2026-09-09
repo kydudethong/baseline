@@ -53,6 +53,12 @@ export interface BallBounce {
 
 export interface BallHit {
   t: number;
+  /**
+   * True when the contact was deduced from the ball crossing the net and
+   * coming back rather than seen in the trajectory. The contact is certain;
+   * the timestamp is the best guess available.
+   */
+  inferred?: boolean;
   /** Ball position at the detected direction-change — always present; a hit is only ever reported where the ball was seen. */
   ball: { x: number; y: number };
   /** Track label of the player most plausibly at the ball; null if nobody was close. */
@@ -75,7 +81,7 @@ export interface BallTrackStats {
 
 const GATE_BASE = 0.06; // how far (normalized) from the predicted position a candidate may be, at rest
 const GATE_PER_SPEED = 1.4; // gate grows with speed (units: fraction of last step)
-const MAX_GAP_FRAMES = 6; // longer gaps: stop predicting, re-acquire from scratch
+const MAX_GAP_STEPS = 6; // longer gaps: stop predicting, re-acquire from scratch
 const REACQUIRE_MIN_CONF = 0.35;
 
 /**
@@ -101,23 +107,35 @@ export function buildBallTrack(
   const points: BallTrackPoint[] = [];
   let last: BallTrackPoint | null = null;
   let prev: BallTrackPoint | null = null;
-  let lastFrame = -1;
   let detected = 0;
   let interpolated = 0;
 
+  // Gaps are measured in SECONDS, not frame numbers.
+  //
+  // detect_ball.py reports `frame` as an index into the SOURCE video but
+  // `fps` as the decimated rate it actually sampled at (source fps / step).
+  // Subtracting frame numbers and dividing by that fps therefore overstated
+  // every gap by the step: with BALL_FPS_CAP forcing step 2 or 4, adjacent
+  // sampled detections looked 2-4 frames apart, so the "fill a short gap"
+  // branch fired between EVERY pair of real detections. Measured on two real
+  // clips: 55% and 72% of the resulting track was synthetic interpolation
+  // presented as gap-fill. Time is the one unit both fields agree on.
+  const step = 1 / Math.max(1e-6, fps); // nominal seconds between sampled frames
+  const maxGapS = MAX_GAP_STEPS * step;
+
   for (const frame of frames) {
     const cands = byFrame.get(frame)!;
-    const gapFrames = lastFrame >= 0 ? frame - lastFrame : Infinity;
+    const gapS = last ? cands[0].t - last.t : Infinity;
     let chosen: BallDetection | null = null;
 
-    if (last && gapFrames <= MAX_GAP_FRAMES) {
+    if (last && gapS <= maxGapS) {
       const vx = prev ? (last.x - prev.x) / Math.max(1e-6, last.t - prev.t) : 0;
       const vy = prev ? (last.y - prev.y) / Math.max(1e-6, last.t - prev.t) : 0;
-      const dt = gapFrames / fps;
+      const dt = gapS;
       const px = last.x + vx * dt;
       const py = last.y + vy * dt;
       const stepLen = Math.hypot(vx * dt, vy * dt);
-      const gate = GATE_BASE + GATE_PER_SPEED * stepLen + 0.01 * gapFrames;
+      const gate = GATE_BASE + GATE_PER_SPEED * stepLen + 0.01 * (gapS / step);
       let best = Infinity;
       for (const c of cands) {
         const dist = Math.hypot(c.x - px, c.y - py);
@@ -128,17 +146,22 @@ export function buildBallTrack(
         }
       }
     }
-    if (!chosen && (gapFrames > MAX_GAP_FRAMES || !last)) {
+    if (!chosen) {
       // Re-acquire: only trust a clearly-detected ball to start a new segment.
+      // This runs whenever the gate found nothing, not only after a long gap.
+      // Previously a frame whose candidates all failed the gate was dropped
+      // without updating `last`, so the track stalled until the gap grew past
+      // the limit -- losing up to six frames every time the ball jinked.
       const top = [...cands].sort((a, b) => b.conf - a.conf)[0];
       if (top && top.conf >= REACQUIRE_MIN_CONF) chosen = top;
     }
     if (!chosen) continue;
 
     // Fill a short gap linearly so downstream velocity math sees a regular series.
-    if (last && gapFrames > 1 && gapFrames <= MAX_GAP_FRAMES) {
-      for (let g = 1; g < gapFrames; g++) {
-        const f = g / gapFrames;
+    const gapSteps = Number.isFinite(gapS) ? Math.round(gapS / step) : Infinity;
+    if (last && gapSteps > 1 && gapSteps <= MAX_GAP_STEPS) {
+      for (let g = 1; g < gapSteps; g++) {
+        const f = g / gapSteps;
         points.push({
           t: last.t + (chosen.t - last.t) * f,
           x: last.x + (chosen.x - last.x) * f,
@@ -154,7 +177,6 @@ export function buildBallTrack(
     detected += 1;
     prev = last;
     last = pt;
-    lastFrame = frame;
   }
 
   const total = framesProcessed ?? frames.length;
@@ -188,6 +210,36 @@ export function sliceTrack(points: BallTrackPoint[], startS: number, endS: numbe
 const BOUNCE_MIN_PROMINENCE = 0.006;
 const BOUNCE_WINDOW = 5;
 const KINK_WINDOW = 3; // frames each side for the velocity estimate
+
+/**
+ * The point `span` indices away, but only if it is close enough in TIME.
+ *
+ * The track is not a uniformly sampled series. A gap longer than
+ * MAX_GAP_STEPS is left as a jump, so `points[i - 2]` can be seconds and half
+ * a court away from `points[i]`. Every window in this file used to index
+ * blindly across those jumps, which divided by a huge dt, collapsed the
+ * apparent speed, and threw the candidate away as "too slow" -- and the point
+ * straight after a re-acquisition is exactly where a hit tends to be, because
+ * the detector loses a fast ball through the strike and finds it again after.
+ * Measured on real clips, 82-94% of candidates next to a jump were discarded
+ * that way.
+ *
+ * Returning null instead lets the caller say "no usable neighbour" rather than
+ * silently reporting a slow ball.
+ */
+function neighbourAt(
+  points: BallTrackPoint[], i: number, span: number, maxSpanS: number
+): BallTrackPoint | null {
+  const j = i + span;
+  if (j < 0 || j >= points.length) return null;
+  const p = points[i];
+  const q = points[j];
+  if (Math.abs(q.t - p.t) > maxSpanS) return null;
+  return q;
+}
+
+/** How far apart two points may be in time and still count as adjacent-ish. */
+const MAX_WINDOW_SPAN_S = 0.35;
 const KINK_MIN_DROP = 0.14; // normalized image heights per second
 const BOUNCE_MIN_SPACING_S = 0.2;
 const BOUNCE_CONTACT_EXCLUSION_S = 0.16;
@@ -203,24 +255,33 @@ export function detectBounces(points: BallTrackPoint[], contactsS: number[] = []
 
     // (a) local maximum with prominence
     let isMax = true;
+    let spanOk = true;
     for (let k = 1; k <= BOUNCE_WINDOW; k++) {
-      if (points[i - k].y > p.y || points[i + k].y > p.y) {
+      const before = neighbourAt(points, i, -k, MAX_WINDOW_SPAN_S);
+      const after = neighbourAt(points, i, k, MAX_WINDOW_SPAN_S);
+      if (!before || !after) { spanOk = false; break; }
+      if (before.y > p.y || after.y > p.y) {
         isMax = false;
         break;
       }
     }
     let prominence = 0;
-    if (isMax) {
+    if (isMax && spanOk) {
       let descend = 0, ascend = 0;
       for (let k = 1; k <= BOUNCE_WINDOW; k++) {
-        descend = Math.max(descend, p.y - points[i - k].y);
-        ascend = Math.max(ascend, p.y - points[i + k].y);
+        const before = neighbourAt(points, i, -k, MAX_WINDOW_SPAN_S);
+        const after = neighbourAt(points, i, k, MAX_WINDOW_SPAN_S);
+        if (!before || !after) break;
+        descend = Math.max(descend, p.y - before.y);
+        ascend = Math.max(ascend, p.y - after.y);
       }
       prominence = Math.min(descend, ascend);
     }
 
     // (b) vertical-velocity kink
-    const b = points[i - KINK_WINDOW], a = points[i + KINK_WINDOW];
+    const b = neighbourAt(points, i, -KINK_WINDOW, MAX_WINDOW_SPAN_S);
+    const a = neighbourAt(points, i, KINK_WINDOW, MAX_WINDOW_SPAN_S);
+    if (!b || !a) continue;
     const vyBefore = (p.y - b.y) / Math.max(1e-3, p.t - b.t);
     const vyAfter = (a.y - p.y) / Math.max(1e-3, a.t - p.t);
     const drop = vyBefore - vyAfter; // positive: started rising (relative to before)
@@ -250,12 +311,19 @@ const HIT_MIN_SPACING_S = 0.25; // two real strikes are never closer together th
 const HIT_MIN_LEG_SPEED = 0.35;
 const PLAYER_REACH = 0.16; // normalized image distance a player can plausibly reach from box center (scaled by box height)
 
-function directionChangeDeg(points: BallTrackPoint[], i: number, span: number): number {
-  const a = points[Math.max(0, i - span)];
-  const b = points[i];
-  const c = points[Math.min(points.length - 1, i + span)];
-  const v1x = b.x - a.x, v1y = b.y - a.y;
-  const v2x = c.x - b.x, v2y = c.y - b.y;
+/**
+ * Angle between the incoming and outgoing VELOCITIES at b.
+ *
+ * Comparing raw displacements is only equivalent when the two legs span equal
+ * time, which is not true on a track with gaps -- a long leg and a short one
+ * meeting at a point produce an angle that says more about the sampling than
+ * about the ball.
+ */
+function directionChangeDeg(a: BallTrackPoint, b: BallTrackPoint, c: BallTrackPoint): number {
+  const dt1 = Math.max(1e-3, b.t - a.t);
+  const dt2 = Math.max(1e-3, c.t - b.t);
+  const v1x = (b.x - a.x) / dt1, v1y = (b.y - a.y) / dt1;
+  const v2x = (c.x - b.x) / dt2, v2y = (c.y - b.y) / dt2;
   const n1 = Math.hypot(v1x, v1y), n2 = Math.hypot(v2x, v2y);
   if (n1 < 1e-5 || n2 < 1e-5) return 0;
   const cos = Math.max(-1, Math.min(1, (v1x * v2x + v1y * v2y) / (n1 * n2)));
@@ -295,21 +363,95 @@ function playerAt(track: PlayerTrack, t: number) {
  * BallTrackStats.coverage for how much of the rally the ball was actually
  * visible for.
  */
+/** Why candidate points were rejected, so "0 hits" is a diagnosis and not a mystery. */
+export interface HitScanStats {
+  points: number;
+  observed: number;
+  rejectedInterpolated: number;
+  rejectedSpacing: number;
+  rejectedSlow: number;
+  rejectedStraight: number;
+  /** Candidates next to a jump in the track — no usable neighbour in time. */
+  rejectedGapEdge: number;
+  /** Largest direction change seen on a point that passed the speed gate. */
+  bestTurnDeg: number;
+  hits: number;
+}
+
+export interface HitScanParams {
+  minLegSpeed: number;
+  minTurnDeg: number;
+  minSpacingS: number;
+}
+
+/**
+ * Thresholds for scanning the WHOLE clip, where most of the timeline is dead
+ * time and a false contact costs more than a missed one.
+ */
+export const STRICT_HIT_PARAMS: HitScanParams = {
+  minLegSpeed: HIT_MIN_LEG_SPEED,
+  minTurnDeg: HIT_TURN_MIN_DEG,
+  minSpacingS: HIT_MIN_SPACING_S,
+};
+
+/**
+ * Thresholds for scanning INSIDE a known rally.
+ *
+ * Not a loosened version of the above -- a different prior. The strict numbers
+ * exist to survive dead time, where a ball rolling on the ground or sitting in
+ * a hand can fake a direction change. Inside a rally window the ball is by
+ * definition in play, so that risk is gone, and the thing to protect against
+ * instead is missing a real contact. Measured on a real clip: 343 candidates
+ * were discarded as "too slow" against 17 accepted, on a track sparse enough
+ * that a genuine strike often sits next to a gap and reads as slow.
+ */
+export const IN_RALLY_HIT_PARAMS: HitScanParams = {
+  minLegSpeed: 0.16,
+  minTurnDeg: 18,
+  minSpacingS: 0.22,
+};
+
 export function detectHits(
   points: BallTrackPoint[],
   playerTracks: PlayerTrack[],
-  overheadAt?: (playerId: string, t: number) => boolean | null
+  overheadAt?: (playerId: string, t: number) => boolean | null,
+  stats?: HitScanStats,
+  params: HitScanParams = STRICT_HIT_PARAMS,
+  /**
+   * How foreshortened the court is at a normalized image row: 1 at the near
+   * baseline, smaller further up. See courtForeshorteningAt() in court.ts.
+   * Omitted (or returning null) leaves the thresholds exactly as before.
+   */
+  foreshorteningAt?: (yNorm: number) => number | null
 ): BallHit[] {
   const hits: BallHit[] = [];
+  if (stats) {
+    stats.points = points.length;
+    stats.observed = points.filter((p) => !p.interpolated).length;
+  }
   for (let i = HIT_TURN_WINDOW; i < points.length - HIT_TURN_WINDOW; i++) {
     const p = points[i];
-    if (p.interpolated) continue;
-    if (hits.length && p.t - hits[hits.length - 1].t < HIT_MIN_SPACING_S) continue;
-    const before = points[Math.max(0, i - HIT_TURN_WINDOW)];
-    const after = points[Math.min(points.length - 1, i + HIT_TURN_WINDOW)];
-    if (legSpeed(before, p) < HIT_MIN_LEG_SPEED || legSpeed(p, after) < HIT_MIN_LEG_SPEED) continue;
-    const turn = directionChangeDeg(points, i, HIT_TURN_WINDOW);
-    if (turn < HIT_TURN_MIN_DEG) continue;
+    if (p.interpolated) { if (stats) stats.rejectedInterpolated += 1; continue; }
+    if (hits.length && p.t - hits[hits.length - 1].t < params.minSpacingS) {
+      if (stats) stats.rejectedSpacing += 1;
+      continue;
+    }
+    const before = neighbourAt(points, i, -HIT_TURN_WINDOW, MAX_WINDOW_SPAN_S);
+    const after = neighbourAt(points, i, HIT_TURN_WINDOW, MAX_WINDOW_SPAN_S);
+    if (!before || !after) { if (stats) stats.rejectedGapEdge += 1; continue; }
+    // The speed floor is a PHYSICAL claim -- "a struck ball is moving" -- but
+    // it is measured in image units, so it has to be scaled to where on the
+    // court this contact happened. Without this a far-court dink is rejected
+    // for being slow when it is only distant.
+    const shrink = foreshorteningAt?.(p.y) ?? 1;
+    const minLeg = params.minLegSpeed * (Number.isFinite(shrink) ? shrink : 1);
+    if (legSpeed(before, p) < minLeg || legSpeed(p, after) < minLeg) {
+      if (stats) stats.rejectedSlow += 1;
+      continue;
+    }
+    const turn = directionChangeDeg(before, p, after);
+    if (stats && turn > stats.bestTurnDeg) stats.bestTurnDeg = turn;
+    if (turn < params.minTurnDeg) { if (stats) stats.rejectedStraight += 1; continue; }
 
     const ball = { x: p.x, y: p.y };
 
@@ -334,7 +476,7 @@ export function detectHits(
 
     const confidence = Math.min(
       0.95,
-      0.5 + Math.min(0.25, (turn - HIT_TURN_MIN_DEG) / 100) + (playerId ? 0.2 : 0) + Math.min(0.1, p.conf * 0.1)
+      0.5 + Math.min(0.25, (turn - params.minTurnDeg) / 100) + (playerId ? 0.2 : 0) + Math.min(0.1, p.conf * 0.1)
     );
     hits.push({
       t: p.t,
@@ -345,5 +487,96 @@ export function detectHits(
       confidence: Math.round(confidence * 100) / 100,
     });
   }
+  if (stats) stats.hits = hits.length;
   return hits;
+}
+
+export function newHitScanStats(): HitScanStats {
+  return {
+    points: 0, observed: 0, rejectedInterpolated: 0, rejectedSpacing: 0,
+    rejectedSlow: 0, rejectedStraight: 0, rejectedGapEdge: 0, bestTurnDeg: 0, hits: 0,
+  };
+}
+
+
+/**
+ * Merge two hit scans, keeping the more confident of any near-duplicate pair.
+ *
+ * A strict pass over the whole clip and a permissive pass inside rallies will
+ * both find the obvious strikes. Taking the union without this would report
+ * the same contact twice, half a frame apart.
+ */
+export function mergeHits(a: BallHit[], b: BallHit[], minSpacingS: number): BallHit[] {
+  const all = [...a, ...b].sort((x, y) => x.t - y.t);
+  const out: BallHit[] = [];
+  for (const h of all) {
+    const last = out[out.length - 1];
+    if (last && h.t - last.t < minSpacingS) {
+      if (h.confidence > last.confidence) out[out.length - 1] = h;
+      continue;
+    }
+    out.push(h);
+  }
+  return out;
+}
+
+/**
+ * A contact between every pair of net crossings, whether or not one was seen.
+ *
+ * This is inference from the rules rather than from pixels, and it is sound:
+ * a ball that crossed the net, then crossed back, was hit by somebody in
+ * between. It could not have turned round on its own. So when the scan found
+ * nothing in that interval, the contact still happened and the only open
+ * question is when.
+ *
+ * The timestamp goes to the sharpest direction change in the interval -- the
+ * best available evidence even when it failed the speed gate -- and the hit is
+ * flagged `inferred` with low confidence so nothing downstream mistakes it for
+ * a measurement. A shot type will not be claimed from it.
+ */
+export function inferHitsBetweenCrossings(
+  points: BallTrackPoint[],
+  crossingTimes: number[],
+  existing: BallHit[],
+  minSpacingS = 0.22
+): BallHit[] {
+  if (crossingTimes.length < 2) return [];
+  const times = [...crossingTimes].sort((a, b) => a - b);
+  const out: BallHit[] = [];
+
+  for (let k = 0; k < times.length - 1; k++) {
+    const from = times[k];
+    const to = times[k + 1];
+    if (to - from < minSpacingS) continue;
+    if (existing.some((h) => h.t > from && h.t < to)) continue;
+    if (out.some((h) => h.t > from && h.t < to)) continue;
+
+    // Sharpest turn in the interval, ignoring the speed gate entirely.
+    let bestI = -1;
+    let bestTurn = -1;
+    for (let i = 1; i < points.length - 1; i++) {
+      const p = points[i];
+      if (p.t <= from || p.t >= to || p.interpolated) continue;
+      const before = neighbourAt(points, i, -1, MAX_WINDOW_SPAN_S * 2);
+      const after = neighbourAt(points, i, 1, MAX_WINDOW_SPAN_S * 2);
+      if (!before || !after) continue;
+      const turn = directionChangeDeg(before, p, after);
+      if (turn > bestTurn) { bestTurn = turn; bestI = i; }
+    }
+    if (bestI < 0) continue;
+
+    const p = points[bestI];
+    out.push({
+      t: p.t,
+      ball: { x: p.x, y: p.y },
+      playerId: null,
+      playerFeet: null,
+      overhead: null,
+      // Deliberately low. The contact is certain; its timing is not, and the
+      // difference has to stay visible to everything downstream.
+      confidence: 0.3,
+      inferred: true,
+    });
+  }
+  return out;
 }

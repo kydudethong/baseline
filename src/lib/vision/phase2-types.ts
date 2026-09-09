@@ -27,7 +27,7 @@ export interface CourtCorners {
 
 export interface CourtCalibration {
   /** How this calibration was produced. Never silently swapped for a fake one. */
-  method: "classical-cv-hsv-contour" | "manual" | "mock";
+  method: "classical-cv-hsv-contour" | "rally_seg-classical" | "manual" | "mock";
   /** 0 means "could not calibrate" — corners will be null in that case. */
   confidence: number;
   /** Pixel coordinates in the source frame used for calibration. */
@@ -129,6 +129,14 @@ export interface PlayerMovementMetrics {
   /** How many of this player's tracked points actually had a valid court transform. */
   transformedSampleCount: number;
   totalSampleCount: number;
+  /**
+   * Movements excluded from the distance total, and why. Distance that skips
+   * these is smaller than the truth; distance that included them was not a
+   * distance at all -- one clip integrated a 42-second tracking hole as a
+   * single sprint and reported 23.9 m/s. Reporting the exclusions is what
+   * keeps the smaller number honest rather than merely quieter.
+   */
+  excludedSegments?: { acrossGaps: number; implausibleSpeed: number };
 }
 
 /** Measurable, not judged — no "good/bad footwork" claims, only numbers. */
@@ -167,6 +175,13 @@ export interface QualityDiagnostics {
   poseFramesSucceeded: number;
   /** unknown_shot events found (ball-track direction-change detection, not audio). */
   shotEventCount: number;
+  /**
+   * Balls that crossed the net once and never came back — a serve into the
+   * net, a putaway nobody returned. Not rallies, and deliberately not counted
+   * as contacts, but a point was conceded each time and that is coachable in
+   * a way no rally count is.
+   */
+  deadBallCount?: number;
   knownLimitations: string[];
 }
 

@@ -49,7 +49,15 @@ export function detectFootworkFoundation(track: PlayerTrack): FootworkFoundation
   const lateralRangeCourtUnits = xs.length > 0 ? Math.max(...xs) - Math.min(...xs) : null;
 
   const possibleSplitSteps: FootworkFoundationMetrics["possibleSplitSteps"] = [];
+  // Track points are not contiguous in time -- the tracker revives an identity
+  // across gaps of several seconds, and the revived box is usually a very
+  // different size because the player crossed the court. Comparing i-1/i/i+1
+  // by index turns that size change into a "crouch" and timestamps a
+  // split-step at the moment of revival.
+  const MAX_TRIPLE_SPAN_S = 0.5;
   for (let i = 1; i < boxHeightSeries.length - 1; i++) {
+    const span = boxHeightSeries[i + 1].timestampSeconds - boxHeightSeries[i - 1].timestampSeconds;
+    if (!(span > 0) || span > MAX_TRIPLE_SPAN_S) continue;
     const prev = boxHeightSeries[i - 1].heightNorm;
     const cur = boxHeightSeries[i].heightNorm;
     const next = boxHeightSeries[i + 1].heightNorm;

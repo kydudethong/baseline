@@ -73,6 +73,14 @@ export interface Shot {
   /** For the last shot of a rally: how the rally ended. "in" otherwise (the ball came back). */
   outcome: ShotOutcome;
   features: Record<string, number | string | boolean | null>;
+  /**
+   * Swing mechanics at this contact, measured from pose, or null.
+   *
+   * NULL MEANS NOT MEASURED. Every field inside is independently nullable too:
+   * legs hidden at contact nulls the knee angle without nulling the rest. A
+   * zero here would be a claim, and absence is not a claim.
+   */
+  mechanics?: import("./swing").SwingMetrics | null;
 }
 
 export const SHOT_CATEGORY: Record<ShotType, ShotCategory> = {
@@ -206,6 +214,14 @@ export interface ClassifyContext {
   frameWidthPx: number;
   frameHeightPx: number;
   playerTracks: PlayerTrack[];
+  /**
+   * Frames per second the BALL pass actually sampled at. Not the source fps,
+   * and not 30 -- with BALL_FPS_CAP this is typically 12-15, and hardcoding 30
+   * under-reported segment coverage by 2.5x, which silently failed the
+   * minTrackCoverage gate and left arcNorm null on shots that were well
+   * tracked.
+   */
+  ballFps?: number;
 }
 
 function homographyFor(ctx: ClassifyContext): Homography | null {
@@ -317,7 +333,7 @@ export function classifyRally(input: RallyShotInput, ctx: ClassifyContext): Shot
 
     // Ball arc and speed between this hit and its landing (or the next hit).
     const seg = input.ballPoints.filter((p) => p.t >= hit.t && p.t <= (landing ? landing.t : windowEnd));
-    const expectedFrames = Math.max(1, ((landing ? landing.t : windowEnd) - hit.t) * 30);
+    const expectedFrames = Math.max(1, ((landing ? landing.t : windowEnd) - hit.t) * (ctx.ballFps ?? 30));
     const segCoverage = seg.filter((p) => !p.interpolated).length / expectedFrames;
     let arcNorm: number | null = null;
     if (hit.ball && seg.length >= 3 && segCoverage >= THRESHOLDS.minTrackCoverage) {
@@ -450,8 +466,16 @@ export function decide(f: DecideInput): { type: ShotType; why: string } {
 
   if (f.overhead && (fast || f.speed === null)) return { type: "overhead", why: "wrist above shoulder at contact, fast ball" };
 
-  if (lobby && (f.landZone === "deep" || f.landZone === "unknown") && !fast) {
-    return { type: "lob", why: `apex ${f.arcNorm} of frame height above contact, landed deep` };
+  // `!fast` was true both when the ball was measured slow AND when speed was
+  // never measured at all, and "unknown" landing was accepted too -- so a
+  // contact with no speed and no landing became a lob on arc alone. In the
+  // shipped output every single shot ever labelled "lob" (17 of 17) had null
+  // speed, and 16 of 17 had an unknown landing. 13 lobs in 138s of doubles is
+  // not a reading, it is a default. A lob is a claim about a slow, high ball;
+  // without a speed there is no claim to make.
+  const measuredSlow = f.speed !== null && f.speed < T.driveMin;
+  if (lobby && measuredSlow && f.landZone === "deep") {
+    return { type: "lob", why: `apex ${f.arcNorm} of frame height above contact at ${f.speed} m/s, landed deep` };
   }
 
   if (f.idx === 2) {

@@ -1,5 +1,6 @@
 import { detectCourt, transformToCourtCoordinates as transformImpl } from "./court";
 import { detectPlayersViaRoboflow } from "./roboflow-provider";
+import { detectPlayersViaPython } from "./cv-scripts";
 import { trackPlayersByIoU } from "./tracker";
 import { estimatePosesForFrames } from "./pose";
 import { analyzeMovement as analyzeMovementImpl } from "./movement";
@@ -32,10 +33,31 @@ export class RoboflowPhase2VisionProvider implements Phase2VisionProvider {
   }
 
   async detectPlayers(frame: { path: string; timestampSeconds: number }): Promise<PlayerDetection[]> {
+    // Kept for the hosted path and for any caller that still wants one frame
+    // at a time. The local detector is batched instead -- see
+    // detectPlayersBatch, which is what the pipeline uses.
     return detectPlayersViaRoboflow(frame, {
       frameWidthPx: this.frameWidthPx,
       frameHeightPx: this.frameHeightPx,
     });
+  }
+
+  /** Whole clip in one local Python process; falls back to per-frame hosted calls. */
+  async detectPlayersBatch(
+    frames: Array<{ path: string; timestampSeconds: number }>
+  ): Promise<Map<string, PlayerDetection[]>> {
+    const byPath = await detectPlayersViaPython(frames.map((f) => f.path));
+    const out = new Map<string, PlayerDetection[]>();
+    for (const f of frames) {
+      const found = byPath.get(f.path) ?? [];
+      out.set(f.path, found.map((p) => ({
+        boxImageNorm: p.boxImageNorm,
+        confidence: p.confidence,
+        timestampSeconds: f.timestampSeconds,
+        appearanceSignature: null,
+      })));
+    }
+    return out;
   }
 
   async trackPlayers(perFrame: FrameDetectionSet[], opts?: Parameters<typeof trackPlayersByIoU>[1]): Promise<PlayerTrack[]> {
@@ -124,6 +146,20 @@ export { analyzeMovementImpl as analyzeMovementWithCalibration };
 
 export function getPhase2VisionProvider(frameWidthPx: number, frameHeightPx: number): Phase2VisionProvider {
   const kind = process.env.VISION_PROVIDER || "mock";
-  if (kind === "roboflow") return new RoboflowPhase2VisionProvider(frameWidthPx, frameHeightPx);
+  if (kind === "roboflow" || kind === "local") {
+    return new RoboflowPhase2VisionProvider(frameWidthPx, frameHeightPx);
+  }
   return new MockPhase2VisionProvider();
+}
+
+/**
+ * Detect people locally unless explicitly told to use the hosted API.
+ *
+ * Local is the default because the hosted model was `coco/50` -- a public,
+ * pretrained COCO detector. Nothing about it was specific to this app, and
+ * the only class ever read was `person`, which yolov8n.pt gives for free and
+ * at a higher input resolution. Set PLAYER_DETECTION=roboflow to go back.
+ */
+export function playerDetectionIsLocal(): boolean {
+  return (process.env.PLAYER_DETECTION || "local").toLowerCase() !== "roboflow";
 }
