@@ -1,0 +1,840 @@
+"use client";
+
+/**
+ * Court and player setup, done on a real frame of the user's own video.
+ *
+ * The video streams from a signed URL and everything is drawn in the browser,
+ * so scrubbing costs nothing and the coordinates the user clicks are already in
+ * the video's own pixel space.
+ *
+ * The frame is chosen for them. Hunting through a clip for the moment all four
+ * players are on court and none is stood in front of another is a chore, and it
+ * is one a detector can do exhaustively over the whole video in less time than
+ * it takes to explain -- so the page opens by asking the server for that frame,
+ * with the court already fitted and the players already located. What is left
+ * is the part only a person can do: saying which of them is you, and correcting
+ * anything the fit got wrong.
+ *
+ * Two things are being captured, and both are things a person settles in
+ * seconds that the CV layer cannot reliably settle at all:
+ *
+ *   Court    Automatic fitting is genuinely hard from a low camera behind the
+ *            baseline -- the far half is often hidden by the net, neighbouring
+ *            courts contribute their own lines, and a wrong homography is worse
+ *            than none because it corrupts every out-of-bounds call while still
+ *            reporting a confident number.
+ *   Players  Public courts come with spectators, a queue behind the fence, and
+ *            two more games either side.
+ */
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { computeHomography, applyHomography } from "@/lib/vision/homography";
+import { courtSegments, type CourtLineRole } from "@/lib/vision/court-model";
+import { SetupExamples } from "./SetupExamples";
+
+type Corner = { x: number; y: number };
+/**
+ * `x`/`y` are the player's feet -- the only part of a person on the court
+ * plane, and what the tracker matches against. `box` is the detector's
+ * bounding box when one exists, kept purely so the click target can be the
+ * whole person rather than a dot at their shoes.
+ */
+type Player = { x: number; y: number; isSelf: boolean; box?: [number, number, number, number] };
+type Stage = "court" | "players";
+
+/**
+ * Blank margin drawn around the video, as a fraction of its short side.
+ *
+ * A corner of the court is often OUTSIDE the frame -- a phone on a fence
+ * catches three sidelines and loses the fourth, and the far baseline goes
+ * missing constantly. Without a margin there was physically nowhere to click
+ * for those corners: the canvas was exactly the video's size, so the court
+ * could only ever be marked as small as the frame, which is a court that does
+ * not exist.
+ *
+ * The geometry has no such limit. A homography is happy with corners at
+ * negative coordinates or past the frame edge -- the four points define a
+ * plane, and whether the camera happened to capture all four of them is
+ * irrelevant to the maths. The only thing that was missing was somewhere to
+ * put the cursor.
+ *
+ * Coordinates stay in VIDEO pixel space throughout: a point in the left
+ * margin is simply negative x. Nothing downstream needs to change, and
+ * frameWidthPx/frameHeightPx keep meaning the video, not the canvas.
+ */
+const PAD_FRAC = 0.18;
+
+const CORNER_STEPS = [
+  { key: "nearLeft", label: "Near-left corner", hint: "baseline closest to the camera, left side" },
+  { key: "nearRight", label: "Near-right corner", hint: "same baseline, right side" },
+  { key: "farRight", label: "Far-right corner", hint: "far baseline — or where the net meets the right sideline" },
+  { key: "farLeft", label: "Far-left corner", hint: "far baseline, left side" },
+] as const;
+
+// Court in feet. Same numbers the Python side uses; a pickleball court is 20
+// by 44 with a 7ft non-volley zone each side of the net.
+const COURT_W = 20;
+const COURT_L = 44;
+const NET_Y = 22;
+
+export interface SetupCourt {
+  nearLeft: Corner;
+  nearRight: Corner;
+  farRight: Corner;
+  farLeft: Corner;
+  quadKind: "full" | "near-half";
+}
+
+interface AutoPlayer {
+  boxPx: [number, number, number, number];
+  feetPx: [number, number];
+  confidence: number;
+  side: "near" | "far" | null;
+}
+
+interface AutoSetup {
+  frameUrl: string | null;
+  frame: { timestampSeconds: number; detector: string; playersReliable: boolean } | null;
+  players: AutoPlayer[];
+  court: {
+    corners: { topLeft: [number, number]; topRight: [number, number]; bottomLeft: [number, number]; bottomRight: [number, number] };
+    quadKind: "full" | "near-half";
+    confidence: number;
+  } | null;
+  courtReason: string | null;
+  imageSize: [number, number];
+}
+
+export interface SetupCanvasProps {
+  analysisId: string;
+  videoUrl: string;
+  initial: {
+    frameTimestampSeconds: number;
+    court: SetupCourt | null;
+    players: Player[];
+  } | null;
+  /**
+   * Rendered inside the upload flow rather than on its own page. The canvas
+   * stops owning navigation and hands control back, so the uploader can keep
+   * one continuous "upload → confirm → analyse" without a page change in the
+   * middle of it.
+   */
+  embedded?: boolean;
+  onSaved?: (didStartAnalysis: boolean) => void;
+}
+
+export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, onSaved }: SetupCanvasProps) {
+  const router = useRouter();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const [stage, setStage] = useState<Stage>("court");
+  const [corners, setCorners] = useState<Corner[]>(() => {
+    const c = initial?.court;
+    return c ? [c.nearLeft, c.nearRight, c.farRight, c.farLeft].filter(Boolean) : [];
+  });
+  const [players, setPlayers] = useState<Player[]>(initial?.players ?? []);
+  const [quadKind, setQuadKind] = useState<"full" | "near-half">(
+    initial?.court?.quadKind ?? "full"
+  );
+  const [videoReady, setVideoReady] = useState(false);
+  // The correction panel. Closed by default: the common case is that the
+  // detection is right and the whole job is one click, so the tools for when
+  // it is wrong should be one click away rather than always on screen.
+  const [fixing, setFixing] = useState(false);
+  const [time, setTime] = useState(initial?.frameTimestampSeconds ?? 0);
+  const [duration, setDuration] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<number | null>(null);
+  const [auto, setAuto] = useState<"idle" | "running" | "done" | "failed">("idle");
+  const [autoNote, setAutoNote] = useState<string | null>(null);
+  const [showLines, setShowLines] = useState(true);
+
+  /* ---------------------------------------------------------------------
+   * Finding the frame.
+   * ------------------------------------------------------------------- */
+
+  const findFrame = useCallback(async () => {
+    setAuto("running");
+    setAutoNote(null);
+    setError(null);
+    try {
+      const res = await fetch(`/api/analyses/${analysisId}/setup-frame`, { method: "POST" });
+      const json = (await res.json()) as AutoSetup & { error?: string };
+      if (!res.ok) {
+        setAuto("failed");
+        setAutoNote(json.error ?? "The frame finder could not run.");
+        return;
+      }
+
+      if (json.frame) {
+        setTime(json.frame.timestampSeconds);
+        const v = videoRef.current;
+        if (v) v.currentTime = json.frame.timestampSeconds;
+      }
+
+      // Everything below arrives in the space the SERVER measured in, which is
+      // not necessarily the canvas's. rally_seg caps its long side at 1280, and
+      // the route can only pass the video's true size once processing has
+      // recorded it -- on a fresh upload those columns are still null, so the
+      // server falls back to its own downscaled frame. Painting 1280-space
+      // coordinates onto a 1920-wide canvas squashes the whole overlay into
+      // two-thirds of the frame, and saving it stamps confidence 1.0 on a
+      // court that outranks every detector.
+      const v = videoRef.current;
+      const cw = v?.videoWidth || 0;
+      const ch = v?.videoHeight || 0;
+      const src = json.imageSize;
+      const sx = src && src[0] > 0 && cw > 0 ? cw / src[0] : 1;
+      const sy = src && src[1] > 0 && ch > 0 ? ch / src[1] : 1;
+      const at = (p: [number, number]): Corner => ({ x: p[0] * sx, y: p[1] * sy });
+
+      if (json.court) {
+        const c = json.court.corners;
+        setCorners([at(c.bottomLeft), at(c.bottomRight), at(c.topRight), at(c.topLeft)]);
+        setQuadKind(json.court.quadKind);
+      }
+      // Detected players are seeded as tracked, but never as "you" -- that is
+      // the one thing here nothing but the user can know, and pre-selecting a
+      // guess would get confirmed without being read.
+      if (json.players.length > 0 && json.frame?.playersReliable !== false) {
+        setPlayers(json.players.map((p) => ({
+          x: p.feetPx[0] * sx, y: p.feetPx[1] * sy, isSelf: false,
+          box: [p.boxPx[0] * sx, p.boxPx[1] * sy, p.boxPx[2] * sx, p.boxPx[3] * sy] as
+            [number, number, number, number],
+        })));
+        setStage("players");
+      }
+
+      const bits: string[] = [];
+      if (json.frame) bits.push(`Frame at ${json.frame.timestampSeconds.toFixed(1)}s.`);
+      if (json.court) bits.push(`Court fitted (${(json.court.confidence * 100).toFixed(0)}% line support) — drag any corner to correct it.`);
+      else if (json.courtReason) bits.push(`Court not fitted: ${json.courtReason}`);
+      if (json.frame?.playersReliable === false) {
+        bits.push("No usable player detector here, so click the players yourself.");
+      } else if (json.players.length) {
+        bits.push(`${json.players.length} player${json.players.length === 1 ? "" : "s"} found — click the one that is you.`);
+      }
+      setAutoNote(bits.join(" "));
+      setAuto("done");
+    } catch (err) {
+      setAuto("failed");
+      setAutoNote((err as Error).message);
+    }
+  }, [analysisId]);
+
+  // Run once on a fresh setup. If the user already saved one, their marks win
+  // and re-running would quietly overwrite them.
+  const startedRef = useRef(false);
+  useEffect(() => {
+    // Wait for the video's real dimensions: the rescale above is meaningless
+    // until videoWidth/videoHeight are known, and running early would place
+    // every corner in the wrong space.
+    if (startedRef.current || initial || !videoReady) return;
+    startedRef.current = true;
+    void findFrame();
+  }, [findFrame, initial, videoReady]);
+
+  /* ---------------------------------------------------------------------
+   * Drawing.
+   * ------------------------------------------------------------------- */
+
+  /**
+   * How tall a person standing here would be, in pixels.
+   *
+   * Taken from the court itself: six feet, measured at that spot through the
+   * same homography the overlay is drawn with, so it shrinks correctly with
+   * distance -- a player at the far baseline is a fraction of the size of one
+   * near the camera, and a fixed pixel height would be absurd at one end or
+   * the other. Falls back to a share of the frame when there is no court yet.
+   */
+  const personHeightPx = useCallback((feetX: number, feetY: number): number => {
+    // The VIDEO's height, not the canvas's. The canvas carries a margin on
+    // every side now, so reading its height here would inflate the fallback
+    // player box by the padding -- roughly a third too tall.
+    const frameH = videoRef.current?.videoHeight || 720;
+    if (corners.length === 4) {
+      const farY = quadKind === "near-half" ? NET_Y : COURT_L;
+      const toCourt = computeHomography(
+        [
+          [corners[0].x, corners[0].y], [corners[1].x, corners[1].y],
+          [corners[2].x, corners[2].y], [corners[3].x, corners[3].y],
+        ],
+        [[0, 0], [COURT_W, 0], [COURT_W, farY], [0, farY]]
+      );
+      const toImage = computeHomography(
+        [[0, 0], [COURT_W, 0], [COURT_W, farY], [0, farY]],
+        [
+          [corners[0].x, corners[0].y], [corners[1].x, corners[1].y],
+          [corners[2].x, corners[2].y], [corners[3].x, corners[3].y],
+        ]
+      );
+      if (toCourt && toImage) {
+        const [cx, cy] = applyHomography(toCourt, [feetX, feetY]);
+        if (Number.isFinite(cx) && Number.isFinite(cy)) {
+          const a = applyHomography(toImage, [cx, cy]);
+          const b = applyHomography(toImage, [Math.min(cx + 1, COURT_W), cy]);
+          const pxPerFt = Math.hypot(b[0] - a[0], b[1] - a[1]);
+          if (Number.isFinite(pxPerFt) && pxPerFt > 0.5) {
+            return Math.max(24, Math.min(frameH * 0.9, pxPerFt * 6));
+          }
+        }
+      }
+    }
+    return frameH * 0.14;
+  }, [corners, quadKind]);
+
+  /** The rectangle that represents this player on screen, box or not. */
+  const playerRect = useCallback((q: Player): [number, number, number, number] => {
+    if (q.box) return q.box;
+    const h = personHeightPx(q.x, q.y);
+    const w = h * 0.42;
+    return [q.x - w / 2, q.y - h, q.x + w / 2, q.y];
+  }, [personHeightPx]);
+
+  /**
+   * The court's own lines, projected from the four corners.
+   *
+   * Recomputed from whatever the corners currently are, so dragging a corner
+   * moves the kitchen line and the net with it. That live feedback is the whole
+   * point: four dots on a picture tell you nothing about whether the geometry
+   * is right, but a kitchen line that lands on the painted kitchen line tells
+   * you immediately.
+   */
+  // Colours live here, geometry lives in court-model.ts. Both editors project
+  // the same segments; only the palette differs.
+  const ROLE_STYLE: Record<CourtLineRole, [string, number]> = {
+    boundary: ["#3aa0ff", 2],
+    kitchen: ["#3aa0ff", 1.4],
+    centre: ["#3aa0ff", 1.4],
+    net: ["#ff43c8", 2],
+    "net-post": ["#ff43c8", 2],
+  };
+
+  const courtLines = useCallback((): Array<[[number, number], [number, number], string, number]> => {
+    return courtSegments(corners, quadKind).map((seg) => {
+      const [colour, width] = ROLE_STYLE[seg.role];
+      return [seg.a, seg.b, colour, width] as [[number, number], [number, number], string, number];
+    });
+    // ROLE_STYLE is a constant literal; corners/quadKind are the real inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [corners, quadKind]);
+
+  const draw = useCallback(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || !video.videoWidth) return;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const pad = Math.round(Math.min(vw, vh) * PAD_FRAC);
+    canvas.width = vw + pad * 2;
+    canvas.height = vh + pad * 2;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Everything below draws in VIDEO coordinates; the translate puts the
+    // origin at the video's top-left so a click in the margin is negative and
+    // no other drawing code has to know the margin exists.
+    ctx.fillStyle = "#0B1220";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.translate(pad, pad);
+    ctx.drawImage(video, 0, 0, vw, vh);
+    const s = vw / 1280;
+
+    // The frame edge, so it is obvious which part is footage and which is
+    // room to place a corner the camera never saw.
+    ctx.strokeStyle = "rgba(255,255,255,.45)";
+    ctx.setLineDash([6 * s, 5 * s]);
+    ctx.lineWidth = Math.max(1, 1.5 * s);
+    ctx.strokeRect(0.5, 0.5, vw - 1, vh - 1);
+    ctx.setLineDash([]);
+
+    if (showLines) {
+      for (const [p, q, colour, w] of courtLines()) {
+        ctx.strokeStyle = colour;
+        ctx.lineWidth = w * s;
+        ctx.beginPath();
+        ctx.moveTo(p[0], p[1]);
+        ctx.lineTo(q[0], q[1]);
+        ctx.stroke();
+      }
+    } else if (corners.length > 1) {
+      ctx.strokeStyle = "#3aa0ff";
+      ctx.lineWidth = 2 * s;
+      ctx.beginPath();
+      ctx.moveTo(corners[0].x, corners[0].y);
+      for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i].x, corners[i].y);
+      if (corners.length === 4) ctx.closePath();
+      ctx.stroke();
+    }
+
+    corners.forEach((c, i) => {
+      ctx.fillStyle = "#ffd23a";
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 7 * s, 0, 7);
+      ctx.fill();
+      ctx.fillStyle = "#101216";
+      ctx.font = `${12 * s}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(i + 1), c.x, c.y);
+    });
+
+    players.forEach((p, i) => {
+      const colour = p.isSelf ? "#ffd23a" : "#5ce08c";
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = (p.isSelf ? 3.5 : 2) * s;
+
+      // The box is both the label and the target. A marker at the feet is
+      // where the coordinate belongs but not where anyone points -- people
+      // click the person -- so draw the person.
+      const [x1, y1, x2, y2] = playerRect(p);
+      if (p.isSelf) {
+        ctx.fillStyle = "rgba(255, 210, 58, 0.16)";
+        ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+      }
+      // Dashed means "this is where a person of your height would stand",
+      // solid means "the detector found a person here". Same click target,
+      // different claim, and the drawing should not blur the two.
+      if (!p.box) ctx.setLineDash([7 * s, 5 * s]);
+      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      ctx.setLineDash([]);
+      const labelX = (x1 + x2) / 2;
+      const labelY = y1 - 8 * s;
+
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 6 * s, 0, 7);
+      ctx.stroke();
+
+      const text = p.isSelf ? "you" : `P${i + 1}`;
+      ctx.font = `600 ${14 * s}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "alphabetic";
+      const w = ctx.measureText(text).width + 10 * s;
+      ctx.fillStyle = colour;
+      ctx.fillRect(labelX - w / 2, labelY - 15 * s, w, 19 * s);
+      ctx.fillStyle = "#101216";
+      ctx.fillText(text, labelX, labelY);
+    });
+
+    ctx.restore();
+  }, [corners, players, courtLines, showLines, playerRect]);
+
+  useEffect(() => { draw(); }, [draw, time, videoReady]);
+
+  /* ---------------------------------------------------------------------
+   * Interaction.
+   * ------------------------------------------------------------------- */
+
+  /**
+   * Which player, if any, a click landed on.
+   *
+   * Anywhere inside the box counts, because that is the shape of the thing a
+   * person is aiming at. Boxes are tested smallest-first so a player standing
+   * in front of another can still be picked -- with overlapping boxes the
+   * nearer, larger one would otherwise swallow every click meant for the
+   * player behind. Hand-placed markers have no box and fall back to a radius
+   * around the feet.
+   */
+  const hitPlayer = (list: Player[], p: Corner, radius: number): number => {
+    const rects = list.map((q) => playerRect(q));
+    const inside = list
+      .map((_q, i) => i)
+      .filter((i) => {
+        const [x1, y1, x2, y2] = rects[i];
+        return p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2;
+      })
+      .sort((a, b) => {
+        const areaOf = (i: number) => (rects[i][2] - rects[i][0]) * (rects[i][3] - rects[i][1]);
+        return areaOf(a) - areaOf(b);
+      });
+    if (inside.length) return inside[0];
+    // Missed every body, but a click just outside one is far likelier to mean
+    // that player than to mean "put a new marker here".
+    let best = -1;
+    let bestD = radius;
+    list.forEach((q, i) => {
+      const d = Math.hypot(q.x - p.x, q.y - p.y);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    return best;
+  };
+
+  /**
+   * Cursor -> VIDEO pixel coordinates.
+   *
+   * The canvas is larger than the video by PAD_FRAC on every side, so this
+   * subtracts the margin. A click in the margin therefore yields a negative
+   * coordinate, or one past the video's width -- which is exactly what is
+   * wanted for a court corner the camera did not capture, and what the
+   * homography consumes without complaint.
+   */
+  const toImage = (ev: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current!;
+    const video = videoRef.current;
+    const r = canvas.getBoundingClientRect();
+    const pad = video?.videoWidth
+      ? Math.round(Math.min(video.videoWidth, video.videoHeight) * PAD_FRAC)
+      : 0;
+    return {
+      x: ((ev.clientX - r.left) * canvas.width) / r.width - pad,
+      y: ((ev.clientY - r.top) * canvas.height) / r.height - pad,
+    };
+  };
+
+  const onDown = (ev: React.MouseEvent<HTMLCanvasElement>) => {
+    const p = toImage(ev);
+    const canvas = canvasRef.current!;
+    const scale = canvas.width / canvas.getBoundingClientRect().width;
+    const grab = 16 * scale;
+    if (stage === "court") {
+      const hit = corners.findIndex((c) => Math.hypot(c.x - p.x, c.y - p.y) < grab);
+      if (hit >= 0) { setDragging(hit); return; }
+      if (corners.length < 4) setCorners([...corners, p]);
+    } else {
+      const hit = hitPlayer(players, p, grab * 2);
+      if (hit >= 0) {
+        setPlayers(players.map((q, i) => ({ ...q, isSelf: i === hit ? !q.isSelf : false })));
+        return;
+      }
+      if (players.length < 8) setPlayers([...players, { x: p.x, y: p.y, isSelf: false }]);
+    }
+  };
+
+  const onMove = (ev: React.MouseEvent<HTMLCanvasElement>) => {
+    if (dragging === null) return;
+    const p = toImage(ev);
+    setCorners(corners.map((c, i) => (i === dragging ? p : c)));
+  };
+
+  const seek = (t: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = Math.max(0, Math.min(duration || v.duration || 0, t));
+  };
+
+  const save = async (thenAnalyse: boolean) => {
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+    // The canvas keeps its 300x150 HTML default until the video has decoded a
+    // frame. Saving then records frameWidthPx: 300, and the pipeline later
+    // scales every corner by 1920/300 -- with confidence 1.0, outranking both
+    // detectors. Refuse rather than store a coordinate space that never existed.
+    // The canvas is now PAD wider than the video on each side, so the old
+    // `canvas.width !== video.videoWidth` guard would reject every save. The
+    // thing it was actually protecting against -- saving before the video had
+    // decoded, when the canvas still had its 300x150 HTML default -- is caught
+    // by videoWidth being 0.
+    if (!canvas || !video?.videoWidth || !video.videoHeight) {
+      setError("The video hasn't finished loading, so the frame size isn't known yet. Give it a moment and try again.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const body = {
+      frameTimestampSeconds: time,
+      // The VIDEO's size, not the canvas's. Every corner is already in video
+      // coordinates, and the pipeline scales by this to reach the source
+      // frame -- handing it the padded canvas would stretch the court by the
+      // margin on every analysis.
+      frameWidthPx: video.videoWidth,
+      frameHeightPx: video.videoHeight,
+      court:
+        corners.length === 4
+          ? {
+              nearLeft: corners[0], nearRight: corners[1],
+              farRight: corners[2], farLeft: corners[3],
+              quadKind,
+            }
+          : null,
+      // The box was only ever a click target on this one frame; what matters
+      // downstream is the feet, which is what the tracker matches against.
+      players: players.map(({ x, y, isSelf }) => ({ x, y, isSelf })),
+    };
+    // Everything from here is wrapped: an unhandled rejection (offline, a
+    // proxy returning non-JSON, an aborted connection) used to leave `saving`
+    // true forever, so both buttons read "Saving…" and stayed disabled with no
+    // message and no way back except a reload.
+    try {
+      const res = await fetch(`/api/analyses/${analysisId}/setup`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(j.error ?? "Could not save.");
+        return;
+      }
+
+    // Starting the run from here is the natural end of the flow: upload, pick
+    // the frame, say which player is you, analyse. Making the user go back to
+    // the dashboard to press a second button adds a step and nothing else.
+      if (thenAnalyse) {
+        const run = await fetch(`/api/analyses/${analysisId}/process`, { method: "POST" });
+        if (!run.ok) {
+          const j = (await run.json().catch(() => ({}))) as { error?: string };
+          // The setup itself saved, so say that rather than implying it was lost.
+          setError(`Setup saved, but processing would not start: ${j.error ?? "unknown error"}`);
+          return;
+        }
+      }
+      if (embedded) {
+        onSaved?.(thenAnalyse);
+      } else {
+        router.push(`/dashboard/${analysisId}`);
+        router.refresh();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const courtDone = corners.length === 4;
+  const selfChosen = players.some((p) => p.isSelf);
+  const ready = courtDone && selfChosen;
+
+  /* ---------------------------------------------------------------------
+   * The correction path.
+   *
+   * Automatic detection is right most of the time and wrong often enough
+   * that "wrong" has to be a first-class answer, not something the user has
+   * to work out how to express. So the page asks a plain question and gives
+   * two equally weighted replies -- and choosing "something's off" opens the
+   * tools rather than sending the user somewhere else to find them.
+   * ------------------------------------------------------------------- */
+  const startCourtOver = () => {
+    setStage("court");
+    setCorners([]);
+    setFixing(true);
+    setAutoNote("Click the four corners of the court, starting near-left and going round.");
+  };
+  const startPlayersOver = () => {
+    setStage("players");
+    setPlayers([]);
+    setFixing(true);
+    setAutoNote("Click each player at their feet, then click yourself again to tag it.");
+  };
+
+  return (
+    <div className="stack g4">
+      <video
+        ref={videoRef}
+        src={videoUrl}
+        preload="auto"
+        playsInline
+        muted
+        crossOrigin={videoUrl.startsWith("blob:") ? undefined : "anonymous"}
+        style={{ display: "none" }}
+        onLoadedData={() => {
+          setVideoReady(true);
+          setDuration(videoRef.current?.duration ?? 0);
+          seek(time || 5);
+        }}
+        onSeeked={() => { setTime(videoRef.current?.currentTime ?? 0); draw(); }}
+        onError={() => setError(
+          "This browser can't play this video, so the court and players can't be marked here. "
+          + "MP4 (H.264) works everywhere; MKV and AVI generally do not. You can still analyse "
+          + "the clip without setup from the analysis page."
+        )}
+      />
+
+      {/* --- the frame ------------------------------------------------- */}
+      <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", background: "#0b0f14", border: "1px solid var(--line)" }}>
+        <canvas
+          ref={canvasRef}
+          onMouseDown={onDown}
+          onMouseMove={onMove}
+          onMouseUp={() => setDragging(null)}
+          onMouseLeave={() => setDragging(null)}
+          style={{
+            width: "100%", display: "block",
+            cursor: stage === "court" ? "crosshair" : "pointer",
+            opacity: videoReady ? 1 : 0,
+            transition: "opacity .2s ease",
+          }}
+        />
+        {!videoReady ? (
+          <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#8ba0b8", fontSize: 14 }}>
+            Loading the video…
+          </div>
+        ) : null}
+        {auto === "running" ? (
+          <div style={{
+            position: "absolute", inset: 0, display: "grid", placeItems: "center",
+            background: "rgba(8,12,18,.62)", backdropFilter: "blur(2px)", color: "#fff",
+          }}>
+            <div className="stack g2" style={{ alignItems: "center" }}>
+              <div className="progress indet" style={{ width: 200 }}><div className="bar" /></div>
+              <span style={{ fontSize: 13 }}>Finding a frame with everyone on court…</span>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* --- scrubber -------------------------------------------------- */}
+      <div className="row g3">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => seek(time - 1)}>← 1s</button>
+        <input
+          type="range" min={0} max={duration || 0} step={0.1} value={time}
+          onChange={(e) => seek(Number(e.target.value))}
+          style={{ flex: 1, minWidth: 160 }}
+        />
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => seek(time + 1)}>1s →</button>
+        <span className="num sm" style={{ opacity: 0.7, minWidth: 54, textAlign: "right" }}>{time.toFixed(1)}s</span>
+      </div>
+
+      {/* --- the verdict ----------------------------------------------- */}
+      {!fixing ? (
+        <div className="card stack g3">
+          <div className="row g2" style={{ justifyContent: "space-between" }}>
+            <span className="eyebrow">Does this look right?</span>
+            <span className={`pill ${ready ? "p-good" : courtDone ? "p-warn" : "p-neutral"}`}>
+              <span className="dot" />
+              {ready ? "Ready to analyse"
+                : courtDone ? `Court found · ${players.length} player${players.length === 1 ? "" : "s"} · pick yourself`
+                : "Court not found"}
+            </span>
+          </div>
+          <p className="sm measure" style={{ margin: 0, opacity: 0.8 }}>
+            Blue lines are the court, pink is the net with its real height. Click
+            the player who is <strong>you</strong> — they turn yellow.
+            {courtDone ? " Drag any corner and everything moves with it." : ""}
+            {" "}If a corner sits outside the video, click out in the dark
+            margin where it would be — the dashed line marks the edge of the
+            footage, and a corner beyond it works exactly the same.
+          </p>
+          <div className="row g2">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={saving || !ready}
+              onClick={() => save(true)}
+            >
+              {saving ? "Saving…" : "Looks right — analyse"}
+            </button>
+            <button type="button" className="btn btn-soft" onClick={() => setFixing(true)}>
+              Something&apos;s wrong
+            </button>
+            {!embedded ? (
+              <button type="button" className="btn btn-ghost" disabled={saving} onClick={() => save(false)}>
+                Save without analysing
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <div className="card stack g4">
+          <div className="row g2" style={{ justifyContent: "space-between" }}>
+            <span className="eyebrow">Fix it yourself</span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFixing(false)}>
+              Done fixing
+            </button>
+          </div>
+
+          <div className="stepbar">
+            <span className={`step ${courtDone ? "done" : stage === "court" ? "cur" : ""}`}>
+              <span className="n">{courtDone ? "✓" : "1"}</span> Court &amp; net
+            </span>
+            <span className="step"><span className="sep" /></span>
+            <span className={`step ${selfChosen ? "done" : stage === "players" ? "cur" : ""}`}>
+              <span className="n">{selfChosen ? "✓" : "2"}</span> Which player is you
+            </span>
+          </div>
+
+          <div className="grid2">
+            <div className="stack g2">
+              <strong style={{ fontSize: 14 }}>The court or net is wrong</strong>
+              <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
+                {courtDone
+                  ? "Drag a corner to nudge it, or start over and click all four. The kitchen line, centre lines and net follow the corners — when those land on the paint, the geometry is right. A corner can sit outside the video: click in the margin past the dashed edge."
+                  : `Click the ${CORNER_STEPS[corners.length].label.toLowerCase()} — ${CORNER_STEPS[corners.length].hint}. If it is off-screen, click out in the margin where it would be.`}
+              </p>
+              <div className="row g2">
+                <button type="button" className="btn btn-soft btn-sm" onClick={startCourtOver}>
+                  Redraw the court
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setStage("court")}>
+                  Adjust corners
+                </button>
+              </div>
+              <label className="sm" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+                <input type="checkbox" checked={quadKind === "near-half"}
+                  onChange={(e) => setQuadKind(e.target.checked ? "near-half" : "full")} />
+                The far baseline is hidden — I marked the net instead
+              </label>
+            </div>
+
+            <div className="stack g2">
+              <strong style={{ fontSize: 14 }}>The players are wrong</strong>
+              <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
+                Click anywhere on a player to tag them as you. Click empty court
+                to add someone the detector missed. Everyone on your court is
+                tracked either way — this only says which one is you.
+              </p>
+              <div className="row g2">
+                <button type="button" className="btn btn-soft btn-sm" onClick={startPlayersOver}>
+                  Redo the players
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setStage("players")}>
+                  Pick who I am
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="dashline" />
+
+          {/* The examples live inside "Fix it yourself" rather than on the
+              main verdict card on purpose. A user whose court came back right
+              does not need to be taught the failure modes, and putting three
+              diagrams in front of them before they have a problem is how a
+              two-click confirmation turns into a manual. Anyone who opened
+              this panel has a problem. */}
+          <SetupExamples />
+
+          <div className="dashline" />
+
+          <div className="row g2">
+            <button
+              type="button"
+              className="btn btn-soft btn-sm"
+              disabled={auto === "running"}
+              onClick={() => {
+                const willClobber = corners.length > 0 || players.length > 0;
+                if (willClobber && !window.confirm(
+                  "Replace the court corners and players you have marked with a fresh detection?"
+                )) return;
+                void findFrame();
+              }}
+            >
+              {auto === "running" ? "Looking…" : "Try a different frame"}
+            </button>
+            <label className="sm" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="checkbox" checked={showLines} onChange={(e) => setShowLines(e.target.checked)} />
+              Show the whole court, not just the corners
+            </label>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm mla"
+              disabled={saving || !ready}
+              onClick={() => save(true)}
+            >
+              {saving ? "Saving…" : "Analyse"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {autoNote ? (
+        <p className={auto === "failed" ? "error" : "note"} style={{ fontSize: 13 }}>{autoNote}</p>
+      ) : null}
+      {error ? <div className="error">{error}</div> : null}
+    </div>
+  );
+}

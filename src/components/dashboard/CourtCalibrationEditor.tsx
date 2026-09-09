@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { computeHomography, applyHomography } from "@/lib/vision/homography";
+import { courtSegments } from "@/lib/vision/court-model";
 import { useDialog } from "@/components/ui/Dialog";
 
 export interface CornerPx {
@@ -57,32 +57,29 @@ export function CourtCalibrationEditor({
   const [error, setError] = useState<string | null>(null);
 
   // Court model in "full" units: x 0..1 across (20 ft), y 0 = far baseline, 1 = near baseline (44 ft).
+  // Same geometry as the setup canvas, from the same module.
+  //
+  // This used to be its own normalized 0..1 court with the kitchen at 7/44 and
+  // the net as a flat line -- a second coordinate system for the same court,
+  // and one that could not show the net's HEIGHT. The segmenter decides which
+  // side of the net the ball is on using that height, so an editor that hides
+  // it lets someone confirm a court whose net band is wrong.
+  //
+  // Corner order differs between the two: this editor names them by image
+  // position (top/bottom), the model wants them in court order starting at the
+  // near baseline. Converting here rather than changing either convention.
   const model = useMemo(() => {
-    const H = computeHomography(
-      [[0, 0], [1, 0], [0, 1], [1, 1]],
-      [
-        [corners.topLeft.x, corners.topLeft.y],
-        [corners.topRight.x, corners.topRight.y],
-        [corners.bottomLeft.x, corners.bottomLeft.y],
-        [corners.bottomRight.x, corners.bottomRight.y],
-      ]
-    );
-    if (!H) return null;
-    const P = (x: number, y: number) => applyHomography(H, [x, y]);
-    const K = 7 / 44;
-    const seg = (a: [number, number], b: [number, number]) => ({ a: P(...a), b: P(...b) });
+    const inCourtOrder = [
+      corners.bottomLeft,  // nearLeft
+      corners.bottomRight, // nearRight
+      corners.topRight,    // farRight
+      corners.topLeft,     // farLeft
+    ];
+    const segs = courtSegments(inCourtOrder, "full");
+    if (segs.length === 0) return null;
     return {
-      lines: [
-        seg([0, 0], [1, 0]), // far baseline
-        seg([0, 1], [1, 1]), // near baseline
-        seg([0, 0], [0, 1]), // left sideline
-        seg([1, 0], [1, 1]), // right sideline
-        seg([0, 0.5 - K], [1, 0.5 - K]), // far kitchen line
-        seg([0, 0.5 + K], [1, 0.5 + K]), // near kitchen line
-        seg([0.5, 0], [0.5, 0.5 - K]), // far centre line
-        seg([0.5, 0.5 + K], [0.5, 1]), // near centre line
-      ],
-      net: seg([0, 0.5], [1, 0.5]),
+      lines: segs.filter((sg) => sg.role !== "net" && sg.role !== "net-post"),
+      net: segs.filter((sg) => sg.role === "net" || sg.role === "net-post"),
     };
   }, [corners]);
 
@@ -146,7 +143,17 @@ export function CourtCalibrationEditor({
               {model.lines.map((l, i) => (
                 <line key={i} x1={l.a[0]} y1={l.a[1]} x2={l.b[0]} y2={l.b[1]} stroke="#CFE23A" strokeWidth={Math.max(2, width / 480)} />
               ))}
-              <line x1={model.net.a[0]} y1={model.net.a[1]} x2={model.net.b[0]} y2={model.net.b[1]} stroke="#FF4FD8" strokeWidth={Math.max(2.5, width / 400)} strokeDasharray={`${width / 80} ${width / 160}`} />
+              {/* The net, drawn at its real height: floor line, sagging tape,
+                  and both posts. Four segments where there was one. */}
+              {model.net.map((n, i) => (
+                <line
+                  key={`net-${i}`}
+                  x1={n.a[0]} y1={n.a[1]} x2={n.b[0]} y2={n.b[1]}
+                  stroke="#FF4FD8"
+                  strokeWidth={Math.max(2.5, width / 400)}
+                  strokeDasharray={n.role === "net-post" ? undefined : `${width / 80} ${width / 160}`}
+                />
+              ))}
             </g>
           ) : null}
           {KEYS.map((k) => (
