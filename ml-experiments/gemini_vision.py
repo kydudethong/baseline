@@ -130,7 +130,12 @@ def schema(joint_names: list[str]) -> dict:
                     "type": "object",
                     "properties": {
                         "t": {"type": "number"},
-                        "ball": {"type": ["array", "null"], "items": {"type": "number"}},
+                        # Gemini expresses "may be null" as nullable: true, NOT as a
+                        # type array -- that is the JSON Schema dialect Claude
+                        # uses, and the two are not interchangeable. This app's
+                        # own claude.ts says so in its header comment, which is
+                        # exactly the note this line failed to heed.
+                        "ball": {"type": "array", "items": {"type": "number"}, "nullable": True},
                         "players": {
                             "type": "array",
                             "items": {
