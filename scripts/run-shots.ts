@@ -76,7 +76,12 @@ function parseSelf(raw: string | undefined): { id?: string; seed?: { x: number; 
     console.error(`--self ${raw}: x and y are fractions of the frame (0-1), not pixels`);
     process.exit(1);
   }
-  return { seed: { x, y, t: m[3] === undefined ? 0 : Number(m[3]) } };
+  // NaN, not 0, when no time is given. Zero is the worst possible default
+  // here: matchTracksToSetup looks within 2s of the stated moment, and at
+  // t=0 a clip usually shows people walking on court or nobody at all, so
+  // the seed matches nothing and the run silently has no subject again.
+  // The caller fills this in with something in the middle of the clip.
+  return { seed: { x, y, t: m[3] === undefined ? Number.NaN : Number(m[3]) } };
 }
 
 async function main() {
@@ -91,6 +96,10 @@ async function main() {
     process.exit(1);
   }
   const self = parseSelf(selfRaw);
+  if (self.seed && !Number.isFinite(self.seed.t)) {
+    console.log("--self has no @seconds, so the position is read at the middle of the clip. "
+      + "If nobody is standing there then, add @<seconds> from a moment mid-rally.");
+  }
   const outDir = positional[1] ?? path.join(process.cwd(), "shot-results", path.basename(videoPath, path.extname(videoPath)));
   await fs.mkdir(outDir, { recursive: true });
   const visionFps = Number(process.env.VISION_FPS ?? "5");
@@ -146,7 +155,9 @@ async function main() {
     // exercises that code rather than a parallel one that could drift from it.
     setup: self.seed
       ? {
-          frameTimestampSeconds: self.seed.t,
+          frameTimestampSeconds: Number.isFinite(self.seed.t)
+            ? self.seed.t
+            : meta.durationSeconds / 2,
           frameWidthPx: meta.width,
           frameHeightPx: meta.height,
           court: null,
