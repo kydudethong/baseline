@@ -1,54 +1,45 @@
 {
   "strengths": [
-    "Displays a balanced, wide athletic base and good knee flexion when fully engaged at the non-volley zone line (notably during Rally 6 at 01:21-01:23).",
-    "Active lateral movement and quick recovery when scrambling to cover open court space."
+    "Solid knee bend and wide, balanced base when engaged in live kitchen exchanges (evident in Rally 2 at 12.4s and Rally 6 at 82.5s).",
+    "Compact stroke mechanics on forehand dinks without unnecessary excessive backswing."
   ],
   "top_priority_fix": {
-    "issue": "Dropping the paddle below waist height in the ready position at the kitchen line.",
-    "why_it_matters": "Letting the paddle dangle down by the thigh significantly increases the time required to react to opponent speed-ups, forcing defensive flicking motions rather than compact, controlled punch volleys.",
-    "evidence": "In Rally 2 between 00:09 and 00:11, as well as during Rally 6 reset moments (01:24) and Rally 7 setup (01:30-01:31), the right arm drops completely straight with the paddle pointing toward the court surface while facing opponents."
+    "issue": "Dropping the paddle to the hip and standing upright between balls at the NVZ.",
+    "why_it_matters": "At the non-volley zone, balls arrive in fractions of a second; dangling the paddle at your side leaves you vulnerable to speed-ups and forces rushed, lifting contacts.",
+    "evidence": "In Rally 1 (06.46s\u201308.47s) and between active exchanges (37.50s, 63.48s, and 84.46s), your paddle arm straightens down by your thigh with an upright posture rather than maintaining a ready chest-level paddle carriage."
   },
   "secondary_observations": [
     {
-      "issue": "Taking an oversized backswing on transition balls and volleys.",
-      "evidence": "At 00:36-00:37 and 01:19-01:20, the hitting arm pulls far behind the torso plane prior to forward swing, creating a late contact point behind the body."
-    },
-    {
-      "issue": "Static positioning without shifting to protect the middle seam.",
-      "evidence": "In Rally 1 (00:06-00:08) and Rally 2 (00:10-00:12), when the partner is pulled wide left, player remains anchored near the right sideline instead of sliding toward the centerline to pinch the middle."
+      "issue": "Casual court entry and delayed split-step recovery.",
+      "evidence": "At 28.49s, running onto the court late and upright as the ball crosses the net rather than pre-setting a balanced split step."
     }
   ],
   "drill_recommendation": {
-    "name": "Rapid Fire Wall/Partner Volley Reset",
-    "target": "Instant paddle recovery to chest height pointing at 10-to-2 o'clock between every strike.",
-    "reps_duration": "4 rounds of 90 seconds of rapid un-bounced kitchen volleys focusing exclusively on paddle-up posture."
+    "name": "Rapid-Fire NVZ Reset & Reload",
+    "target": "Keep paddle tip above wrist and pointed forward at chest height immediately following each contact.",
+    "reps_duration": "4 rounds of 3-minute continuous unattackable dinking with a partner alternating speed-ups."
   },
   "observed_counts": {
     "rallies": 7,
-    "contacts_by_you": 3,
-    "net_crossings": 13
+    "contacts_by_you": 2,
+    "net_crossings": 5
   },
   "overlay_audit": [
     {
-      "at_seconds": 0.46,
-      "what_was_drawn": "Green bounding box labelled 'player_2' without any gold bounding box labelled 'YOU'.",
-      "what_the_footage_shows": "No player is assigned the gold 'YOU' marker anywhere across the footage; player_2 (foreground right) is evaluated as the primary subject."
+      "at_seconds": 42.46,
+      "what_was_drawn": "The gold 'YOU' tracking box was assigned to the far-court baseline player.",
+      "what_the_footage_shows": "You had rotated off-court, and the tracker misassigned your identity to an opponent across the net."
     },
     {
-      "at_seconds": 29.49,
-      "what_was_drawn": "Bottom timeline indicates 'no rally'.",
-      "what_the_footage_shows": "Both players are actively rallying and dinking across the net with confirmed ball strikes between 28.5s and 33.5s."
+      "at_seconds": 96.47,
+      "what_was_drawn": "The gold 'YOU' bounding box is placed over the left-side player.",
+      "what_the_footage_shows": "Your partner is standing on the left; you are walking on the right side of the court."
     },
     {
-      "at_seconds": 86.46,
-      "what_was_drawn": "Bottom timeline marks active 'RALLY 6 78.2\u201388.1s'.",
-      "what_the_footage_shows": "The point concluded around 84.0s into the net, and players are merely walking and retrieving the ball while the rally indicator stays active until 88.1s."
-    },
-    {
-      "at_seconds": 36.49,
-      "what_was_drawn": "Ball trajectory trail and amber circle floating mid-air above the net band.",
-      "what_the_footage_shows": "No ball is in active flight at that location; players are stationary between points."
+      "at_seconds": 28.49,
+      "what_was_drawn": "Multiple stacked pose skeletons rendered simultaneously over the player body.",
+      "what_the_footage_shows": "A single player running into position."
     }
   ],
-  "data_gaps": "The overlay never applied a gold box labelled 'YOU' to any player, requiring player_2 (foreground right) to be inferred as the target player. Additionally, multiple live exchanges between 00:29 and 00:34 were unclassified as rallies by the bottom tracking bar."
+  "data_gaps": "Player tracking identity swapped multiple times between the user, partner, and far-court opponent across dead-ball intervals."
 }
