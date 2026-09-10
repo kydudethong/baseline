@@ -67,3 +67,9 @@ _to_delete/
 # python refuses system-wide installs under PEP 668)
 .venv/
 .venv-*/
+
+# Gemini harness output. Model answers, not source -- they change every run
+# and three of them got committed before anyone noticed.
+gemini-read.json
+gemini-vision.json
+gemini-*.overlay.json
