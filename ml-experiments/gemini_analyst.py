@@ -404,6 +404,23 @@ def main() -> int:
     if out.get("data_gaps"):
         print(f"\nDATA GAPS\n  {out['data_gaps']}")
 
+    # Side by side with what the pipeline settled on, where that was saved.
+    ours = results / "rallies.json"
+    if ours.exists():
+        mine = json.loads(ours.read_text())
+        print(f"\nRALLY BOUNDARIES — Gemini vs the pipeline")
+        for i in range(max(len(mine), len(out["rallies"]))):
+            a = f"{mine[i]['startS']:6.1f}-{mine[i]['endS']:6.1f}s" if i < len(mine) else "   —"
+            g = (f"{out['rallies'][i]['start_s']:6.1f}-{out['rallies'][i]['end_s']:6.1f}s"
+                 if i < len(out["rallies"]) else "   —")
+            ext = ""
+            if i < len(mine) and mine[i].get("extendedSeconds"):
+                ext = f"  (pipeline extended +{mine[i]['extendedSeconds']:.1f}s)"
+            print(f"  {i + 1:>2}  pipeline {a}   gemini {g}{ext}")
+    else:
+        print(f"\n(no {ours} — re-run scripts/run-shots.ts to save the pipeline's own "
+              "boundaries for comparison)")
+
     problems = audit(out, facts)
     print(f"\nAUDIT: {len(problems)} problem(s)")
     for p in problems:

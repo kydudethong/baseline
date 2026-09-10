@@ -28,9 +28,19 @@
  *   <outDir>/labels.csv      one row per shot for you to hand-label
  *                            (fill the `truth` column, then run eval-shots.ts)
  *   <outDir>/quality.json    pipeline quality + known limitations
- *   <outDir>/ball.json       the ball track, ball-derived contacts, rallies
- *                            and calibration — everything needed to re-run
- *                            the classifier offline while tuning it
+ *   <outDir>/ball.json       the ball track, ball-derived contacts and
+ *                            calibration — everything needed to re-run the
+ *                            classifier offline while tuning it
+ *   <outDir>/rallies.json    the rally boundaries the run actually settled on,
+ *                            AFTER keep-alive and the bounce rule. Written
+ *                            because they were previously nowhere: the log
+ *                            prints the crossing-derived spans BEFORE those
+ *                            adjustments, shots.json only implies a rally's
+ *                            extent from its first and last shot, and the
+ *                            numbers that decided the analysis were not saved
+ *                            at all. Anything comparing a segmenter against
+ *                            another needs the actual answer, not two proxies
+ *                            for it.
  *   <outDir>/tracks.json     player tracks
  */
 import fs from "node:fs/promises";
@@ -214,12 +224,34 @@ async function main() {
       durationSeconds: meta.durationSeconds,
     })
   );
+  await fs.writeFile(
+    path.join(outDir, "rallies.json"),
+    JSON.stringify(result.rallies.map((r) => ({
+      idx: r.idx,
+      startS: Math.round(r.startS * 100) / 100,
+      endS: Math.round(r.endS * 100) / 100,
+      source: r.source,
+      endReason: r.endReason,
+      contactCount: r.contactCount,
+      crossingCount: r.crossingCount,
+      // How much of endS was keep-alive rather than evidence. Rally 6 on
+      // ky-720p was extended past a point that had already finished, so this
+      // is the field that says which boundaries to distrust.
+      extendedSeconds: r.extendedSeconds,
+    })), null, 2)
+  );
   await fs.writeFile(path.join(outDir, "tracks.json"), JSON.stringify(result.tracks));
   const csv = ["rally_idx,shot_idx,t_s,player,predicted,confidence,truth"]
     .concat(result.shots.map((s) => [s.rallyIdx, s.shotIdx, s.t, s.playerId ?? "", s.type, s.confidence, ""].join(",")))
     .join("\n");
   await fs.writeFile(path.join(outDir, "labels.csv"), csv);
-  console.log(`wrote ${outDir}/shots.json, quality.json, labels.csv`);
+  console.log(`wrote ${outDir}/shots.json, rallies.json, quality.json, labels.csv`);
+  console.log("rally boundaries this run settled on:");
+  for (const r of result.rallies) {
+    const ext = r.extendedSeconds > 0 ? `  (+${r.extendedSeconds.toFixed(1)}s keep-alive)` : "";
+    console.log(`  ${String(r.idx).padStart(2)}  ${r.startS.toFixed(1)}-${r.endS.toFixed(1)}s`
+      + `  ${r.contactCount} contacts  ${r.endReason ?? "no reason recorded"}${ext}`);
+  }
   console.log("Known limitations:\n  " + result.quality.knownLimitations.join("\n  "));
   console.log(`\nLabel guide: ${Object.keys(SHOT_LABEL).join(" | ")}`);
   await fs.rm(framesDir, { recursive: true, force: true });

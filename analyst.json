@@ -1,0 +1,252 @@
+{
+  "rallies": [
+    {
+      "idx": 1,
+      "start_s": 3.8,
+      "end_s": 8.8,
+      "end_reason": "unforced_error",
+      "winner": "far",
+      "confidence": 0.88
+    },
+    {
+      "idx": 2,
+      "start_s": 9.4,
+      "end_s": 13.8,
+      "end_reason": "forced_error",
+      "winner": "far",
+      "confidence": 0.86
+    },
+    {
+      "idx": 3,
+      "start_s": 25.7,
+      "end_s": 28.4,
+      "end_reason": "out",
+      "winner": "near",
+      "confidence": 0.84
+    },
+    {
+      "idx": 4,
+      "start_s": 42.3,
+      "end_s": 46.2,
+      "end_reason": "winner",
+      "winner": "near",
+      "confidence": 0.82
+    },
+    {
+      "idx": 5,
+      "start_s": 47.2,
+      "end_s": 51.0,
+      "end_reason": "fault",
+      "winner": "far",
+      "confidence": 0.8
+    },
+    {
+      "idx": 6,
+      "start_s": 78.2,
+      "end_s": 88.1,
+      "end_reason": "unforced_error",
+      "winner": "far",
+      "confidence": 0.89
+    },
+    {
+      "idx": 7,
+      "start_s": 90.6,
+      "end_s": 94.7,
+      "end_reason": "fault",
+      "winner": "near",
+      "confidence": 0.82
+    }
+  ],
+  "shots": [
+    {
+      "t": 3.96,
+      "rally_idx": 1,
+      "player": "player_1",
+      "type": "serve",
+      "confidence": 0.92
+    },
+    {
+      "t": 5.51,
+      "rally_idx": 1,
+      "player": "player_4",
+      "type": "return",
+      "confidence": 0.9
+    },
+    {
+      "t": 7.3,
+      "rally_idx": 1,
+      "player": "player_1",
+      "type": "third_shot_drop",
+      "confidence": 0.78
+    },
+    {
+      "t": 9.97,
+      "rally_idx": 2,
+      "player": "player_1",
+      "type": "serve",
+      "confidence": 0.9
+    },
+    {
+      "t": 12.3,
+      "rally_idx": 2,
+      "player": "player_2",
+      "type": "third_shot_drop",
+      "confidence": 0.75
+    },
+    {
+      "t": 13.6,
+      "rally_idx": 2,
+      "player": "player_4",
+      "type": "volley",
+      "confidence": 0.8
+    },
+    {
+      "t": 26.78,
+      "rally_idx": 3,
+      "player": "player_3",
+      "type": "serve",
+      "confidence": 0.94
+    },
+    {
+      "t": 27.49,
+      "rally_idx": 3,
+      "player": "player_2",
+      "type": "return",
+      "confidence": 0.86
+    },
+    {
+      "t": 43.38,
+      "rally_idx": 4,
+      "player": "player_3",
+      "type": "serve",
+      "confidence": 0.92
+    },
+    {
+      "t": 44.75,
+      "rally_idx": 4,
+      "player": "player_2",
+      "type": "return",
+      "confidence": 0.85
+    },
+    {
+      "t": 47.67,
+      "rally_idx": 5,
+      "player": "player_4",
+      "type": "serve",
+      "confidence": 0.91
+    },
+    {
+      "t": 48.8,
+      "rally_idx": 5,
+      "player": "player_2",
+      "type": "return",
+      "confidence": 0.83
+    },
+    {
+      "t": 79.87,
+      "rally_idx": 6,
+      "player": "player_2",
+      "type": "serve",
+      "confidence": 0.95
+    },
+    {
+      "t": 81.12,
+      "rally_idx": 6,
+      "player": "player_4",
+      "type": "return",
+      "confidence": 0.9
+    },
+    {
+      "t": 81.54,
+      "rally_idx": 6,
+      "player": "player_1",
+      "type": "third_shot_drop",
+      "confidence": 0.82
+    },
+    {
+      "t": 82.42,
+      "rally_idx": 6,
+      "player": "player_4",
+      "type": "dink",
+      "confidence": 0.78
+    },
+    {
+      "t": 83.28,
+      "rally_idx": 6,
+      "player": "player_3",
+      "type": "dink",
+      "confidence": 0.75
+    },
+    {
+      "t": 91.51,
+      "rally_idx": 7,
+      "player": "player_2",
+      "type": "serve",
+      "confidence": 0.94
+    },
+    {
+      "t": 93.27,
+      "rally_idx": 7,
+      "player": "player_4",
+      "type": "return",
+      "confidence": 0.85
+    }
+  ],
+  "playstyle": {
+    "summary": "Passive baseline and transition player who relies on upright, compact arm-driven motions rather than dynamic athletic footwork.",
+    "tendencies": [
+      "Stands excessively upright during ready state and shot execution",
+      "Delivers reliable, conservative serves deep into the opponent's court",
+      "Relies mostly on arm extension rather than hip rotation or knee drive"
+    ],
+    "under_pressure": "Tends to stiffen upright and reach with the paddle arm rather than dropping hips and stepping through the ball."
+  },
+  "skills": [
+    {
+      "skill": "serve",
+      "rating": 6.5,
+      "basis": "Consistent depth and mechanics demonstrated on serves at t=79.87s and t=91.51s."
+    },
+    {
+      "skill": "positioning",
+      "rating": 5.0,
+      "basis": "Slow to close the kitchen line, often lingering upright in transition (e.g. t=44.75s, y=13.2 ft)."
+    },
+    {
+      "skill": "consistency",
+      "rating": 5.5,
+      "basis": "Puts returns and serves in play, but produces limited offensive penetration due to high center of gravity."
+    }
+  ],
+  "coaching": {
+    "headline": "Lower your center of gravity to build a dynamic athletic base",
+    "strengths": [
+      "Dependable, controlled serve mechanics starting rallies cleanly (t=79.87s, 91.51s)",
+      "Calm court demeanor with minimal erratic paddle thrashing"
+    ],
+    "top_priority_fix": {
+      "issue": "Severe lack of knee bend and athletic hinge across baseline, transition, and contact points.",
+      "why_it_matters": "Operating with straight legs restricts court coverage, prevents driving through the ball from the lower body, and leads to mistimed, arm-only contacts.",
+      "evidence": "Knee angle at contact measured at 171.1 degrees at t=12.30s, 174.7 degrees at t=44.75s, and 179.5 degrees at t=91.51s."
+    },
+    "secondary": [
+      {
+        "issue": "Passive transition speed up to the kitchen line after hitting returns.",
+        "evidence": "Remains in the mid-court transition zone (y=10.3 to 13.2 ft) during rallies 4 and 5 rather than pushing aggressively to the kitchen tape."
+      }
+    ]
+  },
+  "drills": [
+    {
+      "name": "Athletic Base Drops & Dinks",
+      "targets": "Maintain knee flexion between 135 and 145 degrees throughout ready stance and ball strike.",
+      "reps_or_duration": "4 sets of 15 drops from mid-court and kitchen"
+    },
+    {
+      "name": "Split-Step and Sprint to NVZ",
+      "targets": "Hit a return from the baseline, perform a loaded split-step, and advance to the kitchen line before third ball crosses net.",
+      "reps_or_duration": "10 minutes of return-and-approach patterns"
+    }
+  ],
+  "data_gaps": "No extended kitchen firefights or backhand reset exchanges were recorded in the clip to evaluate soft dinking touch or hand speed under direct pressure."
+}
