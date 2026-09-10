@@ -226,6 +226,46 @@ def to_overlay(g: dict, width: int, height: int, duration_s: float) -> dict:
     }
 
 
+def load_env_local() -> None:
+    """CV_PYTHON lives in .env.local, not the shell.
+
+    Without this the renderer runs under whatever interpreter launched this
+    script -- which for anyone following the setup instructions is the venv
+    created for google-genai, and that venv has no OpenCV. The failure looks
+    like a broken renderer and is a wrong interpreter, which is the same
+    confusion CV_PYTHON exists to prevent.
+    """
+    for parent in (Path.cwd(), Path(__file__).resolve().parent.parent):
+        env = parent / ".env.local"
+        if not env.exists():
+            continue
+        for line in env.read_text(encoding="utf-8").splitlines():
+            if "=" not in line or line.lstrip().startswith("#"):
+                continue
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip().strip("'\""))
+        return
+
+
+def check_rallies(rallies: list, duration_s: float) -> tuple[list, list]:
+    """Split rallies into ones that could exist and ones that could not.
+
+    A span outside the clip is not a judgment call -- the video is 101 seconds
+    long and a rally at 119s did not happen. Worth separating rather than
+    quietly clipping, because inventing time is a different kind of failure
+    from getting a boundary slightly wrong, and only one of them says the
+    model has lost track of where it is.
+    """
+    ok, impossible = [], []
+    for r in rallies:
+        s, e = float(r.get("start_s", -1)), float(r.get("end_s", -1))
+        if s < 0 or e > duration_s + 0.5 or e <= s:
+            impossible.append(r)
+        else:
+            ok.append(r)
+    return ok, impossible
+
+
 def probe(video: Path) -> tuple[int, int, float]:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0",
@@ -238,6 +278,32 @@ def probe(video: Path) -> tuple[int, int, float]:
     return int(s["width"]), int(s["height"]), float(d["format"]["duration"])
 
 
+def render(g: dict, video: Path, width: int, height: int, duration: float,
+           out_video: Path, json_path: Path) -> int:
+    overlay = to_overlay(g, width, height, duration)
+    tmp = json_path.with_suffix(".overlay.json")
+    tmp.write_text(json.dumps(overlay), encoding="utf-8")
+
+    out_video.parent.mkdir(parents=True, exist_ok=True)
+    renderer = Path("scripts/cv/render_debug.py")
+    python = os.environ.get("CV_PYTHON", sys.executable)
+    print(f"\nrendering {out_video} with {python}…", file=sys.stderr)
+    r = subprocess.run([python, str(renderer), str(video), "--data", str(tmp),
+                        "--out", str(out_video)], capture_output=True, text=True)
+    if r.returncode != 0:
+        print(r.stderr[-1200:], file=sys.stderr)
+        if "No module named 'cv2'" in r.stderr:
+            print("\nThat interpreter has no OpenCV. CV_PYTHON in .env.local names the one "
+                  "that does;\nthis script now reads it, so check it is set there.",
+                  file=sys.stderr)
+        print("render failed — the JSON is still there to inspect", file=sys.stderr)
+        return 4
+    print(f"wrote {out_video}", file=sys.stderr)
+    print("\nWatch it beside the pipeline's own overlay. Same renderer, same clip,\n"
+          "so anything that differs is the two systems disagreeing, not two styles.")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("video")
@@ -247,7 +313,20 @@ def main() -> int:
     ap.add_argument("--out-json", default="gemini-vision.json")
     ap.add_argument("--out-video", default="public/rally-debug/gemini-cv.mp4")
     ap.add_argument("--max-output-tokens", type=int, default=60000)
+    ap.add_argument("--render-only", metavar="JSON",
+                    help="skip the API and render an answer already saved — the model was "
+                         "already paid for, a failed render should not cost a second call")
+    ap.add_argument("--no-joints", action="store_true",
+                    help="do not ask for skeletons. They are the bulk of the output and the "
+                         "part most likely to be wrong, and dropping them buys observations")
     args = ap.parse_args()
+    load_env_local()
+
+    if args.render_only:
+        width, height, duration = probe(Path(args.video))
+        g = json.loads(Path(args.render_only).read_text())
+        return render(g, Path(args.video), width, height, duration, Path(args.out_video),
+                      Path(args.render_only))
 
     key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not key:
@@ -277,7 +356,11 @@ def main() -> int:
         time.sleep(3)
         f = client.files.get(name=f.name)
 
-    prompt = PROMPT % {"step": step}
+    prompt = (PROMPT % {"step": step}
+              + f"\n\nThe clip is {duration:.1f} seconds long. Every timestamp you report "
+                f"must fall between 0 and {duration:.1f}. There is no footage outside that.")
+    if args.no_joints:
+        prompt += "\n\nDo NOT report joints at all this time. Boxes only."
     started = time.time()
     resp = None
     delay = 5.0
@@ -288,7 +371,7 @@ def main() -> int:
                 contents=[f, prompt],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    response_schema=schema(JOINTS),
+                    response_schema=schema([] if args.no_joints else JOINTS),
                     max_output_tokens=args.max_output_tokens,
                 ),
             )
@@ -312,33 +395,22 @@ def main() -> int:
     players = sum(len(o.get("players", [])) for o in obs)
     print(f"  court:        {'yes' if g.get('court') else 'no'}"
           f"  (confidence {g.get('court_confidence', '?')})")
-    print(f"  rallies:      {len(g.get('rallies', []))}")
-    for r in g.get("rallies", []):
+    good, impossible = check_rallies(g.get("rallies", []), duration)
+    print(f"  rallies:      {len(good)} inside the clip"
+          + (f", {len(impossible)} IMPOSSIBLE" if impossible else ""))
+    for r in good:
         print(f"      {r['start_s']:6.1f}-{r['end_s']:6.1f}s  {r.get('end_reason', '')}")
+    for r in impossible:
+        print(f"      {r['start_s']:6.1f}-{r['end_s']:6.1f}s  <- outside a {duration:.1f}s clip")
+    if impossible:
+        print("      inventing time is a different failure from a fuzzy boundary:")
+        print("      it means the model lost track of where it was in the video.")
     print(f"  observations: {len(obs)} asked ~{expected}"
           + ("  (TRUNCATED — lower --hz)" if len(obs) < expected * 0.6 else ""))
     print(f"  ball seen in: {with_ball}/{len(obs)} ({with_ball / max(1, len(obs)) * 100:.0f}%)")
     print(f"  player boxes: {players}, of which {with_joints} carry joints")
 
-    overlay = to_overlay(g, width, height, duration)
-    tmp = Path(args.out_json).with_suffix(".overlay.json")
-    tmp.write_text(json.dumps(overlay), encoding="utf-8")
-
-    out_video = Path(args.out_video)
-    out_video.parent.mkdir(parents=True, exist_ok=True)
-    renderer = Path("scripts/cv/render_debug.py")
-    python = os.environ.get("CV_PYTHON", sys.executable)
-    print(f"\nrendering {out_video} with {python}…", file=sys.stderr)
-    r = subprocess.run([python, str(renderer), str(video), "--data", str(tmp), "--out", str(out_video)],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        print(r.stderr[-1500:], file=sys.stderr)
-        print("render failed — the JSON is still there to inspect", file=sys.stderr)
-        return 4
-    print(f"wrote {out_video}", file=sys.stderr)
-    print("\nWatch it beside the pipeline's own overlay. Same renderer, same clip,\n"
-          "so anything that differs is the two systems disagreeing, not two styles.")
-    return 0
+    return render(g, video, width, height, duration, Path(args.out_video), Path(args.out_json))
 
 
 if __name__ == "__main__":
