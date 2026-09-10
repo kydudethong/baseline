@@ -294,15 +294,32 @@ def main() -> int:
 
     print(f"asking {model}…", file=sys.stderr)
     started = time.time()
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=SCHEMA,
+    )
+    contents = [f, legend + "\n\n" + TASK]
+
+    # 503 is Google being busy, not anything wrong here, and its own message
+    # says so: "Spikes in demand are usually temporary." Retried rather than
+    # raised -- an upload that already succeeded should not be thrown away
+    # because the far end was full for ten seconds.
+    attempts, delay = 4, 5.0
+    resp = None
     try:
-        resp = client.models.generate_content(
-            model=model,
-        contents=[f, legend + "\n\n" + TASK],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=SCHEMA,
-            ),
-        )
+        for attempt in range(1, attempts + 1):
+            try:
+                resp = client.models.generate_content(model=model, contents=contents, config=config)
+                break
+            except Exception as exc:
+                msg = str(exc)
+                transient = "503" in msg or "UNAVAILABLE" in msg or "500" in msg
+                if not transient or attempt == attempts:
+                    raise
+                print(f"  {model} busy (attempt {attempt}/{attempts}) — retrying in {delay:.0f}s",
+                      file=sys.stderr)
+                time.sleep(delay)
+                delay *= 3      # 5s, 15s, 45s: a demand spike outlasts a tight loop
     except Exception as exc:
         text = str(exc)
         # A 404 means the model name is wrong, and the API's own message does
@@ -316,6 +333,13 @@ def main() -> int:
         # this key may not call AT ALL without billing. Retrying, at any
         # spacing, will never succeed, and the API's own "please retry in 26s"
         # says the opposite.
+        # Only 5xx is retried above. A 429 with limit: 0 and a 404 are both
+        # permanent; retrying either is just a slower way to fail.
+        if "503" in text or "UNAVAILABLE" in text:
+            print(f"\n{model} stayed busy across {attempts} attempts. That is Google's "
+                  "capacity, not your\nrequest — the video uploaded fine. Try again shortly, "
+                  "or a less contended model\n(--list-models).", file=sys.stderr)
+            return 3
         if "RESOURCE_EXHAUSTED" in text or "429" in text:
             zero = "limit: 0" in text
             print(f"\n{model}: quota exhausted." if not zero else
