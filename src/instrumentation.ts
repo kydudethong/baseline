@@ -1,0 +1,15 @@
+/**
+ * Server start-up hook. Next.js calls register() once per server process.
+ *
+ * This is where the idle watchdog goes rather than in middleware, because
+ * middleware runs on the Edge runtime: no setInterval that outlives a request,
+ * no shared module state with the Node server, and no route to Fly's 6PN
+ * network. The watchdog needs all three.
+ */
+export async function register(): Promise<void> {
+  // Guarded: the same file is evaluated for the edge runtime too, where the
+  // import would pull Node-only assumptions into a bundle that cannot use them.
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  const { startIdleWatchdog } = await import("@/lib/analysis/idle-sleep");
+  startIdleWatchdog();
+}

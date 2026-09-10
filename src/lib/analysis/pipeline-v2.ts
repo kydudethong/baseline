@@ -10,6 +10,7 @@ import { runVisionPipeline } from "@/lib/vision/run-vision-pipeline";
 import { downloadToFile, uploadFileFromDisk } from "@/lib/storage/r2";
 import { describeError } from "./describe-error";
 import { StageTimer } from "./stage-timer";
+import { runFinished, runStarted } from "./idle-sleep";
 import { LOCAL_BUCKET, R2_BUCKET, debugVideoDir, debugVideoKey, debugVideoObjectKey } from "@/lib/vision/debug-video-store";
 import { isLocalDev } from "@/lib/deployment";
 import type { AnalysisProgress, AnalysisStage } from "@/lib/db/types";
@@ -49,6 +50,12 @@ export async function runPipelineV2(
   userId: string,
   analysisId: string
 ): Promise<void> {
+  // Registered before anything can throw and released in the finally below,
+  // so the idle watchdog can never stop this machine while a run is on the
+  // event loop. A leaked increment would keep the machine awake for ever --
+  // costly. A leaked decrement would let it sleep mid-analysis -- worse. The
+  // try/finally is what makes neither possible.
+  runStarted();
   // Everything that can fail must fail INSIDE the try, or the analysis is left
   // sitting at "uploaded" with no error while the client has already been told
   // processing started. These three throws used to happen outside it, and
@@ -257,6 +264,7 @@ export async function runPipelineV2(
     await updateAnalysisStatus(supabase, analysisId, "failed", { errorMessage: message });
     throw err;
   } finally {
+    runFinished();
     if (tempDir) {
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
     }

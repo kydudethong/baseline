@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { noteRequest } from "@/lib/analysis/idle-sleep";
 
 // Google Fonts are loaded via a runtime <link>, not next/font/google: that
 // API fetches fonts from Google's CDN at *build* time, which fails in
@@ -14,6 +15,16 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
+  // Every page render is a sign somebody is here, which keeps the idle
+  // watchdog from stopping the machine underneath them.
+  //
+  // Known gap, and a deliberate one: this does NOT see API-only traffic, so a
+  // dashboard left open polling for a finished run does not count as activity.
+  // That case is already covered from the other side -- a run in flight blocks
+  // sleep on its own -- and the failure mode for the rest is a cold start on
+  // the next click, not lost work. Adding request tracking to every route to
+  // close it would be a lot of surface area for that.
+  noteRequest();
   return (
     <html lang="en" className="h-full antialiased">
       <head>
