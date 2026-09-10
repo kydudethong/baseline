@@ -28,7 +28,7 @@ Three things a script can check:
 Usage:
   export GEMINI_API_KEY=...
   python ml-experiments/gemini_coach.py <debug-video.mp4> \
-      [--facts shot-results/<clip>/facts.json] \
+      [--results shot-results/<clip>] \
       [--model gemini-3-pro] [--out gemini-read.json]
 
 Requires: pip install google-genai
@@ -171,26 +171,58 @@ def check_forbidden(read: dict) -> list[str]:
     return [p for p in FORBIDDEN if re.search(p, blob)]
 
 
-def compare_counts(read: dict, facts_path: Path | None) -> list[str]:
+def pipeline_counts(results_dir: Path) -> dict:
+    """What the pipeline counted, from the files run-shots.ts actually writes.
+
+    Reads shots.json and ball.json rather than a facts.json, because no
+    facts.json is produced -- an earlier version of this asked for one and
+    would have reported "could not be checked" forever without ever saying
+    the file it wanted does not exist.
+    """
+    out: dict = {}
+    shots_path = results_dir / "shots.json"
+    if shots_path.exists():
+        shots = json.loads(shots_path.read_text())
+        out["shots"] = len(shots)
+        # rallyIdx is per-rally, so the distinct count IS the rally count.
+        out["rallies"] = len({s.get("rallyIdx") for s in shots if s.get("rallyIdx") is not None})
+    ball_path = results_dir / "ball.json"
+    if ball_path.exists():
+        ball = json.loads(ball_path.read_text())
+        out["contacts"] = len(ball.get("contacts", []))
+    return out
+
+
+def compare_counts(read: dict, results_dir: Path | None) -> list[str]:
     """The model's counts against the pipeline's, where both exist."""
-    if not facts_path or not facts_path.exists():
-        return ["no --facts given, so counts could not be checked"]
-    facts = json.loads(facts_path.read_text())
-    out = []
+    if not results_dir:
+        return ["no --results given, so counts could not be checked"]
+    if not results_dir.exists():
+        return [f"{results_dir} does not exist — run scripts/run-shots.ts on this clip first"]
+    truth = pipeline_counts(results_dir)
+    if not truth:
+        return [f"{results_dir} has no shots.json or ball.json to compare against"]
     got = read.get("observed_counts", {})
-    rallies = facts.get("rallies")
-    if isinstance(rallies, list):
-        n = len(rallies)
-        m = got.get("rallies")
-        out.append(f"rallies: model {m} vs pipeline {n}"
-                   + ("  MATCH" if m == n else "  DIFFER"))
-    return out or ["facts.json had nothing comparable"]
+    out = []
+    for key, mine in (("rallies", got.get("rallies")), ("contacts", got.get("contacts_by_you"))):
+        if key not in truth:
+            continue
+        n = truth[key]
+        # Contacts BY THE SUBJECT are a subset of all contacts, so an exact
+        # match is not expected and would be suspicious; what matters is that
+        # the model is in the same world, not that it agrees to the unit.
+        note = "  (pipeline counts BOTH sides)" if key == "contacts" else ""
+        verdict = "MATCH" if mine == n else ("close" if mine is not None and abs(mine - n) <= max(1, n * 0.25) else "DIFFER")
+        out.append(f"{key}: model {mine} vs pipeline {n}  {verdict}{note}")
+    return out or ["nothing comparable in the results directory"]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("video")
-    ap.add_argument("--facts", default=None, help="pipeline facts JSON to check counts against")
+    ap.add_argument("--results", default=None,
+                    help="shot-results/<clip> directory, to check the model's counts "
+                         "against what the pipeline found")
     ap.add_argument("--model", default="gemini-3-pro")
     ap.add_argument("--out", default="gemini-read.json")
     ap.add_argument("--legend", default=str(LEGEND))
@@ -252,7 +284,7 @@ def main() -> int:
         print("  none — it stayed inside what the data supports")
 
     print("\nCOUNT CHECK")
-    for line in compare_counts(read, Path(args.facts) if args.facts else None):
+    for line in compare_counts(read, Path(args.results) if args.results else None):
         print(f"  {line}")
 
     usage = getattr(resp, "usage_metadata", None)
