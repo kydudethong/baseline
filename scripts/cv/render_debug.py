@@ -54,6 +54,10 @@ def main() -> int:
                     help="first second to render (absolute, from the source video)")
     ap.add_argument("--end", type=float, default=None,
                     help="last second to render")
+    ap.add_argument("--hide-rallies", action="store_true",
+                    help="draw no rally banner and no timeline. For handing the overlay to "
+                         "something that is being ASKED where the rallies are -- otherwise "
+                         "the answer is written across the bottom of every frame")
     args = ap.parse_args()
     if args.start is not None and args.end is not None and args.end <= args.start:
         print(f"--end ({args.end}) must be after --start ({args.start})", file=sys.stderr)
@@ -313,24 +317,31 @@ def main() -> int:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8 * scale, (255, 255, 255), 2, cv2.LINE_AA)
                 break
 
-        active = next((r for r in rallies if r["startS"] <= t <= r["endS"]), None)
-        banner = f"RALLY {active['idx']}  {active['startS']:.1f}-{active['endS']:.1f}s" if active else "no rally"
-        colour = C_LIVE if active else C_DEAD
         y0 = h - int(38 * scale)
         cv2.rectangle(img, (0, y0), (w, h), (24, 24, 28), -1)
-        cv2.circle(img, (int(20 * scale), y0 + int(19 * scale)), int(7 * scale), colour, -1, cv2.LINE_AA)
-        cv2.putText(img, f"{banner}    t={t:6.2f}s", (int(38 * scale), y0 + int(25 * scale)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6 * scale, (235, 235, 235), 1, cv2.LINE_AA)
+        if args.hide_rallies:
+            # The clock stays -- a model reasoning about WHEN something happened
+            # needs to know where it is -- but nothing about rallies. Not even
+            # "no rally", which is itself a claim about the thing being asked.
+            cv2.putText(img, f"t={t:6.2f}s", (int(20 * scale), y0 + int(25 * scale)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6 * scale, (235, 235, 235), 1, cv2.LINE_AA)
+        else:
+            active = next((r for r in rallies if r["startS"] <= t <= r["endS"]), None)
+            banner = f"RALLY {active['idx']}  {active['startS']:.1f}-{active['endS']:.1f}s" if active else "no rally"
+            colour = C_LIVE if active else C_DEAD
+            cv2.circle(img, (int(20 * scale), y0 + int(19 * scale)), int(7 * scale), colour, -1, cv2.LINE_AA)
+            cv2.putText(img, f"{banner}    t={t:6.2f}s", (int(38 * scale), y0 + int(25 * scale)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6 * scale, (235, 235, 235), 1, cv2.LINE_AA)
 
-        # Timeline of every rally across the clip, with a playhead.
-        dur = d.get("durationS") or 1
-        bar_y = y0 - int(9 * scale)
-        cv2.line(img, (0, bar_y), (w, bar_y), (70, 70, 76), int(5 * scale))
-        for r in rallies:
-            cv2.line(img, (int(r["startS"] / dur * w), bar_y), (int(r["endS"] / dur * w), bar_y),
-                     C_LIVE, int(5 * scale))
-        cv2.line(img, (int(t / dur * w), bar_y - int(6 * scale)),
-                 (int(t / dur * w), bar_y + int(6 * scale)), (255, 255, 255), max(1, int(scale)))
+            # Timeline of every rally across the clip, with a playhead.
+            dur = d.get("durationS") or 1
+            bar_y = y0 - int(9 * scale)
+            cv2.line(img, (0, bar_y), (w, bar_y), (70, 70, 76), int(5 * scale))
+            for r in rallies:
+                cv2.line(img, (int(r["startS"] / dur * w), bar_y), (int(r["endS"] / dur * w), bar_y),
+                         C_LIVE, int(5 * scale))
+            cv2.line(img, (int(t / dur * w), bar_y - int(6 * scale)),
+                     (int(t / dur * w), bar_y + int(6 * scale)), (255, 255, 255), max(1, int(scale)))
 
         try:
             ff.stdin.write(img.tobytes())

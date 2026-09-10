@@ -44,30 +44,27 @@ the overlay is a claim about it, and it is sometimes wrong.
   versions of the same, head grey-blue. The arms are coloured differently on
   purpose — a forehand and a backhand look identical otherwise.
 
-## Paddle — read this twice
+## There is no paddle, and no paddle is drawn
 
-- **Pink handle-and-ellipse shape labelled "paddle (from arm)"** — this is
-  **NOT a detected paddle.** No paddle is detected anywhere in this pipeline.
-  It is drawn one paddle-length from the wrist along the forearm, at the
-  forearm's angle, scaled by the player's shoulder width.
-- You may therefore say things about **where the arm was, how big the swing
-  was, and how high the contact was.**
-- You may **NOT** say anything about the paddle's **face angle, its path
-  through the ball, spin, or where on the face contact was made.** That
-  information does not exist in this video. If you cannot tell, say you
-  cannot tell.
-- **"no paddle found here"** means the arm was not readable at that moment,
-  not that the player had no paddle.
+Nothing in this pipeline detects a paddle. Earlier versions drew an estimate
+of one, derived from the forearm; that is gone.
 
-## Contacts and rallies
+So you may say things about **where the arm was, how big the swing was, and
+how high the contact was.** You may **NOT** say anything about the paddle's
+**face angle, its path through the ball, spin, or where on the face contact
+was made.** That information does not exist in this video. If you cannot
+tell, say you cannot tell.
 
-- **Bright green circle + "CONTACT (audio+ball)"** — a paddle strike both
-  heard in the audio and agreed with by the ball's trajectory. These are the
-  most reliable contact markers in the video.
-- **Bottom bar** — `RALLY n  start–end s   t=…s`, with a green dot while a
-  rally is live and grey when the clip is between points ("no rally").
-- **Thin strip above the bar** — every rally across the whole clip in green,
-  with a white playhead showing where you are.
+## The clock, and what is NOT drawn
+
+- **Bottom bar** — the timestamp, `t=…s`.
+- Some renders also carry a rally banner and a timeline strip. **If you have
+  been asked where the rallies are, they are not drawn** — the bar shows only
+  the clock, and you are being asked to judge it yourself. An absent banner
+  means "not shown", never "no rally is happening".
+- Contacts are not marked on the video either. Where a list of contact
+  timestamps is supplied alongside, those are measured moments the ball
+  visibly changed direction against a player.
 
 ## What this means for how you answer
 
