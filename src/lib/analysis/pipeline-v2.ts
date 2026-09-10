@@ -9,6 +9,7 @@ import { VideoProcessor } from "@/lib/video/processor";
 import { runVisionPipeline } from "@/lib/vision/run-vision-pipeline";
 import { downloadToFile, uploadFileFromDisk } from "@/lib/storage/r2";
 import { describeError } from "./describe-error";
+import { StageTimer } from "./stage-timer";
 import { LOCAL_BUCKET, R2_BUCKET, debugVideoDir, debugVideoKey, debugVideoObjectKey } from "@/lib/vision/debug-video-store";
 import { isLocalDev } from "@/lib/deployment";
 import type { AnalysisProgress, AnalysisStage } from "@/lib/db/types";
@@ -94,6 +95,12 @@ export async function runPipelineV2(
           console.error(`[pipeline] progress not recorded (reporting once): ${describeError(error)}`);
         });
     };
+    // Started here, not inside runVisionPipeline, so the download and the
+    // frame extraction are in the same breakdown as the CV stages. Those two
+    // are the parts most easily assumed to be free, which is exactly why they
+    // need to be on the clock.
+    const timer = new StageTimer();
+    timer.mark("download");
     reportProgress("preparing", "Preparing the video");
 
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pb-analyzer-v2-"));
@@ -121,6 +128,7 @@ export async function runPipelineV2(
     });
 
     const frameCount = Math.max(1, Math.floor((metadata.durationSeconds ?? 0) * VISION_FPS));
+    timer.mark("extract-frames");
     const frames = await processor.extractFrames(metadata, tempDir, frameCount);
 
     const result = await runVisionPipeline({
@@ -133,6 +141,7 @@ export async function runPipelineV2(
       debugId: analysisId,
       setup: await getSetup(supabase, analysisId),
       tempDir,
+      timer,
       onProgress: reportProgress,
     });
 

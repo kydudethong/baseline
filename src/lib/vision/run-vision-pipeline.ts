@@ -5,6 +5,7 @@ import { computeAppearanceSignaturesViaPython, detectAudioOnsetsViaPython, detec
 import { buildBallTrack, detectBounces, detectHits, inferHitsBetweenCrossings, IN_RALLY_HIT_PARAMS, mergeHits, STRICT_HIT_PARAMS, newHitScanStats, sliceTrack, type BallDetection, type BallHit, type BallTrackPoint, type BallTrackStats } from "./ball";
 import { classifyRally, courtFrameFor, sideOf as courtSideOf, type Shot } from "./shots";
 import type { AnalysisStage } from "@/lib/db/types";
+import { StageTimer } from "@/lib/analysis/stage-timer";
 import { SWING_WINDOW_S, measureSwing } from "./swing";
 import { extendRalliesWhileLive, keepAliveEnabled } from "./rally-keepalive";
 import { applyBounceRule, applyDoubleBounceRule, bounceRuleEnabled, classifyBetween } from "./ball-exchange";
@@ -58,6 +59,13 @@ export interface VisionPipelineInput {
    * off are both truthful and more informative than a lying number.
    */
   onProgress?: (stage: AnalysisStage, message: string) => void;
+  /**
+   * Where the time goes. Passed IN rather than created here so the caller's
+   * earlier stages -- downloading the video, extracting frames -- land in the
+   * same breakdown. A timer that starts when the CV work starts cannot tell
+   * you that a third of the run went on the download.
+   */
+  timer?: StageTimer;
 }
 
 /**
@@ -135,7 +143,13 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // Entering a stage is reported once, alongside the same line that already
   // went to stderr, so the browser and the terminal never disagree about where
   // the run is.
+  // Stages are already announced one at a time; timing them is just measuring
+  // the gaps between those announcements. A caller that passed no timer gets
+  // a local one, so the breakdown is logged either way -- it just starts at
+  // the CV work rather than at the download.
+  const timer = input.timer ?? new StageTimer();
   const stage = (name: AnalysisStage, message: string) => {
+    timer.mark(name);
     log(message);
     input.onProgress?.(name, message);
   };
@@ -1161,6 +1175,10 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   events.sort((a, b) => a.timestampSeconds - b.timestampSeconds);
   const shotEventCount = events.filter((e) => e.type === "unknown_shot").length;
   log(`shots: ${shots.length} classified (${shotEventCount} ball-detected contacts) · done in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  // The line this whole exercise exists for. Every claim about what makes a
+  // run slow has so far been inferred from reading the code; this is the
+  // stopwatch.
+  log(`time: ${timer.summary()}`);
   const playerCounts = filteredDetections.map((f) => f.players.length);
   const quality: QualityDiagnostics = {
     videoDurationSeconds: input.videoDurationSeconds,
