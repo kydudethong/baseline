@@ -9,7 +9,20 @@
  * roboflow + ROBOFLOW_API_KEY for players, BALL_MODEL_ID for the ball.
  *
  * Usage:
- *   npx tsx scripts/run-shots.ts <video.mp4> [outDir]
+ *   npx tsx scripts/run-shots.ts <video.mp4> [outDir] [--self <who>]
+ *
+ * --self says which tracked player the overlay should mark as YOU. Without it
+ * nothing is marked, which is what every run of this harness did until a VLM
+ * watching the overlay noticed there was no gold box anywhere in it. Two
+ * forms:
+ *
+ *   --self player_2      name a track. Ids are assigned in order of first
+ *                        appearance, so they are stable across identical
+ *                        re-runs of the same clip but NOT across clips.
+ *   --self 0.42,0.88     where that player's feet are, as a fraction of the
+ *                        frame, optionally with @seconds (0.42,0.88@12.5).
+ *                        Goes through the same seed-matching the app uses,
+ *                        so it survives ids changing.
  * Writes:
  *   <outDir>/shots.json      every classified shot with its features
  *   <outDir>/labels.csv      one row per shot for you to hand-label
@@ -50,14 +63,35 @@ async function probe(videoPath: string) {
   return { durationSeconds: Number(raw.format.duration), width: v.width as number, height: v.height as number };
 }
 
-async function main() {
-  await loadEnvLocal();
-  const videoPath = process.argv[2];
-  if (!videoPath) {
-    console.error("usage: npx tsx scripts/run-shots.ts <video.mp4> [outDir]");
+/** `--self` as either a track id or an `x,y[@t]` seed. */
+function parseSelf(raw: string | undefined): { id?: string; seed?: { x: number; y: number; t: number } } {
+  if (!raw) return {};
+  const m = /^([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)(?:@([0-9]*\.?[0-9]+))?$/.exec(raw.trim());
+  if (!m) return { id: raw.trim() };
+  const x = Number(m[1]), y = Number(m[2]);
+  // Fractions of the frame, not pixels. A "0.42" that meant 0.42 PIXELS would
+  // silently seed the top-left corner and match whichever player happened to
+  // be furthest from the camera.
+  if (x > 1 || y > 1) {
+    console.error(`--self ${raw}: x and y are fractions of the frame (0-1), not pixels`);
     process.exit(1);
   }
-  const outDir = process.argv[3] ?? path.join(process.cwd(), "shot-results", path.basename(videoPath, path.extname(videoPath)));
+  return { seed: { x, y, t: m[3] === undefined ? 0 : Number(m[3]) } };
+}
+
+async function main() {
+  await loadEnvLocal();
+  const argv = process.argv.slice(2);
+  const selfAt = argv.indexOf("--self");
+  const selfRaw = selfAt >= 0 ? argv[selfAt + 1] : undefined;
+  const positional = argv.filter((_, i) => selfAt < 0 || (i !== selfAt && i !== selfAt + 1));
+  const videoPath = positional[0];
+  if (!videoPath) {
+    console.error("usage: npx tsx scripts/run-shots.ts <video.mp4> [outDir] [--self player_2|0.42,0.88[@12.5]]");
+    process.exit(1);
+  }
+  const self = parseSelf(selfRaw);
+  const outDir = positional[1] ?? path.join(process.cwd(), "shot-results", path.basename(videoPath, path.extname(videoPath)));
   await fs.mkdir(outDir, { recursive: true });
   const visionFps = Number(process.env.VISION_FPS ?? "5");
 
@@ -106,12 +140,46 @@ async function main() {
     videoDurationSeconds: meta.durationSeconds,
     debugId,
     tempDir,
+    selfPlayerId: self.id ?? null,
+    // The seed form goes through matchTracksToSetup, the same path the app
+    // uses when someone clicks themselves on the setup screen -- so this
+    // exercises that code rather than a parallel one that could drift from it.
+    setup: self.seed
+      ? {
+          frameTimestampSeconds: self.seed.t,
+          frameWidthPx: meta.width,
+          frameHeightPx: meta.height,
+          court: null,
+          players: [{ x: self.seed.x * meta.width, y: self.seed.y * meta.height, isSelf: true }],
+          lineColorHex: null,
+          matchMode: "doubles",
+          savedAt: new Date().toISOString(),
+        }
+      : null,
   });
   const overlay = path.join(process.cwd(), "public", "rally-debug", `${debugId}.mp4`);
   if (existsSync(overlay)) console.log(`debug overlay: ${overlay}`);
   else if (process.env.RALLY_SEG_DEBUG) console.log("RALLY_SEG_DEBUG was set but no overlay was written — see the log above for why");
 
   console.log(`pipeline done in ${((Date.now() - t0) / 1000).toFixed(0)}s — ${result.shots.length} shots, ball coverage ${result.quality.ballCoverage ?? "n/a"}`);
+
+  // Who is on court, and how much each of them hit. Printed every run because
+  // picking a subject means knowing the options, and the alternative was
+  // reading ids off the overlay by eye.
+  if (result.tracks.length) {
+    const shotsBy = new Map<string, number>();
+    for (const s of result.shots) {
+      if (s.playerId) shotsBy.set(s.playerId, (shotsBy.get(s.playerId) ?? 0) + 1);
+    }
+    console.log(`tracked players (pass one to --self on the next run):`);
+    for (const t of result.tracks) {
+      const feet = t.points.length
+        ? `x≈${(t.points.reduce((n, p) => n + p.boxImageNorm.x + p.boxImageNorm.width / 2, 0) / t.points.length).toFixed(2)}`
+        : "no points";
+      console.log(`  ${t.playerId.padEnd(10)} ${String(shotsBy.get(t.playerId) ?? 0).padStart(3)} shots  ${feet}`);
+    }
+    if (!self.id && !self.seed) console.log("  (none marked as YOU — the overlay will have no gold box)");
+  }
 
   await fs.writeFile(path.join(outDir, "shots.json"), JSON.stringify(result.shots, null, 2));
   await fs.writeFile(path.join(outDir, "quality.json"), JSON.stringify({ quality: result.quality, ball: result.ballTrack.stats, diagnostics: result.ballTrack.diagnostics, calibration: result.courtCalibration }, null, 2));

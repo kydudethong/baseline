@@ -1,0 +1,54 @@
+{
+  "strengths": [
+    "Displays a balanced, wide athletic base and good knee flexion when fully engaged at the non-volley zone line (notably during Rally 6 at 01:21-01:23).",
+    "Active lateral movement and quick recovery when scrambling to cover open court space."
+  ],
+  "top_priority_fix": {
+    "issue": "Dropping the paddle below waist height in the ready position at the kitchen line.",
+    "why_it_matters": "Letting the paddle dangle down by the thigh significantly increases the time required to react to opponent speed-ups, forcing defensive flicking motions rather than compact, controlled punch volleys.",
+    "evidence": "In Rally 2 between 00:09 and 00:11, as well as during Rally 6 reset moments (01:24) and Rally 7 setup (01:30-01:31), the right arm drops completely straight with the paddle pointing toward the court surface while facing opponents."
+  },
+  "secondary_observations": [
+    {
+      "issue": "Taking an oversized backswing on transition balls and volleys.",
+      "evidence": "At 00:36-00:37 and 01:19-01:20, the hitting arm pulls far behind the torso plane prior to forward swing, creating a late contact point behind the body."
+    },
+    {
+      "issue": "Static positioning without shifting to protect the middle seam.",
+      "evidence": "In Rally 1 (00:06-00:08) and Rally 2 (00:10-00:12), when the partner is pulled wide left, player remains anchored near the right sideline instead of sliding toward the centerline to pinch the middle."
+    }
+  ],
+  "drill_recommendation": {
+    "name": "Rapid Fire Wall/Partner Volley Reset",
+    "target": "Instant paddle recovery to chest height pointing at 10-to-2 o'clock between every strike.",
+    "reps_duration": "4 rounds of 90 seconds of rapid un-bounced kitchen volleys focusing exclusively on paddle-up posture."
+  },
+  "observed_counts": {
+    "rallies": 7,
+    "contacts_by_you": 3,
+    "net_crossings": 13
+  },
+  "overlay_audit": [
+    {
+      "at_seconds": 0.46,
+      "what_was_drawn": "Green bounding box labelled 'player_2' without any gold bounding box labelled 'YOU'.",
+      "what_the_footage_shows": "No player is assigned the gold 'YOU' marker anywhere across the footage; player_2 (foreground right) is evaluated as the primary subject."
+    },
+    {
+      "at_seconds": 29.49,
+      "what_was_drawn": "Bottom timeline indicates 'no rally'.",
+      "what_the_footage_shows": "Both players are actively rallying and dinking across the net with confirmed ball strikes between 28.5s and 33.5s."
+    },
+    {
+      "at_seconds": 86.46,
+      "what_was_drawn": "Bottom timeline marks active 'RALLY 6 78.2\u201388.1s'.",
+      "what_the_footage_shows": "The point concluded around 84.0s into the net, and players are merely walking and retrieving the ball while the rally indicator stays active until 88.1s."
+    },
+    {
+      "at_seconds": 36.49,
+      "what_was_drawn": "Ball trajectory trail and amber circle floating mid-air above the net band.",
+      "what_the_footage_shows": "No ball is in active flight at that location; players are stationary between points."
+    }
+  ],
+  "data_gaps": "The overlay never applied a gold box labelled 'YOU' to any player, requiring player_2 (foreground right) to be inferred as the target player. Additionally, multiple live exchanges between 00:29 and 00:34 were unclassified as rallies by the bottom tracking bar."
+}

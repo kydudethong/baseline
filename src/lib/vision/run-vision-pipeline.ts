@@ -46,6 +46,19 @@ export interface VisionPipelineInput {
   debugId?: string;
   /** What the user marked before processing, if they did. */
   setup?: PreAnalysisSetup | null;
+  /**
+   * Which track is the subject, named outright.
+   *
+   * The app works this out by matching what the user clicked during setup to
+   * a track. The offline harness has no setup screen, so every run it ever
+   * did had selfPlayerId null -- which drew no YOU box on the overlay and
+   * left any coaching read without a subject. That was invisible until a
+   * VLM watching the overlay pointed out there was no gold box in it.
+   *
+   * Ignored when `setup` carries a marked player: a person who pointed at
+   * themselves on a real frame outranks an id typed on a command line.
+   */
+  selfPlayerId?: string | null;
   /** Scratch directory for extra frames (pose bursts). Bursts are skipped without it. */
   tempDir?: string;
   /**
@@ -379,6 +392,22 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // the rally logic leans on.
   let selfPlayerId: string | null = null;
   let tracksToUse = tracks;
+  if (input.selfPlayerId) {
+    // Named directly. Checked against the tracks that exist rather than
+    // trusted, because a typo would otherwise fail exactly the way the bug
+    // this fixes did: silently, with no subject and no complaint.
+    const known = tracks.some((t) => t.playerId === input.selfPlayerId);
+    if (known) {
+      selfPlayerId = input.selfPlayerId;
+      log(`setup: you are ${selfPlayerId} (named directly)`);
+    } else {
+      log(`setup: no track called ${input.selfPlayerId} — tracks are `
+        + `${tracks.map((t) => t.playerId).join(", ") || "(none)"}`);
+      knownLimitations.push(
+        `No tracked player is called ${input.selfPlayerId}, so this run has no subject.`
+      );
+    }
+  }
   if (input.setup && input.setup.players.length > 0) {
     const matched = matchTracksToSetup(tracks, input.setup);
     tracksToUse = matched.keep;
