@@ -292,7 +292,7 @@ def main() -> int:
 
     f = upload_and_wait(client, video)
 
-    print(f"asking {args.model}…", file=sys.stderr)
+    print(f"asking {model}…", file=sys.stderr)
     started = time.time()
     try:
         resp = client.models.generate_content(
@@ -304,12 +304,33 @@ def main() -> int:
             ),
         )
     except Exception as exc:
-        # A 404 here means the model name is wrong, and the API's own message
-        # does not say what to use instead. Say it.
-        if "404" in str(exc) or "NOT_FOUND" in str(exc):
+        text = str(exc)
+        # A 404 means the model name is wrong, and the API's own message does
+        # not say what to use instead. Say it.
+        if "404" in text or "NOT_FOUND" in text:
             print(f"\n{model} is not a model this key can call. Available:", file=sys.stderr)
             for name in usable_models(client):
                 print(f"  {name}", file=sys.stderr)
+            return 2
+        # "limit: 0" on a free-tier quota is not rate limiting -- it is a model
+        # this key may not call AT ALL without billing. Retrying, at any
+        # spacing, will never succeed, and the API's own "please retry in 26s"
+        # says the opposite.
+        if "RESOURCE_EXHAUSTED" in text or "429" in text:
+            zero = "limit: 0" in text
+            print(f"\n{model}: quota exhausted." if not zero else
+                  f"\n{model} has NO free-tier quota (limit: 0) — it cannot be called "
+                  "on this key at all without billing enabled.", file=sys.stderr)
+            if zero:
+                print("Retrying will not help, whatever the error's 'retry in Ns' says.\n"
+                      "Either enable billing at https://aistudio.google.com/apikey, or pick a\n"
+                      "model that has free-tier quota — usually a flash tier:", file=sys.stderr)
+                for name in usable_models(client):
+                    if "flash" in name:
+                        print(f"  --model {name}", file=sys.stderr)
+            print("\nNOT falling back automatically: which model produced a read is the "
+                  "thing being measured,\nand silently swapping it would make the result "
+                  "meaningless.", file=sys.stderr)
             return 2
         raise
     elapsed = time.time() - started
