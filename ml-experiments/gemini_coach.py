@@ -29,7 +29,8 @@ Usage:
   export GEMINI_API_KEY=...
   python ml-experiments/gemini_coach.py <debug-video.mp4> \
       [--results shot-results/<clip>] \
-      [--model gemini-3-pro] [--out gemini-read.json]
+      [--model <id>] [--out gemini-read.json]
+  python ml-experiments/gemini_coach.py --list-models <any.mp4>
 
 Requires: pip install google-genai
 """
@@ -165,6 +166,24 @@ def upload_and_wait(client, path: Path, timeout_s: float = 600.0):
     return f
 
 
+def usable_models(client) -> list[str]:
+    """Models this key can actually call generateContent on.
+
+    Asked of the API rather than hardcoded, because model names move and a
+    stale default produces a 404 whose message does not say what to use
+    instead. The account's own list is the only authority on this.
+    """
+    names = []
+    try:
+        for m in client.models.list():
+            actions = getattr(m, "supported_actions", None) or getattr(m, "supported_generation_methods", None) or []
+            if not actions or "generateContent" in actions:
+                names.append(m.name.replace("models/", ""))
+    except Exception as exc:  # pragma: no cover - depends on the SDK version
+        return [f"(could not list models: {exc})"]
+    return names
+
+
 def check_forbidden(read: dict) -> list[str]:
     """Claims about things nothing in this pipeline can see."""
     blob = json.dumps(read).lower()
@@ -223,7 +242,12 @@ def main() -> int:
     ap.add_argument("--results", default=None,
                     help="shot-results/<clip> directory, to check the model's counts "
                          "against what the pipeline found")
-    ap.add_argument("--model", default="gemini-3-pro")
+    # No default that pretends to know today's model names -- see
+    # usable_models(). --list-models prints what this key can call.
+    ap.add_argument("--model", default=None,
+                    help="model id; omit to use the newest Gemini this key can call")
+    ap.add_argument("--list-models", action="store_true",
+                    help="print the models this key can call, and exit")
     ap.add_argument("--out", default="gemini-read.json")
     ap.add_argument("--legend", default=str(LEGEND))
     args = ap.parse_args()
@@ -247,24 +271,53 @@ def main() -> int:
     legend = Path(args.legend).read_text(encoding="utf-8")
 
     client = genai.Client(api_key=key)
+
+    if args.list_models:
+        for name in usable_models(client):
+            print(name)
+        return 0
+
+    model = args.model
+    if not model:
+        # Prefer a Gemini "pro" -- the video reasoning here is not a job for a
+        # flash-tier model -- and fall back to whatever exists rather than
+        # failing on a name this script guessed.
+        names = usable_models(client)
+        pro = [n for n in names if "gemini" in n and "pro" in n and "vision" not in n]
+        model = sorted(pro)[-1] if pro else (names[0] if names else "")
+        if not model:
+            print("no usable model found for this key; try --list-models", file=sys.stderr)
+            return 2
+        print(f"no --model given, using {model}", file=sys.stderr)
+
     f = upload_and_wait(client, video)
 
     print(f"asking {args.model}…", file=sys.stderr)
     started = time.time()
-    resp = client.models.generate_content(
-        model=args.model,
+    try:
+        resp = client.models.generate_content(
+            model=model,
         contents=[f, legend + "\n\n" + TASK],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=SCHEMA,
-        ),
-    )
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=SCHEMA,
+            ),
+        )
+    except Exception as exc:
+        # A 404 here means the model name is wrong, and the API's own message
+        # does not say what to use instead. Say it.
+        if "404" in str(exc) or "NOT_FOUND" in str(exc):
+            print(f"\n{model} is not a model this key can call. Available:", file=sys.stderr)
+            for name in usable_models(client):
+                print(f"  {name}", file=sys.stderr)
+            return 2
+        raise
     elapsed = time.time() - started
     read = json.loads(resp.text)
 
     Path(args.out).write_text(json.dumps(read, indent=2), encoding="utf-8")
 
-    print(f"\n--- {args.model} in {elapsed:.0f}s -> {args.out}\n", file=sys.stderr)
+    print(f"\n--- {model} in {elapsed:.0f}s -> {args.out}\n", file=sys.stderr)
     print(f"PRIORITY FIX: {read['top_priority_fix']['issue']}")
     print(f"  evidence:   {read['top_priority_fix']['evidence']}")
     for s in read.get("strengths", []):
