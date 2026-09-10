@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  activeRunCount, idleMinutes, idleSleepEnabled, idleState,
+  activeRunCount, idleMinutes, idleSleepDisabledReason, idleSleepEnabled, idleState,
   noteRequest, runFinished, runStarted, __resetIdleState,
 } from "./idle-sleep";
 
@@ -97,6 +97,42 @@ test("it stays off unless every Fly variable is present", () => {
 
   process.env.FLY_API_TOKEN = saved.t ?? "";
   if (saved.t === undefined) delete process.env.FLY_API_TOKEN;
+  if (saved.a === undefined) delete process.env.FLY_APP_NAME; else process.env.FLY_APP_NAME = saved.a;
+  if (saved.m === undefined) delete process.env.FLY_MACHINE_ID; else process.env.FLY_MACHINE_ID = saved.m;
+  if (saved.s === undefined) delete process.env.IDLE_SLEEP; else process.env.IDLE_SLEEP = saved.s;
+});
+
+test("a disabled watchdog says which piece is missing", () => {
+  // The symptom that started this: no log line at all, which reads the same
+  // whether the code never shipped or shipped and switched itself off.
+  const saved = {
+    t: process.env.FLY_API_TOKEN, a: process.env.FLY_APP_NAME,
+    m: process.env.FLY_MACHINE_ID, s: process.env.IDLE_SLEEP,
+  };
+  delete process.env.IDLE_SLEEP;
+  delete process.env.FLY_API_TOKEN;
+  delete process.env.FLY_APP_NAME;
+  delete process.env.FLY_MACHINE_ID;
+
+  let why = idleSleepDisabledReason();
+  assert.ok(why?.includes("FLY_API_TOKEN"), why ?? "expected a reason");
+  assert.ok(why?.includes("FLY_APP_NAME"), why ?? "expected a reason");
+
+  // Only the token missing: Fly supplies the other two, so the advice should
+  // be "make a token", not "you are not on Fly".
+  process.env.FLY_APP_NAME = "baseline-court";
+  process.env.FLY_MACHINE_ID = "abc123";
+  why = idleSleepDisabledReason();
+  assert.ok(why?.includes("FLY_API_TOKEN"), why ?? "expected a reason");
+  assert.ok(why?.includes("fly tokens create"), "expected the fix in the message");
+
+  process.env.FLY_API_TOKEN = "tok";
+  assert.equal(idleSleepDisabledReason(), null, "fully configured is not disabled");
+
+  process.env.IDLE_SLEEP = "off";
+  assert.equal(idleSleepDisabledReason(), "IDLE_SLEEP=off");
+
+  if (saved.t === undefined) delete process.env.FLY_API_TOKEN; else process.env.FLY_API_TOKEN = saved.t;
   if (saved.a === undefined) delete process.env.FLY_APP_NAME; else process.env.FLY_APP_NAME = saved.a;
   if (saved.m === undefined) delete process.env.FLY_MACHINE_ID; else process.env.FLY_MACHINE_ID = saved.m;
   if (saved.s === undefined) delete process.env.IDLE_SLEEP; else process.env.IDLE_SLEEP = saved.s;

@@ -85,9 +85,29 @@ export function idleMinutes(): number {
   return Number.isFinite(raw) && raw >= 1 ? raw : DEFAULT_IDLE_MINUTES;
 }
 
+/**
+ * Why the watchdog is off, or null when it is on.
+ *
+ * Separate from the boolean because "no log line appeared" is a useless
+ * symptom: it reads the same whether the code never shipped or shipped and
+ * decided to do nothing. A feature whose failure mode is silence cannot be
+ * debugged from the outside, and this one's failure mode costs money quietly.
+ */
+export function idleSleepDisabledReason(): string | null {
+  if ((process.env.IDLE_SLEEP ?? "on").toLowerCase() === "off") return "IDLE_SLEEP=off";
+  const missing = (["FLY_API_TOKEN", "FLY_APP_NAME", "FLY_MACHINE_ID"] as const)
+    .filter((k) => !process.env[k]);
+  if (missing.length) {
+    return `${missing.join(", ")} not set`
+      + (missing.includes("FLY_APP_NAME") || missing.includes("FLY_MACHINE_ID")
+        ? " (Fly injects those two itself, so this is probably not running on Fly)"
+        : " (create one: fly tokens create deploy --name idle-sleep --expiry 8760h)");
+  }
+  return null;
+}
+
 export function idleSleepEnabled(): boolean {
-  if ((process.env.IDLE_SLEEP ?? "on").toLowerCase() === "off") return false;
-  return Boolean(process.env.FLY_API_TOKEN && process.env.FLY_APP_NAME && process.env.FLY_MACHINE_ID);
+  return idleSleepDisabledReason() === null;
 }
 
 /**
@@ -121,7 +141,15 @@ async function stopSelf(): Promise<void> {
  * woken by a request that never becomes a run still goes back to sleep.
  */
 export function startIdleWatchdog(stop: () => Promise<void> = stopSelf): void {
-  if (timer || !idleSleepEnabled()) return;
+  if (timer) return;
+  const off = idleSleepDisabledReason();
+  if (off) {
+    // Say so. Locally this is the expected state and the line is noise worth
+    // paying; on Fly it is the difference between "it is working" and "it has
+    // been billing you by the hour for a week".
+    console.error(`[idle] watchdog OFF — ${off}`);
+    return;
+  }
   const ms = idleMinutes() * 60_000;
 
   timer = setInterval(() => {
