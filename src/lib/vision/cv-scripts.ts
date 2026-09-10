@@ -282,35 +282,5 @@ export async function detectPlayersViaPython(
   }
 }
 
-/**
- * Paddle-contact ONSETS from the audio track — candidate instants, never
- * contacts. Everything about whether one is real is decided in
- * audio-contacts.ts against the ball's own behaviour, because a microphone on
- * a public court hears the games either side just as clearly as this one.
- *
- * Failure here is never fatal: a clip with no audio track, or with audio the
- * detector cannot use, simply contributes no candidates and the pipeline
- * carries on with vision-only contacts.
- */
-export async function detectAudioOnsetsViaPython(
-  videoPath: string,
-  minGapSeconds = 0.15
-): Promise<{ events: Array<{ timestampSeconds: number; strength: number }>; diagnostics: Record<string, unknown> }> {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "pb-audio-"));
-  const outPath = path.join(dir, "audio.json");
-  try {
-    await runPython("audio_events.py",
-      [videoPath, "--min-gap", String(minGapSeconds), "--out", outPath],
-      { streamStderr: true });
-    const raw = JSON.parse(await fsp.readFile(outPath, "utf8")) as {
-      events?: Array<{ timestampSeconds: number; strength: number }>;
-      diagnostics?: Record<string, unknown>;
-    };
-    return { events: raw.events ?? [], diagnostics: raw.diagnostics ?? {} };
-  } finally {
-    await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-}
-
 export class PaddleModelNotConfiguredError extends Error {}
 

@@ -1,7 +1,7 @@
 import { getPhase2VisionProvider, playerDetectionIsLocal } from "./provider-v2";
 import { analyzeMovementWithCalibration } from "./provider-v2";
 import { hitsToUnknownShotEvents, detectFootworkFoundation } from "./events";
-import { computeAppearanceSignaturesViaPython, detectAudioOnsetsViaPython, detectBallViaPython, BallModelNotConfiguredError, ballModelConfigured } from "./cv-scripts";
+import { computeAppearanceSignaturesViaPython, detectBallViaPython, BallModelNotConfiguredError, ballModelConfigured } from "./cv-scripts";
 import { buildBallTrack, detectBounces, detectHits, inferHitsBetweenCrossings, IN_RALLY_HIT_PARAMS, mergeHits, STRICT_HIT_PARAMS, newHitScanStats, sliceTrack, type BallDetection, type BallHit, type BallTrackPoint, type BallTrackStats } from "./ball";
 import { classifyRally, courtFrameFor, sideOf as courtSideOf, type Shot } from "./shots";
 import type { AnalysisStage } from "@/lib/db/types";
@@ -9,13 +9,11 @@ import { StageTimer } from "@/lib/analysis/stage-timer";
 import { SWING_WINDOW_S, measureSwing } from "./swing";
 import { extendRalliesWhileLive, keepAliveEnabled } from "./rally-keepalive";
 import { applyBounceRule, applyDoubleBounceRule, bounceRuleEnabled, classifyBetween } from "./ball-exchange";
-import { AUDIO_GATE_PARAMS, audioContactsEnabled, confirmAudioContacts, newAudioGateStats, type PaddleObservation } from "./audio-contacts";
 import { ballGatePolygonPx, calibrationFromSetup, courtForeshorteningAt, isPlausibleCourtQuad, playerGatePolygonPx, pointInPolygon, transformToCourtCoordinates } from "./court";
 import { clusterRalliesFromHits, HIT_CLUSTER_PARAMS, type ClusteredRally } from "./rallies";
 import { detectNetCrossings, netLineImagePx, netRalliesEnabled, segmentNetCrossings, sideOfNet, type NetBand, type NetCrossing } from "./rallies-net";
 import { clusterRalliesFromContacts, contactRalliesEnabled } from "./rallies-contact";
 import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
-import { paddleFromPoseEnabled, paddlesFromPoses } from "./paddle-from-pose";
 import { rallySegEnabled, segmentRalliesViaRallySeg } from "./rally-seg";
 import { describeError } from "@/lib/analysis/describe-error";
 import { detectCourtViaRallySeg, rallySegCourtEnabled } from "./court-rally-seg";
@@ -496,8 +494,6 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // Hoisted so the overlay, which is rendered at the very end from the values
   // the run actually used, can draw what the paddle model and the audio gate
   // produced instead of only reporting counts in the log.
-  let paddlesSeen: PaddleObservation[] = [];
-  let audioConfirmed: BallHit[] = [];
   // Hoisted so the overlay renderer at the end can draw the boundaries that
   // actually won, rather than whichever segmenter happened to run last.
   let ralliesUsed: ClusteredRally[] = [];
@@ -592,7 +588,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
       const foreshorteningAt = (yNorm: number): number | null =>
         courtForeshorteningAt(courtCalibration, yNorm * input.frameHeightPx);
 
-      stage("contacts", "finding paddle contacts");
+      stage("contacts", "finding ball contacts");
       const hitStats = newHitScanStats();
       let allHitsWide = detectHits(built.points, tracks, overheadAt, hitStats,
         STRICT_HIT_PARAMS, foreshorteningAt);
@@ -605,92 +601,23 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
         + `${hitStats.rejectedSpacing} too close together, ${hitStats.rejectedGapEdge} beside a gap`
         + ` · sharpest turn ${hitStats.bestTurnDeg.toFixed(0)}°`);
 
-      // Audio proposes contacts the ball alone could not show.
+      // AUDIO CONTACTS AND THE POSE-DERIVED PADDLE ARE BOTH GONE.
       //
-      // Placed BEFORE rally segmentation on purpose: rallies are clustered
-      // from contacts, so a contact that arrives after the boundaries are
-      // drawn cannot influence them -- and kitchen exchanges, the case this
-      // exists for, are exactly where the boundaries come out wrong.
+      // Audio: measured on this clip it turned 51 contacts into 63 -- 100
+      // onsets of which 16 survived the ball-agreement gate. A 24% lift, for
+      // a whole Python pass, a second signal to reason about, and a gate with
+      // five distinct rejection reasons. It bought contacts that shot
+      // classification no longer needs, because shot types are Gemini's job
+      // now and it reads them off the video rather than off a contact list.
       //
-      // Every onset is checked against the ball's own trajectory first (see
-      // audio-contacts.ts). Onsets from the courts either side make a sound
-      // but do not bend THIS ball, and are dropped.
-      // Audio onsets first: candidate instants only, confirmed further down.
-      let audioOnsets: Array<{ timestampSeconds: number; strength: number }> = [];
-      let audioDiagnostics: Record<string, unknown> = {};
-      if (audioContactsEnabled()) {
-        try {
-          const got = await detectAudioOnsetsViaPython(input.videoPath);
-          audioOnsets = got.events;
-          audioDiagnostics = got.diagnostics;
-        } catch (err) {
-          // A clip with no audio track is normal, not a failure of the analysis.
-          log(`audio contacts unavailable: ${describeError(err).split("\n")[0]}`);
-        }
-      }
-
-      // Paddle detection runs on its OWN terms.
+      // Paddle from pose: it fed exactly one +0.1 confidence term and drew a
+      // shape on the overlay. Four detection models were measured before it
+      // and none worked; the arm-derived estimate was the honest fallback,
+      // and with technique judgment moving to a model that watches the
+      // footage, an estimated paddle position is a thing to be wrong about
+      // rather than a thing to reason from.
       //
-      // It used to sit inside the audio branch, which quietly made it
-      // conditional on audio finding something: a clip with no usable audio got
-      // no paddles at all, and -- because the overlay draws what the run
-      // produced -- no way to see whether the paddle model works. Two separate
-      // signals should not be able to take each other down.
-      // PADDLE DETECTION BY MODEL IS GONE, deliberately.
-      //
-      // Four Roboflow models were measured on this footage. The best found a
-      // paddle in 14% of sampled frames and cost ~50s a clip; the others were
-      // nearer 1%. That is not four bad models -- a paddle is thin, edge-on
-      // for much of a swing, motion-blurred exactly at contact, and from
-      // behind the baseline the near player's is hidden by their own body
-      // while the far player's is a few pixels. The camera cannot see it.
-      //
-      // Position now comes from the arm, which pose lands on the large
-      // majority of frames. If a paddle model ever does work on baseline
-      // footage, this is the place it goes back in -- alongside the estimate,
-      // not instead of it, since the two fail in different places.
-      let paddles: PaddleObservation[] = [];
-
-      // The paddle, derived from the swinging arm. See paddle-from-pose.ts
-      // for what this can and cannot claim: it is a position and a long-axis
-      // direction, never a face angle.
-      if (paddleFromPoseEnabled() && poses.length > 0) {
-        const estimated = paddlesFromPoses(poses);
-        if (estimated.length > 0) {
-          paddles = estimated;
-          paddlesSeen = estimated;
-          log(`paddles: ${estimated.length} position(s) derived from the swinging arm`);
-        } else {
-          log("paddles: pose produced no readable swinging arm, so no paddle positions");
-        }
-      }
-
-      if (audioContactsEnabled()) {
-        if (audioOnsets.length === 0) {
-          log(`audio: no paddle-like onsets found (${JSON.stringify(audioDiagnostics)})`);
-        } else {
-          const gateStats = newAudioGateStats();
-          const confirmed = confirmAudioContacts({
-            onsets: audioOnsets, ballPoints: built.points, tracks, paddles, stats: gateStats,
-          });
-          audioConfirmed = confirmed;
-          const before = allHitsWide.length;
-          allHitsWide = mergeHits(allHitsWide, confirmed, AUDIO_GATE_PARAMS.minSpacingS);
-          log(`audio: ${gateStats.onsets} onsets → ${gateStats.accepted} confirmed by the ball `
-            + `(rejected ${gateStats.rejectedNoBall} with no ball either side, `
-            + `${gateStats.rejectedGappy} where the ball was too sparse to fit a velocity, `
-            + `${gateStats.rejectedNotTowardPlayer} not travelling at a player, `
-            + `${gateStats.rejectedNoChange} where the ball never changed — other courts, `
-            + `${gateStats.rejectedSpacing} duplicates) · contacts ${before} → ${allHitsWide.length}`);
-          if (gateStats.accepted === 0) {
-            knownLimitations.push(
-              `Audio found ${gateStats.onsets} paddle-like sounds but none coincided with a change in this ball's ` +
-              `flight, so none were counted — on a court with games either side that is the expected result when ` +
-              `the ball itself was not tracked well.`
-            );
-          }
-        }
-      }
+      // Both are in git if the trade turns out badly.
 
       // Two ways to draw the boundaries. Hit clustering groups contacts by the
       // gaps between them; rally_seg reads the ball's physics and ends a rally
@@ -1191,8 +1118,6 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
       rallies: ralliesUsed,
       tracks,
       poses,
-      paddles: paddlesSeen,
-      audioContacts: audioConfirmed.map((h) => ({ t: h.t, x: h.ball.x, y: h.ball.y, playerId: h.playerId })),
       selfPlayerId,
       onLog: (l) => log(`  ${l}`),
     });

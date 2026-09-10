@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsc -p tsconfig.test.json && node --test .vision-test-build/**/*.test.js",
+    "test": "rm -rf .vision-test-build 2>/dev/null || true; tsc -p tsconfig.test.json && node --test .vision-test-build/**/*.test.js",
     "deploy": "bash scripts/deploy.sh",
     "verify-models": "bash scripts/verify-models.sh",
     "sleep": "bash scripts/sleep.sh",
