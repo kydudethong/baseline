@@ -9,7 +9,10 @@
     "lint": "eslint",
     "test": "tsc -p tsconfig.test.json && node --test .vision-test-build/**/*.test.js",
     "deploy": "bash scripts/deploy.sh",
-    "verify-models": "bash scripts/verify-models.sh"
+    "verify-models": "bash scripts/verify-models.sh",
+    "sleep": "bash scripts/sleep.sh",
+    "wake": "bash scripts/wake.sh",
+    "share": "bash scripts/share.sh"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1126.0",

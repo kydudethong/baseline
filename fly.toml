@@ -17,8 +17,19 @@ primary_region = "sjc"
   # back (see pipeline-v2.ts). Stopping the machine when traffic goes quiet
   # would kill runs in flight, so this one stays up.
   auto_stop_machines = false
+  # Left ON. A stopped machine is woken by the next incoming request, which is
+  # what makes `npm run sleep` safe to use: the site keeps working for anyone
+  # who visits, they just pay a cold start on the first request. On an image
+  # carrying torch and ffmpeg that is tens of seconds, not milliseconds.
   auto_start_machines = true
-  min_machines_running = 1
+  # Zero, so a machine stopped by `npm run sleep` STAYS stopped. This setting
+  # governs Fly's own autostop behaviour rather than manual stops, but leaving
+  # it at 1 states an intent -- "always keep one up" -- that is the opposite of
+  # what a project being tested a few hours a week wants.
+  #
+  # Set it back to 1 when there are real users, because then a cold start on
+  # someone's first visit is a worse trade than the hosting bill.
+  min_machines_running = 0
   # ONE machine, always. Fly creates a second for high availability unless you
   # stop it, and a second machine is wrong for this app: a run lives in one
   # process's memory, and the overlay and setup frames it writes land on that
