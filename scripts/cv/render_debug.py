@@ -11,7 +11,15 @@ That distinction is the whole point. An overlay from a component that did not
 decide the answer shows you a plausible picture of the wrong thing, and the
 numbers and the video then disagree with no way to tell which is lying.
 
+A time range may be given, which is what makes a coaching clip cheap: the
+overlay data covers the whole clip, but only the seconds around one contact
+have to be decoded and drawn. Timestamps in the data are ABSOLUTE seconds
+from the start of the source video and stay that way -- a clip starting at
+72.5 s looks up the same ball points it always did, so a clip and the full
+overlay can never disagree about what happened.
+
 Usage: render_debug.py <video> --data overlay.json --out debug.mp4
+                              [--start 71.0] [--end 74.0]
 """
 import argparse
 import json
@@ -42,7 +50,14 @@ def main() -> int:
     ap.add_argument("--data", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--crf", type=int, default=26)
+    ap.add_argument("--start", type=float, default=None,
+                    help="first second to render (absolute, from the source video)")
+    ap.add_argument("--end", type=float, default=None,
+                    help="last second to render")
     args = ap.parse_args()
+    if args.start is not None and args.end is not None and args.end <= args.start:
+        print(f"--end ({args.end}) must be after --start ({args.start})", file=sys.stderr)
+        return 2
 
     with open(args.data, "r", encoding="utf-8") as fh:
         d = json.load(fh)
@@ -75,6 +90,18 @@ def main() -> int:
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
+    # Seek by FRAME, not by CAP_PROP_POS_MSEC.  Seeking by milliseconds lands
+    # on the nearest keyframe on some containers and reports a position that
+    # does not match where it actually is, which would silently offset every
+    # overlay in the clip -- the ball drawn where it was a beat ago.  A frame
+    # index is exact, and the frame index is also what the time is derived
+    # from below, so the two cannot drift apart.
+    start_frame = 0
+    if args.start is not None:
+        start_frame = max(0, int(round(args.start * fps)))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    end_frame = None if args.end is None else int(round(args.end * fps))
+
     ff = subprocess.Popen(
         ["ffmpeg", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{w}x{h}",
          "-r", f"{fps:.4f}", "-i", "-", "-an", "-vcodec", "libx264",
@@ -86,11 +113,15 @@ def main() -> int:
     ball_sorted = sorted(ball, key=lambda p: p["t"])
     ball_ts = [p["t"] for p in ball_sorted]
     scale = max(0.5, w / 1280.0)
-    i = 0
+    i = start_frame
     while True:
+        if end_frame is not None and i > end_frame:
+            break
         ok, img = cap.read()
         if not ok:
             break
+        # Absolute time in the SOURCE video, so every lookup below is against
+        # the same timeline the data was recorded on.
         t = i / fps
         i += 1
 

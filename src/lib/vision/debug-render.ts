@@ -16,9 +16,8 @@
 
 import fs from "node:fs";
 import fsp from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { debugVideoDir, debugVideoKey } from "./debug-video-store";
+import { debugVideoDir, debugVideoKey, overlayDataKey, shotClipKey } from "./debug-video-store";
 
 import { cvPython } from "./cv-scripts";
 import type { BallTrackPoint } from "./ball";
@@ -59,16 +58,17 @@ export interface DebugRenderInput {
   onLog?: (line: string) => void;
 }
 
-export async function renderDebugVideo(input: DebugRenderInput): Promise<string | null> {
+/**
+ * Everything the renderer needs, as the JSON it reads.
+ *
+ * Split out from renderDebugVideo because it is written ONCE and read many
+ * times: the full overlay at the end of a run, and then a short clip per
+ * coaching point, possibly days later. Building it twice from two code paths
+ * is how a clip and the full overlay start disagreeing about what happened.
+ */
+export function buildOverlayData(input: DebugRenderInput): unknown {
   const c = input.calibration.cornersImagePx;
-  const outDir = debugVideoDir();
-  const outPath = path.join(outDir, debugVideoKey(input.analysisId));
-  const work = await fsp.mkdtemp(path.join(os.tmpdir(), "pb-debug-"));
-  const dataPath = path.join(work, "overlay.json");
-
-  try {
-    await fsp.mkdir(outDir, { recursive: true });
-    await fsp.writeFile(dataPath, JSON.stringify({
+  return {
       durationS: input.durationSeconds,
       courtCornersPx: c && input.calibration.confidence > 0
         ? [c.bottomLeft, c.bottomRight, c.topRight, c.topLeft]
@@ -124,21 +124,85 @@ export async function renderDebugVideo(input: DebugRenderInput): Promise<string 
           box: [p.boxImageNorm.x, p.boxImageNorm.y, p.boxImageNorm.width, p.boxImageNorm.height],
         })),
       })),
-    }), "utf8");
+  };
+}
 
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const run = promisify(execFile);
-    const script = path.join(process.cwd(), "scripts", "cv", "render_debug.py");
-    await run(cvPython(), [script, path.resolve(input.videoPath), "--data", dataPath, "--out", outPath],
-      { maxBuffer: 8 * 1024 * 1024 });
+/** Run the Python renderer. Shared by the full overlay and by clips. */
+async function runRenderer(
+  videoPath: string, dataPath: string, outPath: string,
+  window?: { startS: number; endS: number }
+): Promise<void> {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const run = promisify(execFile);
+  const script = path.join(process.cwd(), "scripts", "cv", "render_debug.py");
+  const args = [script, path.resolve(videoPath), "--data", dataPath, "--out", outPath];
+  if (window) {
+    args.push("--start", window.startS.toFixed(3), "--end", window.endS.toFixed(3));
+  }
+  await run(cvPython(), args, { maxBuffer: 8 * 1024 * 1024 });
+}
 
+export async function renderDebugVideo(input: DebugRenderInput): Promise<string | null> {
+  const outDir = debugVideoDir();
+  const outPath = path.join(outDir, debugVideoKey(input.analysisId));
+  // The data lives beside the video rather than in a temp dir that is deleted
+  // on the way out. A coaching clip is rendered from it later -- possibly much
+  // later -- and re-deriving it would mean re-running the whole analysis.
+  const dataPath = path.join(outDir, overlayDataKey(input.analysisId));
+
+  try {
+    await fsp.mkdir(outDir, { recursive: true });
+    await fsp.writeFile(dataPath, JSON.stringify(buildOverlayData(input)), "utf8");
+    await runRenderer(input.videoPath, dataPath, outPath);
     if (!fs.existsSync(outPath)) return null;
     return `/rally-debug/${debugVideoKey(input.analysisId)}`;
   } catch (err) {
     input.onLog?.(`debug overlay not rendered: ${(err as Error).message.split("\n")[0]}`);
     return null;
-  } finally {
-    await fsp.rm(work, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** How much of the clip sits before the contact, and how much after. */
+export const CLIP_LEAD_S = 1.5;
+export const CLIP_TAIL_S = 1.5;
+
+/**
+ * A short overlay clip around one moment.
+ *
+ * Measured on a real clip: rendering the full overlay of a 20-second video
+ * took 11.0 s, and a 3-second window took 0.85 s. That ratio is the whole
+ * reason a coaching point can carry its own video -- five of them cost about
+ * four seconds, where five full renders would cost a minute.
+ *
+ * Never throws. A coaching point without a clip is still a coaching point.
+ */
+export async function renderShotClip(opts: {
+  videoPath: string;
+  overlayDataPath: string;
+  analysisId: string;
+  atSeconds: number;
+  durationSeconds: number;
+  outDir?: string;
+  onLog?: (line: string) => void;
+}): Promise<string | null> {
+  const outDir = opts.outDir ?? debugVideoDir();
+  const name = shotClipKey(opts.analysisId, opts.atSeconds);
+  const outPath = path.join(outDir, name);
+  // Clamped to the clip. Asking ffmpeg for -1.2s produces an empty file, and
+  // an empty file is worse than a shorter one: it plays as a broken video
+  // rather than as a slightly clipped moment.
+  const startS = Math.max(0, opts.atSeconds - CLIP_LEAD_S);
+  const endS = Math.min(opts.durationSeconds, opts.atSeconds + CLIP_TAIL_S);
+  if (!(endS > startS)) return null;
+
+  try {
+    await fsp.mkdir(outDir, { recursive: true });
+    await runRenderer(opts.videoPath, opts.overlayDataPath, outPath, { startS, endS });
+    if (!fs.existsSync(outPath)) return null;
+    return name;
+  } catch (err) {
+    opts.onLog?.(`shot clip not rendered: ${(err as Error).message.split("\n")[0]}`);
+    return null;
   }
 }

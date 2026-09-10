@@ -36,6 +36,29 @@ export function debugVideoObjectKey(analysisId: string): string {
   return `debug/${analysisId}.mp4`;
 }
 
+/**
+ * The overlay DATA for an analysis, kept beside the video.
+ *
+ * Persisted rather than thrown away with the temp dir, because a coaching clip
+ * is rendered from it long after the run finished. It is small -- a few
+ * hundred KB of rounded coordinates -- next to a ~35MB overlay video.
+ */
+export function overlayDataKey(analysisId: string): string {
+  return `${analysisId}.overlay.json`;
+}
+
+/**
+ * A clip of the overlay around one moment, named by its own timestamp.
+ *
+ * Deterministic on purpose: the frontend can work out the URL for a coaching
+ * point's shot from data it already has, so no column has to be added to
+ * coaching_observations to record it, and no migration has to be run before
+ * the feature works.
+ */
+export function shotClipKey(analysisId: string, atSeconds: number): string {
+  return `${analysisId}-shot-${Math.round(atSeconds * 1000)}.mp4`;
+}
+
 export function debugVideoDir(): string {
   return process.env.RALLY_SEG_DEBUG_DIR || path.join(process.cwd(), "public", "rally-debug");
 }
