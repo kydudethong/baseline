@@ -61,6 +61,14 @@ export interface RallySegSetupFrame {
    * wrong boxes would be a trap.
    */
   playersReliable: boolean;
+  /**
+   * People found in the frame who are not standing on this court -- the queue
+   * behind the fence, the next court over, spectators. Meaningful only when
+   * `courtGated` is true: with no court there is nothing to be outside of, so
+   * a zero here means "not judged", not "none".
+   */
+  playersOffCourt: number;
+  courtGated: boolean;
 }
 
 export interface RallySegSetup {
@@ -260,6 +268,8 @@ export async function setupFrameViaRallySeg(
             path: raw.frame.path ?? null,
             detector: String(raw.frame.detector ?? "unknown"),
             playersReliable: raw.frame.players_reliable !== false,
+            playersOffCourt: Number(raw.frame.players_off_court ?? 0) || 0,
+            courtGated: raw.frame.court_gate === true,
           }
         : null,
       players: (raw.players ?? []).map((p: {

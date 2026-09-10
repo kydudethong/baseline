@@ -98,7 +98,13 @@ interface AutoPlayer {
 
 interface AutoSetup {
   frameUrl: string | null;
-  frame: { timestampSeconds: number; detector: string; playersReliable: boolean } | null;
+  frame: {
+    timestampSeconds: number;
+    detector: string;
+    playersReliable: boolean;
+    playersOffCourt?: number;
+    courtGated?: boolean;
+  } | null;
   players: AutoPlayer[];
   court: {
     corners: { topLeft: [number, number]; topRight: [number, number]; bottomLeft: [number, number]; bottomRight: [number, number] };
@@ -242,6 +248,16 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
         bits.push("No usable player detector here, so click the players yourself.");
       } else if (json.players.length) {
         bits.push(`${json.players.length} player${json.players.length === 1 ? "" : "s"} found — click the one that is you.`);
+        // Say what the court gate did. Silence here is ambiguous in a way
+        // that matters: "4 players" reads the same whether nobody else was in
+        // frame or six spectators were correctly ignored, and only one of
+        // those two means the court is right.
+        const off = json.frame?.playersOffCourt ?? 0;
+        if (json.frame?.courtGated && off > 0) {
+          bits.push(`${off} more ${off === 1 ? "person was" : "people were"} ignored for standing off court.`);
+        } else if (json.frame?.courtGated === false) {
+          bits.push("No court was fitted, so nobody could be ruled out for standing off it — expect spectators in the list.");
+        }
       }
       setAutoNote(bits.join(" "));
       setAuto("done");
@@ -704,12 +720,6 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    * two equally weighted replies -- and choosing "something's off" opens the
    * tools rather than sending the user somewhere else to find them.
    * ------------------------------------------------------------------- */
-  const startCourtOver = () => {
-    setStage("court");
-    setCorners([]);
-    setFixing(true);
-    setAutoNote("Click the four corners of the court, starting near-left and going round.");
-  };
   const startPlayersOver = () => {
     setStage("players");
     setPlayers([]);
@@ -843,7 +853,16 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
         <div className="card stack g4">
           <div className="row g2" style={{ justifyContent: "space-between" }}>
             <span className="eyebrow">Fix it yourself</span>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFixing(false)}>
+            <button
+              type="button"
+              className="btn btn-soft btn-sm"
+              onClick={() => setFixing(false)}
+              title="Close these tools and go back to the summary"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3 8.5 6.2 12 13 4.5" stroke="currentColor" strokeWidth="2"
+                      strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
               Done fixing
             </button>
           </div>
@@ -863,15 +882,16 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
               <strong style={{ fontSize: 14 }}>The court or net is wrong</strong>
               <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
                 {courtDone
-                  ? "Drag a corner to nudge it, or start over and click all four. The kitchen line, centre lines and net follow the corners — when those land on the paint, the geometry is right. A corner can sit outside the video: click in the margin past the dashed edge."
+                  ? "Drag any corner to nudge it. The kitchen line, centre lines and net follow the corners — when those land on the paint, the geometry is right. A corner can sit outside the video: drag it out into the margin past the dashed edge."
                   : `Click the ${CORNER_STEPS[corners.length].label.toLowerCase()} — ${CORNER_STEPS[corners.length].hint}. If it is off-screen, click out in the margin where it would be.`}
               </p>
               <div className="row g2">
-                <button type="button" className="btn btn-soft btn-sm" onClick={startCourtOver}>
-                  Redraw the court
-                </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setStage("court")}>
-                  Adjust corners
+                <button
+                  type="button"
+                  className={`btn btn-sm ${stage === "court" ? "btn-primary" : "btn-soft"}`}
+                  onClick={() => setStage("court")}
+                >
+                  {stage === "court" ? "Adjusting corners" : "Adjust corners"}
                 </button>
               </div>
               <label className="sm" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>

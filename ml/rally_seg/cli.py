@@ -348,22 +348,28 @@ def cmd_setup(args) -> int:
 
     best = None
     for frame in frames:
-        dets = player_detector.detect(frame.image)
+        found = player_detector.detect(frame.image)
+        kept = found
         if gate is not None:
-            dets = [d for d in dets
+            kept = [d for d in found
                     if cv2.pointPolygonTest(gate, (float(d.feet[0]), float(d.feet[1])), False) >= 0]
-        dets = sorted(dets, key=lambda d: -d.conf)[: cfg.players.max_players]
+        # Counted, not just discarded.  "4 people found, 2 of them off court"
+        # is the difference between the gate working and the detector failing,
+        # and without the number the setup screen cannot tell the user which
+        # one happened.
+        dropped = len(found) - len(kept)
+        dets = sorted(kept, key=lambda d: -d.conf)[: cfg.players.max_players]
         score = _frame_setup_score(dets, fitted)
         if best is None or score > best[0]:
-            best = (score, frame, dets)
+            best = (score, frame, dets, dropped)
 
-    score, frame, dets = best
+    score, frame, dets, off_court = best
     if player_detector.name == "motion":
         # No usable detections, so the score ranked noise.  A frame from the
         # middle of the clip is a better place to start clicking than whichever
         # one the noise happened to like.
         mid = frames[len(frames) // 2]
-        score, frame, dets = 0.0, mid, []
+        score, frame, dets, off_court = 0.0, mid, [], 0
     # The motion fallback subtracts a *background* it builds from consecutive
     # frames, and these frames are seconds apart, so its boxes here are noise
     # wearing a detector's clothes.  Say so rather than presenting them: the
@@ -376,6 +382,13 @@ def cmd_setup(args) -> int:
         "score": float(score),
         "detector": player_detector.name,
         "players_reliable": reliable,
+        #: People the detector found who are not standing on this court --
+        #: spectators, the queue behind the fence, the neighbours' game.
+        "players_off_court": int(off_court),
+        #: False when no court was fitted, in which case NOTHING was excluded
+        #: and every person in the frame is a candidate.  Worth saying out
+        #: loud: a zero above means "none were dropped" only when this is true.
+        "court_gate": gate is not None,
     }
     if not reliable:
         dets = []
