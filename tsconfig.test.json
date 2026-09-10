@@ -17,6 +17,7 @@
     "src/lib/vision/**/*.ts",
     "src/lib/db/**/*.ts",
     "src/lib/analysis/**/*.ts",
-    "src/lib/video/**/*.ts"
+    "src/lib/video/**/*.ts",
+    "src/lib/coaching/**/*.ts"
   ]
 }
