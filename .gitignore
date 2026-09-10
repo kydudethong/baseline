@@ -62,3 +62,8 @@ ball_debug_*.txt
 tracknet_result.json
 /_*.png
 _to_delete/
+
+# Python virtualenvs (the Gemini harness wants google-genai, and Homebrew's
+# python refuses system-wide installs under PEP 668)
+.venv/
+.venv-*/
