@@ -2,59 +2,43 @@
   "rallies": [
     {
       "idx": 1,
-      "start_s": 3.8,
-      "end_s": 8.8,
-      "end_reason": "unforced_error",
-      "winner": "far",
+      "start_s": 0.0,
+      "end_s": 14.5,
+      "end_reason": "opponent error",
+      "winner": "player_2",
       "confidence": 0.88
     },
     {
       "idx": 2,
-      "start_s": 9.4,
-      "end_s": 13.8,
-      "end_reason": "forced_error",
-      "winner": "far",
-      "confidence": 0.86
+      "start_s": 26.5,
+      "end_s": 33.5,
+      "end_reason": "opponent error",
+      "winner": "player_2",
+      "confidence": 0.95
     },
     {
       "idx": 3,
-      "start_s": 25.7,
-      "end_s": 28.4,
-      "end_reason": "out",
-      "winner": "near",
-      "confidence": 0.84
+      "start_s": 43.0,
+      "end_s": 50.5,
+      "end_reason": "partner error into net",
+      "winner": "player_4",
+      "confidence": 0.92
     },
     {
       "idx": 4,
-      "start_s": 42.3,
-      "end_s": 46.2,
-      "end_reason": "winner",
-      "winner": "near",
-      "confidence": 0.82
+      "start_s": 79.5,
+      "end_s": 83.5,
+      "end_reason": "opponent error",
+      "winner": "player_2",
+      "confidence": 0.94
     },
     {
       "idx": 5,
-      "start_s": 47.2,
-      "end_s": 51.0,
-      "end_reason": "fault",
-      "winner": "far",
-      "confidence": 0.8
-    },
-    {
-      "idx": 6,
-      "start_s": 78.2,
-      "end_s": 88.1,
-      "end_reason": "unforced_error",
-      "winner": "far",
-      "confidence": 0.89
-    },
-    {
-      "idx": 7,
-      "start_s": 90.6,
-      "end_s": 94.7,
-      "end_reason": "fault",
-      "winner": "near",
-      "confidence": 0.82
+      "start_s": 87.5,
+      "end_s": 93.5,
+      "end_reason": "dead ball / practice hits at match conclusion",
+      "winner": null,
+      "confidence": 0.7
     }
   ],
   "shots": [
@@ -62,191 +46,341 @@
       "t": 3.96,
       "rally_idx": 1,
       "player": "player_1",
-      "type": "serve",
-      "confidence": 0.92
+      "type": "volley",
+      "confidence": 0.85
+    },
+    {
+      "t": 4.42,
+      "rally_idx": 1,
+      "player": "player_1",
+      "type": "volley",
+      "confidence": 0.85
     },
     {
       "t": 5.51,
       "rally_idx": 1,
       "player": "player_4",
-      "type": "return",
-      "confidence": 0.9
+      "type": "volley",
+      "confidence": 0.88
+    },
+    {
+      "t": 5.96,
+      "rally_idx": 1,
+      "player": "player_1",
+      "type": "volley",
+      "confidence": 0.85
+    },
+    {
+      "t": 6.38,
+      "rally_idx": 1,
+      "player": "player_1",
+      "type": "volley",
+      "confidence": 0.85
     },
     {
       "t": 7.3,
       "rally_idx": 1,
       "player": "player_1",
-      "type": "third_shot_drop",
-      "confidence": 0.78
+      "type": "dink",
+      "confidence": 0.85
+    },
+    {
+      "t": 7.72,
+      "rally_idx": 1,
+      "player": "player_1",
+      "type": "dink",
+      "confidence": 0.85
     },
     {
       "t": 9.97,
-      "rally_idx": 2,
+      "rally_idx": 1,
       "player": "player_1",
-      "type": "serve",
-      "confidence": 0.9
+      "type": "dink",
+      "confidence": 0.85
+    },
+    {
+      "t": 10.51,
+      "rally_idx": 1,
+      "player": "player_1",
+      "type": "dink",
+      "confidence": 0.85
+    },
+    {
+      "t": 10.76,
+      "rally_idx": 1,
+      "player": "player_1",
+      "type": "dink",
+      "confidence": 0.85
     },
     {
       "t": 12.3,
-      "rally_idx": 2,
+      "rally_idx": 1,
       "player": "player_2",
-      "type": "third_shot_drop",
-      "confidence": 0.75
-    },
-    {
-      "t": 13.6,
-      "rally_idx": 2,
-      "player": "player_4",
-      "type": "volley",
-      "confidence": 0.8
-    },
-    {
-      "t": 26.78,
-      "rally_idx": 3,
-      "player": "player_3",
-      "type": "serve",
-      "confidence": 0.94
-    },
-    {
-      "t": 27.49,
-      "rally_idx": 3,
-      "player": "player_2",
-      "type": "return",
-      "confidence": 0.86
-    },
-    {
-      "t": 43.38,
-      "rally_idx": 4,
-      "player": "player_3",
-      "type": "serve",
+      "type": "dink",
       "confidence": 0.92
     },
     {
-      "t": 44.75,
-      "rally_idx": 4,
+      "t": 12.89,
+      "rally_idx": 1,
+      "player": "player_2",
+      "type": "dink",
+      "confidence": 0.92
+    },
+    {
+      "t": 13.18,
+      "rally_idx": 1,
+      "player": "player_1",
+      "type": "speed_up",
+      "confidence": 0.9
+    },
+    {
+      "t": 13.6,
+      "rally_idx": 1,
+      "player": "player_4",
+      "type": "block",
+      "confidence": 0.85
+    },
+    {
+      "t": 13.85,
+      "rally_idx": 1,
+      "player": "player_4",
+      "type": "unknown",
+      "confidence": 0.75
+    },
+    {
+      "t": 26.78,
+      "rally_idx": 2,
+      "player": "player_3",
+      "type": "serve",
+      "confidence": 0.98
+    },
+    {
+      "t": 27.49,
+      "rally_idx": 2,
       "player": "player_2",
       "type": "return",
+      "confidence": 0.95
+    },
+    {
+      "t": 27.99,
+      "rally_idx": 2,
+      "player": "player_3",
+      "type": "third_shot_drop",
+      "confidence": 0.8
+    },
+    {
+      "t": 28.49,
+      "rally_idx": 2,
+      "player": "player_3",
+      "type": "drop",
+      "confidence": 0.8
+    },
+    {
+      "t": 43.38,
+      "rally_idx": 3,
+      "player": "player_3",
+      "type": "serve",
+      "confidence": 0.98
+    },
+    {
+      "t": 43.88,
+      "rally_idx": 3,
+      "player": "player_3",
+      "type": "unknown",
+      "confidence": 0.7
+    },
+    {
+      "t": 44.75,
+      "rally_idx": 3,
+      "player": "player_2",
+      "type": "return",
+      "confidence": 0.92
+    },
+    {
+      "t": 45.88,
+      "rally_idx": 3,
+      "player": "player_4",
+      "type": "drop",
       "confidence": 0.85
     },
     {
       "t": 47.67,
-      "rally_idx": 5,
+      "rally_idx": 3,
       "player": "player_4",
-      "type": "serve",
-      "confidence": 0.91
+      "type": "dink",
+      "confidence": 0.85
+    },
+    {
+      "t": 47.92,
+      "rally_idx": 3,
+      "player": "player_4",
+      "type": "dink",
+      "confidence": 0.85
+    },
+    {
+      "t": 48.26,
+      "rally_idx": 3,
+      "player": "player_4",
+      "type": "dink",
+      "confidence": 0.85
     },
     {
       "t": 48.8,
-      "rally_idx": 5,
+      "rally_idx": 3,
       "player": "player_2",
-      "type": "return",
-      "confidence": 0.83
+      "type": "speed_up",
+      "confidence": 0.88
+    },
+    {
+      "t": 49.63,
+      "rally_idx": 3,
+      "player": "player_1",
+      "type": "volley",
+      "confidence": 0.85
     },
     {
       "t": 79.87,
-      "rally_idx": 6,
+      "rally_idx": 4,
       "player": "player_2",
       "type": "serve",
-      "confidence": 0.95
+      "confidence": 0.98
     },
     {
       "t": 81.12,
-      "rally_idx": 6,
+      "rally_idx": 4,
       "player": "player_4",
       "type": "return",
-      "confidence": 0.9
+      "confidence": 0.95
     },
     {
       "t": 81.54,
-      "rally_idx": 6,
+      "rally_idx": 4,
       "player": "player_1",
       "type": "third_shot_drop",
-      "confidence": 0.82
+      "confidence": 0.85
+    },
+    {
+      "t": 81.79,
+      "rally_idx": 4,
+      "player": "player_1",
+      "type": "reset",
+      "confidence": 0.85
     },
     {
       "t": 82.42,
-      "rally_idx": 6,
+      "rally_idx": 4,
       "player": "player_4",
-      "type": "dink",
-      "confidence": 0.78
+      "type": "block",
+      "confidence": 0.85
     },
     {
-      "t": 83.28,
-      "rally_idx": 6,
-      "player": "player_3",
-      "type": "dink",
+      "t": 82.87,
+      "rally_idx": 4,
+      "player": "player_4",
+      "type": "unknown",
       "confidence": 0.75
     },
     {
-      "t": 91.51,
-      "rally_idx": 7,
-      "player": "player_2",
-      "type": "serve",
-      "confidence": 0.94
+      "t": 87.13,
+      "rally_idx": 5,
+      "player": "player_1",
+      "type": "unknown",
+      "confidence": 0.7
     },
     {
-      "t": 93.27,
-      "rally_idx": 7,
-      "player": "player_4",
-      "type": "return",
+      "t": 88.05,
+      "rally_idx": 5,
+      "player": "player_1",
+      "type": "serve",
       "confidence": 0.85
+    },
+    {
+      "t": 91.51,
+      "rally_idx": 5,
+      "player": "player_2",
+      "type": "serve",
+      "confidence": 0.8
+    },
+    {
+      "t": 92.18,
+      "rally_idx": 5,
+      "player": "player_1",
+      "type": "unknown",
+      "confidence": 0.7
+    },
+    {
+      "t": 92.43,
+      "rally_idx": 5,
+      "player": "player_1",
+      "type": "unknown",
+      "confidence": 0.7
     }
   ],
   "playstyle": {
-    "summary": "Passive baseline and transition player who relies on upright, compact arm-driven motions rather than dynamic athletic footwork.",
+    "summary": "Measured right-side doubles player with reliable baseline groundstrokes and patient kitchen positioning, relying on partner offense while maintaining court discipline.",
     "tendencies": [
-      "Stands excessively upright during ready state and shot execution",
-      "Delivers reliable, conservative serves deep into the opponent's court",
-      "Relies mostly on arm extension rather than hip rotation or knee drive"
+      "Stands with tall, upright posture at the non-volley zone line",
+      "Executes deep, high-percentage returns to secure straightforward transitions forward",
+      "Waits patiently during neutral kitchen rallies before selecting opportunist speed-ups"
     ],
-    "under_pressure": "Tends to stiffen upright and reach with the paddle arm rather than dropping hips and stepping through the ball."
+    "under_pressure": "Remains in position at the kitchen line but exhibits stiff knee action, limiting emergency lateral resets and reactive touch."
   },
   "skills": [
     {
       "skill": "serve",
+      "rating": 7.0,
+      "basis": "Demonstrated a clean, deep serve at t=79.87s hitting 10.9 m/s with 27 deg shoulder rotation to pin opponents back."
+    },
+    {
+      "skill": "return",
+      "rating": 7.0,
+      "basis": "Consistent deep returns at t=27.49s and t=44.75s allowing clean forward transitions to the NVZ line."
+    },
+    {
+      "skill": "dinking",
       "rating": 6.5,
-      "basis": "Consistent depth and mechanics demonstrated on serves at t=79.87s and t=91.51s."
+      "basis": "Consistent unattackable dinks at t=12.30s and t=12.89s, though executed with nearly straight legs."
+    },
+    {
+      "skill": "kitchen",
+      "rating": 6.8,
+      "basis": "Holds the kitchen line cleanly without overstepping or drifting back during firefights."
     },
     {
       "skill": "positioning",
-      "rating": 5.0,
-      "basis": "Slow to close the kitchen line, often lingering upright in transition (e.g. t=44.75s, y=13.2 ft)."
-    },
-    {
-      "skill": "consistency",
-      "rating": 5.5,
-      "basis": "Puts returns and serves in play, but produces limited offensive penetration due to high center of gravity."
+      "rating": 6.7,
+      "basis": "Follows returns forward swiftly and stays synchronized with partner laterally."
     }
   ],
   "coaching": {
-    "headline": "Lower your center of gravity to build a dynamic athletic base",
+    "headline": "Lower Center of Gravity by Adding Knee Flexion at the Kitchen Line",
     "strengths": [
-      "Dependable, controlled serve mechanics starting rallies cleanly (t=79.87s, 91.51s)",
-      "Calm court demeanor with minimal erratic paddle thrashing"
+      "Consistent deep serve and return fundamentals that establish favorable rally positioning",
+      "Calm positioning and patience at the NVZ without unforced stepping into the kitchen"
     ],
     "top_priority_fix": {
-      "issue": "Severe lack of knee bend and athletic hinge across baseline, transition, and contact points.",
-      "why_it_matters": "Operating with straight legs restricts court coverage, prevents driving through the ball from the lower body, and leads to mistimed, arm-only contacts.",
-      "evidence": "Knee angle at contact measured at 171.1 degrees at t=12.30s, 174.7 degrees at t=44.75s, and 179.5 degrees at t=91.51s."
+      "issue": "Severe upright posture with straight legs during kitchen play",
+      "why_it_matters": "Operating with straight knees (angles above 168 deg) forces you to bend at the waist and reach downward with the paddle, slowing hand reaction speed and reducing margin over the net.",
+      "evidence": "Knee angles at contact were measured at 171.1 deg (t=12.30s), 168.2 deg (t=12.89s), and 174.7 deg (t=44.75s), far above the 135-145 deg athletic bend."
     },
     "secondary": [
       {
-        "issue": "Passive transition speed up to the kitchen line after hitting returns.",
-        "evidence": "Remains in the mid-court transition zone (y=10.3 to 13.2 ft) during rallies 4 and 5 rather than pushing aggressively to the kitchen tape."
+        "issue": "Excessive upper body rotation on NVZ speed-ups instead of a compact punch",
+        "evidence": "At t=48.80s, speed-up contact showed 104 deg shoulder rotation, creating an erratic swing path and leaving court open."
       }
     ]
   },
   "drills": [
     {
-      "name": "Athletic Base Drops & Dinks",
-      "targets": "Maintain knee flexion between 135 and 145 degrees throughout ready stance and ball strike.",
-      "reps_or_duration": "4 sets of 15 drops from mid-court and kitchen"
+      "name": "NVZ Athletic Stance Dinking",
+      "targets": "Maintain knee flexion below 145 deg throughout neutral dink exchanges",
+      "reps_or_duration": "4 sets of 40 crosscourt dinks pausing every 10 shots to verify knee bend"
     },
     {
-      "name": "Split-Step and Sprint to NVZ",
-      "targets": "Hit a return from the baseline, perform a loaded split-step, and advance to the kitchen line before third ball crosses net.",
-      "reps_or_duration": "10 minutes of return-and-approach patterns"
+      "name": "Return, Split-Step & Compact Volley",
+      "targets": "Deep return from baseline, sprint to NVZ, dynamic split-step with knee bend, punch volley",
+      "reps_or_duration": "15 minutes of feed-and-approach repetitions"
     }
   ],
-  "data_gaps": "No extended kitchen firefights or backhand reset exchanges were recorded in the clip to evaluate soft dinking touch or hand speed under direct pressure."
+  "data_gaps": "Limited third-shot drop and defensive reset opportunities observed due to partner taking the majority of middle balls."
 }

@@ -31,7 +31,9 @@ the overlay is a claim about it, and it is sometimes wrong.
   ball; the position is inferred between two real observations. Treat a hollow
   circle as a guess, and do not build a claim about ball position on one.
 - **Magenta banner across the top: "BALL CROSSED NET → far / near"** — a
-  confirmed crossing, flashed for a third of a second.
+  confirmed crossing, flashed for a third of a second. Not drawn in every
+  render: where you are being asked to judge rallies yourself, crossings are
+  withheld too, because they are the evidence a rally is built from.
 
 ## Players
 

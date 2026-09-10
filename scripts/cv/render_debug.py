@@ -55,9 +55,10 @@ def main() -> int:
     ap.add_argument("--end", type=float, default=None,
                     help="last second to render")
     ap.add_argument("--hide-rallies", action="store_true",
-                    help="draw no rally banner and no timeline. For handing the overlay to "
-                         "something that is being ASKED where the rallies are -- otherwise "
-                         "the answer is written across the bottom of every frame")
+                    help="draw no rally banner, no timeline, and no net-crossing flashes. "
+                         "For handing the overlay to something that is being ASKED where the "
+                         "rallies are -- otherwise the answer, and the evidence behind it, "
+                         "are written across the frame")
     args = ap.parse_args()
     if args.start is not None and args.end is not None and args.end <= args.start:
         print(f"--end ({args.end}) must be after --start ({args.start})", file=sys.stderr)
@@ -309,7 +310,12 @@ def main() -> int:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5 * scale, (90, 255, 140), 1, cv2.LINE_AA)
 
         # A crossing flashes for a third of a second, with its direction.
-        for c in crossings:
+        #
+        # Suppressed with the rally banner, not separately: crossings are the
+        # EVIDENCE the segmenter builds rallies from, so a full-width
+        # "BALL CROSSED NET -> far" is most of the answer to "where are the
+        # rallies" even without the banner spelling it out.
+        for c in ([] if args.hide_rallies else crossings):
             if 0 <= t - c["t"] <= 0.33:
                 txt = "BALL CROSSED NET -> far" if c["into"] > 0 else "BALL CROSSED NET -> near"
                 cv2.rectangle(img, (0, 0), (w, int(46 * scale)), C_NET, -1)
