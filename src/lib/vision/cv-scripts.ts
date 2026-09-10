@@ -23,6 +23,8 @@ const SCRIPTS_DIR = path.join(process.cwd(), "scripts", "cv");
 export function cvPython(): string {
   return process.env.CV_PYTHON || "python3";
 }
+import { activeRunSignal } from "../analysis/run-registry";
+
 const POSE_MODEL_PATH = path.join(process.cwd(), "models", "yolov8n-pose.pt");
 
 export class PythonCvError extends Error {}
@@ -36,6 +38,10 @@ async function runPython(
   try {
     const child = execFileAsync(cvPython(), [scriptPath, ...args], {
       maxBuffer: opts.maxBuffer ?? 20 * 1024 * 1024,
+      // Node kills the child when this aborts. Without it, "stop" would mean
+      // "stop once the current Python script finishes", which for a full-clip
+      // ball pass is minutes away.
+      signal: activeRunSignal(),
     });
     // Long-running scripts report progress on stderr; forward it live so a
     // ten-minute ball pass doesn't look like a hang.

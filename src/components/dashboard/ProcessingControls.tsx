@@ -46,8 +46,46 @@ export function ProcessingControls({
     }
   }
 
+  async function stop() {
+    // Asked, because it is destructive in the only way that matters: the work
+    // done so far is in the process's memory and there is nothing to resume
+    // from. Starting again starts from the beginning.
+    if (!window.confirm(
+      "Stop this analysis? The work done so far is lost and starting again begins from the top."
+    )) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/analyses/${analysisId}/cancel`, { method: "POST" });
+      const json = (await res.json()) as { error?: string; message?: string; wasRunning?: boolean };
+      if (!res.ok) throw new Error(json.error ?? "Could not stop the analysis.");
+      // Said out loud when the run had already died with its machine, because
+      // "stopped" would imply this click did something it did not, and the
+      // user has probably been watching a stuck progress bar for a while.
+      if (json.wasRunning === false && json.message) setError(json.message);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not stop the analysis.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (inFlight) {
-    return <AnalysisProgress analysisId={analysisId} initialStatus={status} />;
+    return (
+      <div className="stack g3">
+        <AnalysisProgress analysisId={analysisId} initialStatus={status} />
+        <div className="row g2" style={{ alignItems: "center" }}>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={stop}>
+            {busy ? "Stopping…" : "Stop analysis"}
+          </button>
+          <span className="sm" style={{ opacity: 0.6 }}>
+            Nothing happens to your video — the clip stays exactly as it is.
+          </span>
+        </div>
+        {error ? <div className="error">{error}</div> : null}
+      </div>
+    );
   }
 
   // Every state that is not mid-run gets the setup link. An earlier version

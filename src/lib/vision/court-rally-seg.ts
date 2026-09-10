@@ -33,6 +33,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { CourtCalibration, CourtCorners } from "./phase2-types";
+import { activeRunSignal } from "../analysis/run-registry";
 
 /** Line segments in source-frame pixels, keyed by which court marking they are. */
 export type CourtLinesPx = Record<string, [[number, number], [number, number]]>;
@@ -293,9 +294,21 @@ export async function setupFrameViaRallySeg(
   }
 }
 
-function run(bin: string, args: string[], cwd: string, onLog?: (s: string) => void): Promise<void> {
+function run(
+  bin: string, args: string[], cwd: string,
+  onLog?: (s: string) => void,
+  signal: AbortSignal | undefined = activeRunSignal()
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(bin, args, { cwd, env: { ...process.env, PYTHONPATH: cwd, PYTHONUNBUFFERED: "1" } });
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error("Analysis stopped."));
+      return;
+    }
+    const proc = spawn(bin, args, {
+      cwd,
+      env: { ...process.env, PYTHONPATH: cwd, PYTHONUNBUFFERED: "1" },
+      signal,
+    });
     let stderr = "";
     const timeout = Number(process.env.RALLY_SEG_COURT_TIMEOUT_MS || 8 * 60 * 1000);
     const timer = setTimeout(() => {

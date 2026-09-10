@@ -11,6 +11,9 @@ import { downloadToFile, uploadFileFromDisk } from "@/lib/storage/r2";
 import { describeError } from "./describe-error";
 import { StageTimer } from "./stage-timer";
 import { runFinished, runStarted } from "./idle-sleep";
+import {
+  beginRun, clearActiveRunSignal, endRun, isCancellation, setActiveRunSignal,
+} from "./run-registry";
 import { LOCAL_BUCKET, R2_BUCKET, debugVideoDir, debugVideoKey, debugVideoObjectKey } from "@/lib/vision/debug-video-store";
 import { isLocalDev } from "@/lib/deployment";
 import type { AnalysisProgress, AnalysisStage } from "@/lib/db/types";
@@ -56,6 +59,12 @@ export async function runPipelineV2(
   // costly. A leaked decrement would let it sleep mid-analysis -- worse. The
   // try/finally is what makes neither possible.
   runStarted();
+  // Registered so a cancel request can find this run, and published so every
+  // Python subprocess it starts is spawned with the same signal -- which is
+  // what makes "stop" mean seconds rather than "after the current four-minute
+  // detector pass".
+  const controller = beginRun(analysisId);
+  setActiveRunSignal(controller.signal);
   // Everything that can fail must fail INSIDE the try, or the analysis is left
   // sitting at "uploaded" with no error while the client has already been told
   // processing started. These three throws used to happen outside it, and
@@ -259,12 +268,28 @@ export async function runPipelineV2(
       }
     }
   } catch (err) {
+    // A stop is not a failure, and must not be recorded as one. The video is
+    // untouched and the analysis is exactly as re-runnable as it was before
+    // the run started, so it goes back to "uploaded" -- the state it would
+    // have been in had nobody pressed analyse.
+    //
+    // Deliberately NOT a new "cancelled" status: that needs an enum value in
+    // the database, and code that writes a value the enum does not have fails
+    // every cancel until the migration is run. Reverting works the moment it
+    // ships.
+    if (isCancellation(err)) {
+      console.error(`[pipeline-v2] analysis ${analysisId} stopped by request`);
+      await updateAnalysisStatus(supabase, analysisId, "uploaded", { errorMessage: null });
+      return;
+    }
     const message = describeError(err);
     console.error(`[pipeline-v2] analysis ${analysisId} failed: ${message}`, err);
     await updateAnalysisStatus(supabase, analysisId, "failed", { errorMessage: message });
     throw err;
   } finally {
     runFinished();
+    clearActiveRunSignal(controller.signal);
+    endRun(analysisId, controller);
     if (tempDir) {
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
     }

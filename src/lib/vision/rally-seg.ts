@@ -30,6 +30,7 @@ import path from "node:path";
 import type { CourtCalibration } from "./phase2-types";
 import type { ClusteredRally } from "./rallies";
 import type { RawBallDetections } from "./cv-scripts";
+import { activeRunSignal } from "../analysis/run-registry";
 
 /** Where the pipeline lives. Sibling checkout by default. */
 function rallySegDir(): string {
@@ -291,11 +292,22 @@ export async function segmentRalliesViaRallySeg(
   }
 }
 
-function run(bin: string, args: string[], cwd: string, onLog?: (s: string) => void): Promise<void> {
+function run(
+  bin: string, args: string[], cwd: string,
+  onLog?: (s: string) => void,
+  signal: AbortSignal | undefined = activeRunSignal()
+): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error("Analysis stopped."));
+      return;
+    }
     const proc = spawn(bin, args, {
       cwd,
       env: { ...process.env, PYTHONPATH: cwd, PYTHONUNBUFFERED: "1" },
+      // rally_seg's pass is the longest single subprocess in the pipeline, so
+      // it is the one that most needs to die on demand.
+      signal,
     });
     let stderr = "";
     const timeout = Number(process.env.RALLY_SEG_TIMEOUT_MS || 30 * 60 * 1000);
