@@ -26,9 +26,21 @@ import type { ClusteredRally } from "./rallies";
 import type { CourtCalibration, PlayerPoseFrame, PlayerTrack } from "./phase2-types";
 import { visibleBones } from "./skeleton";
 
+/**
+ * The overlay renders on every run now, because the coaching read is written
+ * from it.
+ *
+ * It used to be opt-in behind RALLY_SEG_DEBUG -- reasonable when it was a
+ * thing you looked at to check the pipeline, and wrong now that it is an
+ * INPUT. Production had that flag off, so a deployed run would have produced
+ * no overlay and therefore no coaching at all.
+ *
+ * OVERLAY=off still turns it off, for a run that only wants the numbers. That
+ * run cannot be coached, and run-coaching says so rather than failing oddly.
+ */
 export function debugRenderEnabled(): boolean {
-  const v = (process.env.RALLY_SEG_DEBUG || "").toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
+  const v = (process.env.OVERLAY ?? process.env.RALLY_SEG_DEBUG ?? "on").toLowerCase();
+  return v !== "off" && v !== "0" && v !== "false" && v !== "no";
 }
 
 // Re-exported from the storage module so there is one definition of where an

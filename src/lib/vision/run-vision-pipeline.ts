@@ -1102,7 +1102,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // court or a set of boundaries that lost.
   let debugVideoUrl: string | null = null;
   if (debugRenderEnabled() && input.debugId) {
-    stage("overlay", "rendering the annotated overlay (a full decode and re-encode)…");
+    stage("overlay", "rendering the annotated overlay — the coaching read is written from it…");
     debugVideoUrl = await renderDebugVideo({
       videoPath: input.videoPath,
       analysisId: input.debugId,

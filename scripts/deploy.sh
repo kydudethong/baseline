@@ -53,7 +53,12 @@ SITE_URL=${DEPLOY_SITE_URL:-https://${APP}.fly.dev}
 # one of these is still set from `fly secrets import < .env.local` it silently
 # beats the correct container value — CV_PYTHON in particular points at a macOS
 # path that does not exist in the image, which fails every analysis.
-LAPTOP_ONLY=(CV_PYTHON RALLY_SEG_DIR RALLY_SEG_DEBUG)
+# CV_PYTHON and RALLY_SEG_DIR point at macOS paths that do not exist in the
+# image, and a Fly secret OVERRIDES the Dockerfile's ENV -- so one of these set
+# as a secret silently fails every analysis. RALLY_SEG_DEBUG used to be here
+# too; the overlay now renders on every run because the coaching is read from
+# it, so there is nothing to guard.
+LAPTOP_ONLY=(CV_PYTHON RALLY_SEG_DIR)
 if secrets=$(fly secrets list --app "$APP" 2>/dev/null); then
   stale=()
   for v in "${LAPTOP_ONLY[@]}"; do grep -qE "^${v}[[:space:]]" <<<"$secrets" && stale+=("$v"); done

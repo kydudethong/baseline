@@ -82,7 +82,7 @@ teaching it.
 
 ### 4. Unset the settings that are laptop-only
 
-`fly secrets import < .env.local` copies **everything**, including three values
+`fly secrets import < .env.local` copies **everything**, including two values
 that are paths on Ky's Mac. A Fly secret overrides the Dockerfile's `ENV`, so
 these silently win over the correct container values and break things that
 otherwise work:
@@ -91,10 +91,23 @@ otherwise work:
 |---|---|---|
 | `CV_PYTHON` | a macOS CommandLineTools path | The image sets `/opt/venv/bin/python`. Left set, every CV script spawns an interpreter that does not exist and **every analysis fails**. |
 | `RALLY_SEG_DIR` | `/Users/kythong/coach/ml` | The image sets `/app/ml`. Left set, `rallySegInstalled()` is false and the setup screen 503s. |
-| `RALLY_SEG_DEBUG` | `1` | Renders an annotated debug video per run. Minutes of CPU and hundreds of MB written to a container with no volume. Fine locally, waste in production. |
 
 ```bash
-fly secrets unset CV_PYTHON RALLY_SEG_DIR RALLY_SEG_DEBUG
+fly secrets unset CV_PYTHON RALLY_SEG_DIR
+```
+
+`RALLY_SEG_DEBUG` used to be on this list, when the overlay was a thing you
+looked at. It is an **input** now — the coaching read is written from it — so
+it renders on every run and there is nothing to unset. `OVERLAY=off` disables
+it for a run that only wants the numbers; that run cannot be coached.
+
+**`GEMINI_API_KEY` must be set as a secret.** The coaching read, rally
+boundaries, shot types, skill ratings and drills all come from one Gemini call,
+and without a key every analysis completes its CV stage and then has no
+coaching at all:
+
+```bash
+fly secrets set GEMINI_API_KEY=... --app baseline-court
 ```
 
 `RALLY_SEGMENTER=rally_seg` **does** carry over now that `ml/` ships in the
