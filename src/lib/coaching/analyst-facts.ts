@@ -23,6 +23,16 @@ import type { AnalystInput, MeasuredContact } from "./analyst";
  * have made every distance the model quoted wrong by a factor of twenty, in
  * prose confident enough that nobody would check.
  */
+/**
+ * Above this, the clip gets an explicit warning in the prompt.
+ *
+ * Ten minutes is not a cliff, it is where the risk starts being worth naming.
+ * The audit catches a timestamp outside the clip either way -- this is the
+ * cheaper half of the defence, aimed at preventing the mistake rather than
+ * reporting it.
+ */
+const LONG_CLIP_WARN_S = 600;
+
 const COURT_W_FT = 20;
 const COURT_L_FT = 44;
 
@@ -104,6 +114,18 @@ export function buildAnalystInput(opts: {
   if (!contacts.some((c) => c.body)) {
     limitations.push(
       "No body measurements were taken on any contact, so nothing can be said about technique."
+    );
+  }
+  // One call for the whole clip, deliberately -- chunking is not worth its
+  // failure modes for clips of this length. But the model's known failure is
+  // losing track of WHERE IT IS in a long video: on a 101-second clip run
+  // unassisted it returned rallies at 119s and 131s. That gets likelier the
+  // longer the footage, so say so rather than discovering it as coaching that
+  // cites points which never happened.
+  if (opts.clipSeconds > LONG_CLIP_WARN_S) {
+    limitations.push(
+      `This clip is ${Math.round(opts.clipSeconds / 60)} minutes long. Be especially careful that every `
+      + `timestamp you report falls inside it; do not report anything after ${opts.clipSeconds.toFixed(0)}s.`
     );
   }
   if (!opts.subjectPlayerId) {

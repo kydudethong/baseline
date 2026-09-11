@@ -110,3 +110,17 @@ test("caller-supplied limitations survive alongside the derived ones", () => {
   assert.ok(got.knownLimitations.includes("the far baseline was outside the frame"));
   assert.ok(got.knownLimitations.length > 1);
 });
+
+test("a long clip gets an explicit warning about inventing time", () => {
+  // One call for the whole video is the chosen design, so the defence against
+  // the model drifting has to live in the prompt and the audit rather than in
+  // chunking. This is the prompt half.
+  const short = input({ clipSeconds: 101.3 });
+  assert.equal(short.knownLimitations.some((l) => /minutes long/.test(l)), false);
+
+  const long = input({ clipSeconds: 90 * 60 });
+  const warning = long.knownLimitations.find((l) => /minutes long/.test(l));
+  assert.ok(warning, "expected a long-clip warning");
+  assert.match(warning!, /90 minutes/);
+  assert.match(warning!, /do not report anything after 5400s/);
+});
