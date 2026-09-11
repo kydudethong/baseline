@@ -116,3 +116,19 @@ test("the prompt states the clip length and never leaks our rallies", () => {
   assert.ok(!/rally_idx["\s:]*\d/.test(p), "no rally assignment leaked");
   assert.ok(!p.includes('"type":"dink"'), "no shot type leaked");
 });
+
+test("the prompt asks for the scales the database actually stores", () => {
+  // coaching_skill_ratings.raw and coaching_observations.severity are both
+  // clamped 1-5 on persist. Asking the model for 1-10 would have collapsed
+  // every rating above 5 into "5" — turning a 6 and a 10 into the same
+  // "strength", silently, forever.
+  const p = analystPrompt(input(), "LEGEND");
+  assert.match(p, /SKILL RATINGS 1-5/);
+  assert.match(p, /severity 1-5/);
+  assert.ok(!/1-10/.test(p), "no 1-10 scale anywhere in the prompt");
+});
+
+test("observations must cite a measured contact time, and the prompt says so", () => {
+  const p = analystPrompt(input(), "LEGEND");
+  assert.match(p, /not a time you chose/);
+});

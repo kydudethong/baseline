@@ -63,6 +63,7 @@ export interface AnalystOutput {
     type: typeof SHOT_TYPES[number]; confidence: number;
   }>;
   playstyle: { summary: string; tendencies: string[]; under_pressure: string };
+  /** rating is 1-5, matching coaching_skill_ratings.raw — NOT 1-10. */
   skills: Array<{ skill_key: string; rating: number; basis: string }>;
   coaching: {
     headline: string;
@@ -224,13 +225,16 @@ YOUR JOB
    answer where you cannot tell, and a wrong label is not.
 3. PLAYSTYLE of the subject — how they actually play, where they win and lose
    points, what they reach for under pressure. Describe, do not flatter.
-4. SKILL RATINGS 1-10, only for skills this clip supports. Omit a skill rather
-   than inventing a number, and say what the rating rests on.
+4. SKILL RATINGS 1-5, only for skills this clip supports. 1 is a clear
+   weakness, 3 is competent, 5 is a strength at this player's level. Omit a
+   skill rather than inventing a number, and say what the rating rests on.
 5. COACHING — a headline, a short summary, 1-2 strengths, one priority fix,
    1-2 secondary points. Every one cites a rally, a time, or a measured number.
 6. OBSERVATIONS — the same findings as structured records, one per finding,
-   each tagged with a skill and a coaching dimension, severity 0-1, and where
-   it is about one identifiable moment, the shot_t of that contact.
+   each tagged with a skill and a coaching dimension, severity 1-5 (5 being
+   the most costly), and where it is about one identifiable moment, the
+   shot_t of that contact -- which must be one of the contact timestamps you
+   were given, not a time you chose.
 7. DRILLS — what to practise, tied to the priority fix. Where one of the
    catalogue drills fits, cite its slug; otherwise leave slug null and name it.
 
