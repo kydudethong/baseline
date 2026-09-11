@@ -159,6 +159,100 @@ const MAX_ATTEMPTS = 4;
  * call that model at all without billing, and no amount of waiting fixes it.
  * Retrying one is a slower way to fail, so it is not retried.
  */
+/**
+ * A text-only call — no video, no schema.
+ *
+ * Shares the failure handling with generateJSON rather than duplicating it,
+ * because every one of those cases was learned from a real failure and a
+ * second copy would drift from the first.
+ */
+export async function generateText(opts: {
+  model?: string;
+  prompt: string;
+  maxOutputTokens?: number;
+  onLog?: (line: string) => void;
+}): Promise<string> {
+  const out = await callGemini(opts.model ?? analystModel(), {
+    contents: [{ parts: [{ text: opts.prompt }] }],
+    generationConfig: { maxOutputTokens: opts.maxOutputTokens ?? 4000 },
+  }, opts.onLog);
+  return out;
+}
+
+/** Structured JSON from text alone — the same shape as generateJSON, no file. */
+export async function generateJSONFromText<T>(opts: {
+  model?: string;
+  prompt: string;
+  schema: Record<string, unknown>;
+  maxOutputTokens?: number;
+  onLog?: (line: string) => void;
+}): Promise<T> {
+  const text = await callGemini(opts.model ?? analystModel(), {
+    contents: [{ parts: [{ text: opts.prompt }] }],
+    generationConfig: {
+      response_mime_type: "application/json",
+      response_schema: sanitiseSchema(opts.schema),
+      maxOutputTokens: opts.maxOutputTokens ?? 8000,
+    },
+  }, opts.onLog);
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new GeminiError(`Gemini returned text that is not JSON: ${text.slice(0, 200)}`);
+  }
+}
+
+/**
+ * One request, with the retry and quota handling every caller needs.
+ *
+ * A 429 carrying "limit: 0" is NOT rate limiting -- it means the key may not
+ * call that model at all without billing, and no amount of waiting fixes it.
+ * Retrying one is a slower way to fail, so it is not retried, whatever the
+ * error's own "please retry in 26s" says.
+ */
+async function callGemini(
+  model: string,
+  body: Record<string, unknown>,
+  onLog?: (line: string) => void
+): Promise<string> {
+  let delay = 5000;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(
+      `${BASE}/v1beta/models/${model}:generateContent?key=${apiKey()}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+    );
+    if (res.ok) {
+      const json = (await res.json()) as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      };
+      const text = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+      if (!text) throw new GeminiError("Gemini returned no content — the response may have been truncated.");
+      return text;
+    }
+
+    const detail = (await res.text()).slice(0, 500);
+    if (res.status === 404) {
+      const available = await listModels();
+      throw new GeminiError(
+        `${model} is not a model this key can call. Available: ${available.join(", ") || "(none listed)"}`
+      );
+    }
+    if (res.status === 429 && detail.includes("limit: 0")) {
+      throw new GeminiError(
+        `${model} has no free-tier quota (limit: 0) — this key cannot call it without billing. `
+        + "Retrying will not help. Enable billing, or set GEMINI_MODEL to a flash-tier model."
+      );
+    }
+    if (!RETRYABLE.has(res.status) || attempt === MAX_ATTEMPTS) {
+      throw new GeminiError(`Gemini failed (${res.status}): ${detail}`);
+    }
+    onLog?.(`${model} busy (${res.status}, attempt ${attempt}/${MAX_ATTEMPTS}) — retrying in ${delay / 1000}s`);
+    await new Promise((r) => setTimeout(r, delay));
+    delay *= 3;   // a demand spike outlasts a tight loop
+  }
+  throw new GeminiError("unreachable");
+}
+
 export async function generateJSON<T>(opts: {
   model: string;
   file: UploadedFile;
@@ -181,44 +275,12 @@ export async function generateJSON<T>(opts: {
     },
   };
 
-  let delay = 5000;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const res = await fetch(
-      `${BASE}/v1beta/models/${opts.model}:generateContent?key=${apiKey()}`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
-    );
-    if (res.ok) {
-      const json = (await res.json()) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      };
-      const text = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-      if (!text) throw new GeminiError("Gemini returned no content — the response may have been truncated.");
-      try {
-        return JSON.parse(text) as T;
-      } catch {
-        throw new GeminiError(`Gemini returned text that is not JSON: ${text.slice(0, 200)}`);
-      }
-    }
-
-    const detail = (await res.text()).slice(0, 500);
-    if (res.status === 404) {
-      const available = await listModels();
-      throw new GeminiError(
-        `${opts.model} is not a model this key can call. Available: ${available.join(", ") || "(none listed)"}`
-      );
-    }
-    if (res.status === 429 && detail.includes("limit: 0")) {
-      throw new GeminiError(
-        `${opts.model} has no free-tier quota (limit: 0) — this key cannot call it without billing. `
-        + "Retrying will not help. Enable billing, or set GEMINI_MODEL to a flash-tier model."
-      );
-    }
-    if (!RETRYABLE.has(res.status) || attempt === MAX_ATTEMPTS) {
-      throw new GeminiError(`Gemini failed (${res.status}): ${detail}`);
-    }
-    opts.onLog?.(`${opts.model} busy (${res.status}, attempt ${attempt}/${MAX_ATTEMPTS}) — retrying in ${delay / 1000}s`);
-    await new Promise((r) => setTimeout(r, delay));
-    delay *= 3;   // a demand spike outlasts a tight loop
+  // The retry, quota and 404 handling all live in callGemini; duplicating it
+  // here is how the two copies drift.
+  const text = await callGemini(opts.model, body, opts.onLog);
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new GeminiError(`Gemini returned text that is not JSON: ${text.slice(0, 200)}`);
   }
-  throw new GeminiError("unreachable");
 }
