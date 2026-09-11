@@ -4,7 +4,7 @@ import { getAnalysisForUser } from "@/lib/db/analyses";
 import { CoachingPipelineError, runCoachingPipeline } from "@/lib/coaching/run-coaching";
 import { describeError } from "@/lib/analysis/describe-error";
 
-// Calls the Claude REST API directly (see lib/coaching/claude.ts) — no
+// Coaching runs through Gemini now (lib/coaching/analyst.ts) — no
 // fs/child_process dependency, but kept on the Node runtime for parity with
 // the rest of this app's server routes and consistent env var handling.
 export const runtime = "nodejs";

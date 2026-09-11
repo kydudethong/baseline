@@ -14,7 +14,7 @@ import type {
   CoachingDrillRow,
   Database,
 } from "@/lib/db/types";
-import { generateJSON, textPart } from "./claude";
+import { generateJSONFromText } from "./gemini";
 import { getDrillsForSkill } from "./drills";
 import { BLUEPRINT_SCHEMA, blueprintPrompt } from "./prompts";
 import { skillName } from "./types";
@@ -54,21 +54,16 @@ export async function generateBlueprint(
   }
   const drillsBySlug = new Map(drills.map((d) => [d.slug, d]));
 
-  const plan = await generateJSON<BlueprintPlan>(
-    [
-      textPart(
-        blueprintPrompt({
-          weaknessTitle: opts.weaknessTitle,
-          weaknessDetail: opts.weaknessDetail,
-          skillName: skillName(opts.skillKey),
-          level: opts.level,
-          drills: drills.map((d) => ({ slug: d.slug, name: d.name, skill: d.skill_key, difficulty: d.difficulty, purpose: d.purpose })),
-        })
-      ),
-    ],
-    BLUEPRINT_SCHEMA,
-    0.4
-  );
+  const plan = await generateJSONFromText<BlueprintPlan>({
+    prompt: blueprintPrompt({
+      weaknessTitle: opts.weaknessTitle,
+      weaknessDetail: opts.weaknessDetail,
+      skillName: skillName(opts.skillKey),
+      level: opts.level,
+      drills: drills.map((d) => ({ slug: d.slug, name: d.name, skill: d.skill_key, difficulty: d.difficulty, purpose: d.purpose })),
+    }),
+    schema: BLUEPRINT_SCHEMA,
+  });
 
   const { data: blueprintRow, error: blueprintError } = await supabase
     .from("coaching_blueprints")

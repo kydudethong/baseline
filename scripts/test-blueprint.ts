@@ -38,13 +38,12 @@ async function main() {
     console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local");
     process.exit(1);
   }
-  if (!env.ANTHROPIC_API_KEY) {
-    console.error("Missing ANTHROPIC_API_KEY in .env.local");
+  if (!env.GEMINI_API_KEY) {
+    console.error("Missing GEMINI_API_KEY in .env.local");
     process.exit(1);
   }
-  process.env.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
+  process.env.GEMINI_API_KEY = env.GEMINI_API_KEY;
   if (env.CLAUDE_MODEL) process.env.CLAUDE_MODEL = env.CLAUDE_MODEL;
-  if (env.ANTHROPIC_WORKSPACE_ID) process.env.ANTHROPIC_WORKSPACE_ID = env.ANTHROPIC_WORKSPACE_ID;
 
   const supabase = createClient<Database>(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
