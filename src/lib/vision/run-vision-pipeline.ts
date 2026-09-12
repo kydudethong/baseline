@@ -2,23 +2,21 @@ import { getPhase2VisionProvider, playerDetectionIsLocal } from "./provider-v2";
 import { analyzeMovementWithCalibration } from "./provider-v2";
 import { hitsToUnknownShotEvents, detectFootworkFoundation } from "./events";
 import { computeAppearanceSignaturesViaPython, detectBallViaPython, BallModelNotConfiguredError, ballModelConfigured } from "./cv-scripts";
-import { buildBallTrack, detectBounces, detectHits, inferHitsBetweenCrossings, IN_RALLY_HIT_PARAMS, mergeHits, STRICT_HIT_PARAMS, newHitScanStats, sliceTrack, type BallDetection, type BallHit, type BallTrackPoint, type BallTrackStats } from "./ball";
+import { buildBallTrack, detectBounces, detectHits, STRICT_HIT_PARAMS, newHitScanStats, type BallDetection, type BallHit, type BallTrackPoint, type BallTrackStats } from "./ball";
 import { classifyRally, courtFrameFor, sideOf as courtSideOf, type Shot } from "./shots";
 import type { AnalysisStage } from "@/lib/db/types";
 import { StageTimer } from "@/lib/analysis/stage-timer";
 import { SWING_WINDOW_S, measureSwing } from "./swing";
-import { extendRalliesWhileLive, keepAliveEnabled } from "./rally-keepalive";
-import { applyBounceRule, applyDoubleBounceRule, bounceRuleEnabled, classifyBetween } from "./ball-exchange";
 import { ballGatePolygonPx, calibrationFromSetup, courtForeshorteningAt, isPlausibleCourtQuad, playerGatePolygonPx, pointInPolygon, transformToCourtCoordinates } from "./court";
-import { clusterRalliesFromHits, HIT_CLUSTER_PARAMS, type ClusteredRally } from "./rallies";
-import { detectNetCrossings, netLineImagePx, netRalliesEnabled, segmentNetCrossings, sideOfNet, type NetBand, type NetCrossing } from "./rallies-net";
-import { clusterRalliesFromContacts, contactRalliesEnabled } from "./rallies-contact";
+import type { ClusteredRally } from "./rallies";
+import { netBandImagePx, netLineImagePx, type NetBand, type NetCrossing } from "./rallies-net";
 import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
-import { rallySegEnabled, segmentRalliesViaRallySeg } from "./rally-seg";
+import { makeCvProxy } from "@/lib/video/ffmpeg";
+import path from "node:path";
 import { describeError } from "@/lib/analysis/describe-error";
 import { detectCourtViaRallySeg, rallySegCourtEnabled } from "./court-rally-seg";
 import {
-  matchTracksToSetup, setupCourtForRallySeg, rallySegOverridesForSetup,
+  matchTracksToSetup, rallySegOverridesForSetup,
   type PreAnalysisSetup,
 } from "@/lib/db/setup";
 import type {
@@ -482,14 +480,13 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // shots, honestly, rather than a guessed boundary from something else.
   let ballTrack: VisionPipelineOutput["ballTrack"] = { points: [], stats: null, diagnostics: {}, rawDetections: [] };
   let shots: Shot[] = [];
-  let netCrossings: NetCrossing[] = [];
-  // Only rally_seg reports why a rally ended. Keyed by rally idx so the others
-  // simply have no entry — absent, rather than a made-up reason.
-  const rallyEndReasons = new Map<number, string>();
+  // Always empty now: crossings were rally evidence and nothing computes them.
+  // Kept as a field so the overlay renderer's shape does not have to change.
+  const netCrossings: NetCrossing[] = [];
   let netLinePx: [[number, number], [number, number]] | null = null;
   let netBandPx: NetBand | null = null;
-  let deadBallCount = 0;
-  let contactRalliesWon = false;
+  // Always 0: dead balls were counted by the segmenters that are gone.
+  const deadBallCount = 0;
   let ballGatePx: Array<[number, number]> | null = null;
   // Hoisted so the overlay, which is rendered at the very end from the values
   // the run actually used, can draw what the paddle model and the audio gate
@@ -516,11 +513,27 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
       // approved after seeing it roughly doubled worst-clip rally F1 in
       // testing (0.167 -> 0.348 across the 3 labeled clips).
       stage("ball", `detecting the ball across the full ${input.videoDurationSeconds.toFixed(0)}s clip — first run downloads the model…`);
+      // Read a downscaled copy rather than the original where that is
+      // cheaper. Returns null -- and costs nothing -- when the source is
+      // already at or below the target, which is the common case for phone
+      // footage at 720p. See makeCvProxy for why this is conditional.
+      // No temp dir means nowhere to put the proxy, so read the original --
+      // the same path taken when the source is already small enough.
+      const ballProxy = input.tempDir
+        ? await makeCvProxy(
+            input.videoPath,
+            path.join(input.tempDir, "cv-proxy.mp4"),
+            { sourceWidth: input.frameWidthPx }
+          )
+        : null;
+      if (ballProxy) {
+        log(`ball: reading a ${1280}px-wide proxy instead of the ${input.frameWidthPx}px original`);
+      }
       // Tag detection failures so the catch below can tell them apart from a
       // failure in hit-scanning or shot classification. Blaming a full,
       // healthy ball track on "ball detection failed" sends every future
       // investigation to the wrong place -- which is exactly what happened.
-      const raw = await detectBallViaPython(input.videoPath, [[0, input.videoDurationSeconds]])
+      const raw = await detectBallViaPython(ballProxy ?? input.videoPath, [[0, input.videoDurationSeconds]])
         .catch((err) => { (err as { stage?: string }).stage = "detection"; throw err; });
       // Drop balls belonging to other courts BEFORE the track is built.
       // Filtering afterwards cannot help: the tracker has already chosen
@@ -590,7 +603,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
 
       stage("contacts", "finding ball contacts");
       const hitStats = newHitScanStats();
-      let allHitsWide = detectHits(built.points, tracks, overheadAt, hitStats,
+      const allHitsWide = detectHits(built.points, tracks, overheadAt, hitStats,
         STRICT_HIT_PARAMS, foreshorteningAt);
       // Zero hits is a common and previously silent outcome, and every cause
       // needs a different fix: too few observed points, every candidate too
@@ -619,355 +632,39 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
       //
       // Both are in git if the trade turns out badly.
 
-      // Two ways to draw the boundaries. Hit clustering groups contacts by the
-      // gaps between them; rally_seg reads the ball's physics and ends a rally
-      // on evidence the point is actually over (a bounce outside the lines, a
-      // ball dying in the net, a double bounce). rally_seg is opt-in via
-      // RALLY_SEGMENTER and falls back here on any failure, so an analysis run
-      // can never be taken down by it.
-      let rallies = clusterRalliesFromHits(allHitsWide.map((h) => h.t), input.videoDurationSeconds, HIT_CLUSTER_PARAMS);
-      let rallySource = `${allHitsWide.length} ball hits`;
-
-      // Contacts first: a rally is the ball being hit by both sides.
+      // RALLY BOUNDARIES ARE GEMINI'S. Everything that used to live here --
+      // hit clustering, contact clustering, net-crossing segmentation,
+      // rally_seg, keep-alive extension and the two bounce rules -- has been
+      // removed, and this is the whole of what replaced it.
       //
-      // A contact is attributed to whichever tracked player was nearest, and
-      // the players are tracked on the ground plane where the court geometry
-      // is exact. That is the advantage over crossings: deciding which side of
-      // the net a ball in FLIGHT is on is undecidable inside the net band from
-      // this camera -- the tape is ~73px tall in the image while the entire
-      // far court is ~44px -- whereas a player standing on the court is not
-      // ambiguous at all.
-      const sideOfHit = (h: BallHit): "near" | "far" | null => {
-        if (!h.playerId) return null;
-        const tr = tracks.find((t) => t.playerId === h.playerId);
-        if (!tr) return null;
-        let best: PlayerTrack["points"][number] | null = null;
-        let bestDt = 0.4;
-        for (const p of tr.points) {
-          const dt = Math.abs(p.timestampSeconds - h.t);
-          if (dt < bestDt) { bestDt = dt; best = p; }
-        }
-        return best ? sideOf(best.boxImageNorm) : null;
-      };
-
-      if (contactRalliesEnabled()) {
-        // Two passes, because contacts and rally windows define each other.
-        //
-        // The strict scan has to survive a whole clip of dead time, so it is
-        // sceptical and misses real contacts on a sparse track. The permissive
-        // scan is only safe INSIDE a rally, where the ball is in play by
-        // definition -- but knowing where the rallies are is what we are
-        // trying to work out. So: cluster once on the strict contacts to get
-        // provisional windows, rescan inside those, then cluster again on the
-        // fuller set. The second clustering is the one that counts.
-        const provisional = clusterRalliesFromContacts(
-          allHitsWide, sideOfHit, input.videoDurationSeconds
-        ).rallies;
-        if (provisional.length > 0) {
-          const before = allHitsWide.length;
-          const inRallyStats = newHitScanStats();
-          let found: BallHit[] = [];
-          for (const r of provisional) {
-            const seg = sliceTrack(built.points, r.startS, r.endS);
-            if (seg.length < 5) continue;
-            found = found.concat(
-              detectHits(seg, tracks, overheadAt, inRallyStats, IN_RALLY_HIT_PARAMS, foreshorteningAt)
-            );
-          }
-          allHitsWide = mergeHits(allHitsWide, found, IN_RALLY_HIT_PARAMS.minSpacingS);
-          log(`  contacts: ${before} strict → ${allHitsWide.length} after rescanning `
-            + `${provisional.length} provisional rall${provisional.length === 1 ? "y" : "ies"}`);
-        }
-
-        const { rallies: contactRallies, dead } = clusterRalliesFromContacts(
-          allHitsWide, sideOfHit, input.videoDurationSeconds
-        );
-        log(`contacts → rallies: ${allHitsWide.length} contacts → ${contactRallies.length} rall`
-          + `${contactRallies.length === 1 ? "y" : "ies"}`
-          + (contactRallies.length
-            ? ` (${contactRallies.map((r) => `${r.startS.toFixed(0)}-${r.endS.toFixed(0)}s ${r.nearContacts}n/${r.farContacts}f`).join(", ")})`
-            : ""));
-        if (dead.length > 0) {
-          // Not rallies, but each was a point: a serve into the net, a ball
-          // nobody returned. Worth naming rather than silently dropping.
-          const oneSide = dead.filter((d) => d.reason === "one-side-only");
-          if (oneSide.length) {
-            log(`  ${oneSide.length} group(s) hit by one side only — no return `
-              + `(${oneSide.map((d) => `${d.startS.toFixed(0)}s`).join(", ")})`);
-          }
-          deadBallCount = dead.length;
-        }
-        if (contactRallies.length > 0) {
-          rallies = contactRallies;
-          contactRalliesWon = true;
-          rallySource = `${allHitsWide.length} paddle contacts, both sides`;
-        }
-      }
-
-      // Net crossings as the fallback: a rally is the ball going over and coming back,
-      // which is the rule rather than a statistic about it. The two segmenters
-      // below infer boundaries from contact timing or ball physics; this one
-      // reads the definition directly, and is the only one that will not call
-      // a player bouncing the ball on the floor a rally.
-      if (!contactRalliesWon && netRalliesEnabled()) {
-        const { crossings, net, band } = detectNetCrossings(
-          built.points, courtCalibration, input.frameWidthPx, input.frameHeightPx
-        );
-        netCrossings = crossings;
-        netLinePx = net;
-        netBandPx = band;
-        if (!net) {
-          log("net crossings: no usable court, so the net line is unknown — falling back");
-          knownLimitations.push(
-            "Rally boundaries could not be read from net crossings because the court was not calibrated. "
-            + "Mark the four corners in setup for the most reliable boundaries."
-          );
-        } else {
-          const { rallies: netRallies, deadBalls } = segmentNetCrossings(crossings, input.videoDurationSeconds);
-          if (deadBalls.length > 0) {
-            // Not rallies, but not nothing: a ball that crossed once and never
-            // came back is a point conceded. Recorded as events so the coaching
-            // layer can say "three serves into the net" -- a fact no rally
-            // count contains.
-            log(`  ${deadBalls.length} one-way crossing(s) — ball over and never returned `
-              + `(${deadBalls.map((d) => `${d.t.toFixed(0)}s`).join(", ")})`);
-            // Deliberately NOT pushed as unknown_shot events. facts.ts
-            // re-derives rallies by clustering those, so a dead ball added
-            // there would manufacture a rally out of the very thing that is
-            // not one. They travel as their own count instead.
-            deadBallCount = deadBalls.length;
-          }
-          log(`net crossings: ${crossings.length} confirmed → ${netRallies.length} rall${netRallies.length === 1 ? "y" : "ies"}`
-            + (netRallies.length ? ` (${netRallies.map((r) => `${r.startS.toFixed(0)}-${r.endS.toFixed(0)}s×${r.crossings}`).join(", ")})` : ""));
-          if (netRallies.length > 0) {
-            rallies = netRallies;
-            rallySource = `${crossings.length} net crossings`;
-
-            // Same two-pass rescan as the contact segmenter, since this path
-            // only runs when that one found nothing at all.
-            const before = allHitsWide.length;
-            let found: BallHit[] = [];
-            for (const r of netRallies) {
-              const seg = sliceTrack(built.points, r.startS, r.endS);
-              if (seg.length < 5) continue;
-              found = found.concat(
-                detectHits(seg, tracks, overheadAt, newHitScanStats(), IN_RALLY_HIT_PARAMS, foreshorteningAt)
-              );
-            }
-            allHitsWide = mergeHits(allHitsWide, found, IN_RALLY_HIT_PARAMS.minSpacingS);
-            const inferred = inferHitsBetweenCrossings(
-              built.points, crossings.map((c) => c.t), allHitsWide, IN_RALLY_HIT_PARAMS.minSpacingS
-            );
-            allHitsWide = mergeHits(allHitsWide, inferred, IN_RALLY_HIT_PARAMS.minSpacingS);
-            log(`  contacts: ${before} strict → ${allHitsWide.length}`);
-          } else if (crossings.length > 0) {
-            // Crossings but no rally means every run was a single crossing --
-            // a serve into the net, a feed, a ball knocked to the next court.
-            log("  every crossing was one-way; nothing went over and came back");
-          }
-        }
-      }
-
-      if (rallies.length === 0 && rallySegEnabled()) {
-        log("rally boundaries: trying rally_seg…");
-        const seg = await segmentRalliesViaRallySeg({
-          videoPath: input.videoPath,
-          durationSeconds: input.videoDurationSeconds,
-          frameWidthPx: input.frameWidthPx,
-          frameHeightPx: input.frameHeightPx,
-          detections: raw.detections,
-          fps: raw.sourceFps || raw.fps,
-          framesProcessed: raw.framesProcessed,
-          calibration: courtCalibration,
-          debugId: input.debugId,
-          courtOverride: setupCourtForRallySeg(input.setup ?? null),
-          configOverrides: rallySegOverridesForSetup(input.setup ?? null),
-          onLog: (line) => log(`  rally_seg: ${line}`),
-        });
-        if (seg && seg.rallies.length > 0) {
-          rallies = seg.rallies;
-          rallySource = "rally_seg (ball trajectory)";
-          for (const w of seg.warnings) knownLimitations.push(`rally_seg: ${w}`);
-          const lowConfidence = seg.detail.filter((d) => d.confidence < 0.5);
-          if (lowConfidence.length > 0) {
-            knownLimitations.push(
-              `${lowConfidence.length} of ${seg.detail.length} rally boundaries are low-confidence ` +
-              `(${lowConfidence.map((d) => `#${d.idx + 1}`).join(", ")}) — worth checking before trusting those clips.`
-            );
-          }
-          for (const d of seg.detail) rallyEndReasons.set(d.idx, d.endReason);
-          log(`  rally_seg endings: ${seg.detail.map((d) => d.endReason).join(", ")}`);
-          if (seg.debugVideoUrl) log(`  annotated video: http://localhost:3000${seg.debugVideoUrl}`);
-        } else {
-          log("  rally_seg produced nothing usable — using hit clustering");
-        }
-      }
-
-      // Keep-alive: crossings decided where each rally BEGAN; alternating
-      // contacts decide how long it lasted. Runs after every segmenter has
-      // resolved, so it extends whichever one won rather than competing with
-      // them, and it can only ever lengthen a rally — never create, shorten or
-      // merge one.
-      // Captured BEFORE keep-alive so each rally can report how much it was
-      // extended, rather than only a clip-wide total.
-      const endsBeforeKeepAlive = new Map(rallies.map((r) => [r.idx, r.endS]));
-
-      if (keepAliveEnabled() && rallies.length > 0) {
-        const kaContacts = allHitsWide.map((h) => ({ t: h.t, side: sideOfHit(h) }));
-        const ka = extendRalliesWhileLive(rallies, kaContacts, input.videoDurationSeconds);
-        if (ka.extended > 0) {
-          const longest = Math.max(...ka.rallies.map((r, i) => r.endS - rallies[i].endS));
-          log(`keep-alive: ${ka.extended} of ${rallies.length} rallies held open through `
-            + `continued back-and-forth (+${ka.addedSeconds}s total, longest +${longest.toFixed(1)}s)`);
-          rallies = ka.rallies;
-        } else {
-          log("keep-alive: no rally had alternating contacts after its last net crossing");
-        }
-      }
-
-      // Ky's rule: contacts from both sides with the ball changing trajectory
-      // across the net means a rally is going on; the ball bouncing up and
-      // down on ONE side means the rally is over and somebody is just bouncing
-      // it. Every segmenter above answers the first half from where the
-      // STRIKER stood, which a player bouncing a ball at the net can fool --
-      // the nearest player to alternate contacts can be their opponent
-      // standing a few feet away. This asks the ball instead, and only ever
-      // shortens or removes a rally. See ball-exchange.ts for why the bounce
-      // verdict cannot fire on a kitchen dink.
-      const netForBounce = netLinePx
+      // WHY, given net crossings measured 6/6 on ky-720p. Because it was never
+      // only a segmenter: run-coaching.ts refused to call Gemini at all when
+      // the local pass found zero rallies, so a bad court fit or a sparse ball
+      // track silently produced "not enough movement data" instead of asking
+      // the component that is better at this. Gemini found 7/7 auditing the
+      // overlay and caught two real segmenter bugs that Ky then confirmed by
+      // watching the footage: a rally ended at 29s when play ran to 33.5s, and
+      // keep-alive holding rally 6 open 3.2s past a finished point. A fallback
+      // that gates the thing it is a fallback FOR is not a safety net.
+      //
+      // The net LINE AND BAND are both still computed, because both are pure
+      // court geometry rather than rally evidence, and the overlay legend --
+      // which IS the prompt -- tells Gemini what the band means: a ball inside
+      // it cannot be assigned to a side, because from behind a baseline the
+      // net stands between the camera and the far court. That ambiguity is
+      // real and Gemini should see it marked.
+      //
+      // CROSSINGS are not computed. Those are rally evidence, and drawing them
+      // would hand Gemini the answer to the question it is being asked, which
+      // is the mistake --hide-rallies exists to prevent.
+      netBandPx = netBandImagePx(courtCalibration, input.frameWidthPx, input.frameHeightPx);
+      netLinePx = netBandPx?.base
         ?? netLineImagePx(courtCalibration, input.frameWidthPx, input.frameHeightPx);
-      if (bounceRuleEnabled() && rallies.length > 0 && netForBounce) {
-        const netDistance = (pt: { x: number; y: number }) =>
-          sideOfNet(pt, netForBounce, input.frameWidthPx, input.frameHeightPx);
-        const classify = (a: number, b: number) =>
-          classifyBetween(built.points, a, b, netDistance);
-        // Contacts come from the hit list rather than rally.contacts, because
-        // the net-crossing segmenter does not populate that field and the rule
-        // has to work whichever segmenter won.
-        const shadow = rallies.map((r) => ({
-          idx: r.idx,
-          startS: r.startS,
-          endS: r.endS,
-          contacts: allHitsWide.filter((h) => h.t >= r.startS && h.t <= r.endS).map((h) => h.t),
-        }));
-        // The double bounce first, because it is the RULE and not an
-        // inference: a ball that lands twice on one side with nobody hitting
-        // it in between has ended the point, whatever anything else suggests.
-        const contactTimes = allHitsWide.map((h) => h.t);
-        const { rallies: afterDouble, stats: dbStats } = applyDoubleBounceRule(
-          shadow,
-          (a, b) => detectBounces(sliceTrack(built.points, a, b), contactTimes),
-          contactTimes,
-          netDistance,
-          HIT_CLUSTER_PARAMS.tailS
-        );
-        if (dbStats.ended > 0) {
-          log(`double-bounce rule: ${dbStats.ended} rall${dbStats.ended === 1 ? "y" : "ies"} ended `
-            + `where the ball bounced twice on one side (-${dbStats.trimmedSeconds}s)`);
-        }
 
-        const { rallies: kept, stats: bounceStats } = applyBounceRule(
-          afterDouble, classify, HIT_CLUSTER_PARAMS.tailS
-        );
-        if (dbStats.ended > 0 || bounceStats.dropped > 0 || bounceStats.trimmed > 0) {
-          const endById = new Map(kept.map((r) => [r.idx, r.endS]));
-          // Which rallies these rules actually changed, so each can say why it
-          // ended rather than the clip carrying one anonymous total.
-          const endedByDoubleBounce = new Set(
-            afterDouble.filter((r) => r.endS < (shadow.find((sh) => sh.idx === r.idx)?.endS ?? Infinity) - 1e-6)
-              .map((r) => r.idx)
-          );
-          const trimmedByBouncing = new Set(
-            kept.filter((r) => {
-              const prior = afterDouble.find((a) => a.idx === r.idx)?.endS ?? Infinity;
-              return r.endS < prior - 1e-6;
-            }).map((r) => r.idx)
-          );
-          const priorReasons = new Map(rallies.map((r) => [r.idx, rallyEndReasons.get(r.idx)]));
-          const survivors = rallies.filter((r) => endById.has(r.idx));
-          // Re-key the end reasons onto the new numbering FIRST: renumbering
-          // without this would quietly attach each rally's reason to a
-          // different rally.
-          rallyEndReasons.clear();
-          survivors.forEach((r, i) => {
-            const reason = endedByDoubleBounce.has(r.idx)
-              ? "the ball bounced twice on one side"
-              : trimmedByBouncing.has(r.idx)
-                ? "the ball stopped crossing the net"
-                : priorReasons.get(r.idx);
-            if (reason) rallyEndReasons.set(i + 1, reason);
-          });
-          // Renumbered so idx stays 1..n: analysis_shots.rally_idx joins on
-          // it, and a gap would point shots at a rally that is not there.
-          rallies = survivors.map((r, i) => ({ ...r, idx: i + 1, endS: endById.get(r.idx)! }));
-          if (bounceStats.dropped > 0 || bounceStats.trimmed > 0) {
-            log(`ball-bounce rule: ${bounceStats.dropped} group(s) dropped as one-side bouncing, `
-              + `${bounceStats.trimmed} rall${bounceStats.trimmed === 1 ? "y" : "ies"} cut back to the `
-              + `last exchange (-${bounceStats.trimmedSeconds}s)`);
-          }
-          if (bounceStats.dropped > 0) {
-            knownLimitations.push(
-              `${bounceStats.dropped} contact group(s) were not counted as rallies: the ball stayed on `
-              + `one side of the net and bounced rather than being exchanged.`
-            );
-          }
-        } else {
-          log("ball-bounce rules: no double bounce and no one-side bouncing found");
-        }
-      } else if (bounceRuleEnabled() && rallies.length > 0) {
-        log("ball-bounce rule: skipped — the net line is unknown without a calibrated court");
-      }
-
-      stage("rallies", `segmenting rallies from ${rallySource}`);
-      ralliesUsed = rallies;
-
-      // Everything the frontend needs to describe a rally WITHOUT the coaching
-      // pass having run: where it is, which segmenter drew it, why it ended,
-      // and who hit what inside it.
-      const rallySourceKind: AnalysisRallyOutput["source"] =
-        rallySource.includes("net crossing") ? "net-crossings"
-        : rallySource.includes("rally_seg") ? "rally_seg"
-        : rallySource.includes("paddle contacts") ? "contacts"
-        : rallySource.includes("ball hits") ? "hit-clustering"
-        : "unknown";
-
-      rallyOutput = rallies.map((r) => {
-        const before = endsBeforeKeepAlive.get(r.idx);
-        const inWindow = allHitsWide.filter((h) => h.t >= r.startS && h.t <= r.endS);
-        return {
-          idx: r.idx,
-          startS: Math.round(r.startS * 1000) / 1000,
-          endS: Math.round(r.endS * 1000) / 1000,
-          source: rallySourceKind,
-          // Only rally_seg reports a reason today; the others genuinely do not
-          // know one, and null says so rather than inventing "ended".
-          endReason: rallyEndReasons.get(r.idx) ?? null,
-          contactCount: inWindow.length,
-          crossingCount: netCrossings.length
-            ? netCrossings.filter((c) => c.t >= r.startS && c.t <= r.endS).length
-            : null,
-          extendedSeconds: before === undefined
-            ? 0
-            : Math.round(Math.max(0, r.endS - before) * 100) / 100,
-          contacts: inWindow.map((h) => {
-            const side = sideOfHit(h);
-            return {
-              t_s: Math.round(h.t * 1000) / 1000,
-              // "near"/"far" is a court side; "self"/"opponent" is what the UI
-              // needs, and only the tagged self track can decide it.
-              side: (side === null || !selfPlayerId
-                ? "unknown"
-                : h.playerId === selfPlayerId ? "self" : "opponent") as "self" | "opponent" | "unknown",
-              confidence: Math.round(h.confidence * 100) / 100,
-            };
-          }),
-        };
-      });
-
-      if (rallies.length === 0) {
-        knownLimitations.push("No ball hits were detected sharply enough to identify any rallies — shot types were not classified.");
-      }
-      log(`segmented ${rallies.length} rallies from ${rallySource}`);
+      stage("rallies", "leaving rally boundaries to the coaching pass");
+      ralliesUsed = [];
+      rallyOutput = [];
+      log("rallies: not segmented here — Gemini draws them from the overlay");
 
       // A swing lasts about a third of a second. At VISION_FPS (5) that is one
       // or two frames, so the pose data physically cannot contain a swing --
@@ -1029,31 +726,37 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
         );
       }
 
-      stage("shots", "classifying shots");
-      const allHits: BallHit[] = [];
-      for (const r of rallies) {
-        const pts = sliceTrack(built.points, r.startS - 0.3, r.endS + 0.3);
-
-        // Use the contacts already found, not a fresh strict scan.
-        //
-        // This used to re-run detectHits per rally, which threw away every
-        // contact the in-rally rescan and the crossing inference had added --
-        // the whole point of finding them. Measured: 35 contacts became 11
-        // shots, because the classifier never saw 24 of them.
-        //
-        // The original reason for re-detecting was edge-of-array context, and
-        // that reason is gone: the windows are time-bounded now (neighbourAt),
-        // so a hit near a slice boundary is judged by its neighbours in time
-        // rather than by its index. Falling back to a local scan only when the
-        // global one found nothing in this window keeps the old behaviour
-        // available where it still helps.
-        let hits = allHitsWide.filter((h) => h.t >= r.startS - 0.3 && h.t <= r.endS + 0.3);
-        if (hits.length === 0) hits = detectHits(pts, tracks, overheadAt, undefined, STRICT_HIT_PARAMS, foreshorteningAt);
-
-        const bounces = detectBounces(pts, hits.map((h) => h.t));
-        allHits.push(...hits);
-        shots.push(...classifyRally({ rallyIdx: r.idx, startS: r.startS, endS: r.endS, hits, bounces, ballPoints: pts }, ctx));
+      // MEASUREMENT IS OURS; INTERPRETATION IS GEMINI'S.
+      //
+      // One pass over the whole clip rather than one per rally, because there
+      // are no rallies here any more. classifyRally still earns its place: it
+      // computes where the hitter stood, where the ball landed, the zones,
+      // approximate speed, arc, and whether the ball bounced first. All of
+      // that is measurement.
+      //
+      // What it ALSO produces is a shot type, and that is not ours under Ky's
+      // split -- so type, category and outcome are cleared below rather than
+      // shipped as though this system still decided them. analyst-facts.ts
+      // already withholds shot types from the prompt, so Gemini was never
+      // biased by them; but analysis_shots feeds the UI directly, and a
+      // "third_shot_drop" sitting there would be this system asserting
+      // something it no longer works out.
+      stage("shots", "measuring each contact");
+      const allHits: BallHit[] = allHitsWide;
+      if (allHits.length > 0) {
+        const pts = built.points;
+        const bounces = detectBounces(pts, allHits.map((h) => h.t));
+        shots.push(...classifyRally(
+          { rallyIdx: 0, startS: 0, endS: input.videoDurationSeconds, hits: allHits, bounces, ballPoints: pts },
+          ctx
+        ));
+        for (const sh of shots) {
+          sh.type = "unknown";
+          sh.category = "unknown";
+          sh.outcome = "unknown";
+        }
       }
+
 
       // Mechanics belong to the SHOT, and are measured here rather than in the
       // coaching layer for two reasons: the pose bursts and the shots both
@@ -1082,7 +785,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
       log(`mechanics: measured on ${measured} of ${shots.length} shots`
         + `${shots.length ? ` (${Math.round((measured / shots.length) * 100)}%)` : ""}`);
 
-      log(`  ${allHits.length} contact(s) inside rallies went to shot classification`);
+      log(`  ${allHits.length} contact(s) measured; shot types are left to the coaching pass`);
       events.push(...hitsToUnknownShotEvents(allHits));
     } catch (err) {
       if (err instanceof BallModelNotConfiguredError) {

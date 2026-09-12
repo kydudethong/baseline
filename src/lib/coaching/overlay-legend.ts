@@ -29,8 +29,9 @@ the overlay is a claim about it, and it is sometimes wrong.
 - **Magenta band labelled NET** — the net as a surface, not a line: a base on
   the ground, the tape above it with its real sag, and a shaded face between.
   A ball inside this band **cannot be assigned to a side** — from behind a
-  baseline the net stands between the camera and the far court — so the band
-  is exactly where the crossing test declines to guess.
+  baseline the net stands between the camera and the far court. The band marks
+  exactly where side-of-net is undecidable from the image, so treat a ball
+  inside it as genuinely ambiguous rather than guessing.
 
 ## Ball
 
@@ -39,10 +40,9 @@ the overlay is a claim about it, and it is sometimes wrong.
 - **Amber circle, HOLLOW** — interpolated. The detector did **not** see the
   ball; the position is inferred between two real observations. Treat a hollow
   circle as a guess, and do not build a claim about ball position on one.
-- **Magenta banner across the top: "BALL CROSSED NET → far / near"** — a
-  confirmed crossing, flashed for a third of a second. Not drawn in every
-  render: where you are being asked to judge rallies yourself, crossings are
-  withheld too, because they are the evidence a rally is built from.
+- **Net crossings are never marked.** Nothing in this pipeline decides where
+  the ball changed sides any more — that judgement is yours, from the footage
+  and the ball path. Their absence carries no information at all.
 
 ## Players
 
@@ -69,10 +69,10 @@ tell, say you cannot tell.
 ## The clock, and what is NOT drawn
 
 - **Bottom bar** — the timestamp, \`t=…s\`.
-- Some renders also carry a rally banner and a timeline strip. **If you have
-  been asked where the rallies are, they are not drawn** — the bar shows only
-  the clock, and you are being asked to judge it yourself. An absent banner
-  means "not shown", never "no rally is happening".
+- **There is no rally banner and no timeline strip.** Rally boundaries are not
+  drawn because nothing upstream computes them: you are the only thing in this
+  system that decides where a rally starts and ends. The bar shows the clock
+  and nothing else.
 - Contacts are not marked on the video either. Where a list of contact
   timestamps is supplied alongside, those are measured moments the ball
   visibly changed direction against a player.

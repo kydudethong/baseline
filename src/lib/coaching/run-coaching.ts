@@ -129,32 +129,24 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   };
   await pruneStale();
 
-  if (facts.rallies.length === 0) {
-    // Still record an honest result rather than leaving the UI with
-    // nothing to show — "we tried and there wasn't enough data" is itself
-    // useful information, not a failure to hide.
-    const { error } = await supabase.from("coaching_reads").upsert(
-      {
-        analysis_id: analysisId,
-        model: null,
-        headline: "Not enough movement data to build a coaching read",
-        summary:
-          "No rally could be segmented from this clip's player movement — either the players weren't " +
-          "moving enough to look like real points, or too little of the clip could be tracked.",
-        quality: { usable: false, issues: facts.known_limitations },
-        coaching_json: null,
-        facts_json: JSON.stringify(facts),
-      },
-      { onConflict: "analysis_id" }
-    );
-    if (error) throw error;
-    // The observations belong to the read that is being replaced, so they go
-    // with it -- otherwise this headline sits above the previous run's list.
-    const { data: prior } = await supabase
-      .from("coaching_reads").select("id").eq("analysis_id", analysisId).maybeSingle();
-    if (prior?.id) await supabase.from("coaching_observations").delete().eq("read_id", prior.id);
-    return;
-  }
+  // NO RALLY GATE HERE ANY MORE, and its removal is the point of the change.
+  //
+  // This used to read `if (facts.rallies.length === 0) return` with a stored
+  // headline of "Not enough movement data to build a coaching read" -- so when
+  // the local segmenter found nothing, Gemini was never asked. That inverted
+  // the architecture: the component that is WORSE at finding rallies (it
+  // missed boundaries Gemini caught, twice confirmed against the footage) got
+  // to veto the one that is better, on exactly the clips where it had already
+  // failed. A bad court fit or a sparse ball track produced silence instead of
+  // an answer.
+  //
+  // Nothing local segments rallies now, so facts.rallies is always empty and
+  // this gate would reject every clip. Gemini reads boundaries off the overlay
+  // and the contact list; if there is genuinely nothing to see it says so
+  // itself, which is a better answer than ours and arrives the same way.
+  //
+  // The message was also wrong on its own terms: it blamed "player movement",
+  // which stopped being the rally signal long before this.
 
   const allDrills: CoachingDrillRow[] = await getAllDrills(supabase);
   const validSlugs = new Set(allDrills.map((d: CoachingDrillRow) => d.slug));
