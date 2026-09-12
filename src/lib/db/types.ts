@@ -650,9 +650,54 @@ export type CoachingChatMessageUpdate = Partial<CoachingChatMessageInsert>;
  * use embedded-resource typing here — query results are cast explicitly in
  * src/lib/db/analyses.ts instead.
  */
+/**
+ * One shot, looked at closely.
+ *
+ * Written by the coaching pass's SECOND Gemini call, which re-watches a short
+ * window around each shot at 15fps -- the first pass sees 1 frame per second
+ * and a stroke lasts about a third of one, so it cannot see a swing at all.
+ * See supabase/migrations/0013_shot_technique.sql.
+ */
+/*
+ * A `type`, not an `interface`, and that is load-bearing rather than style.
+ * Supabase's GenericTable requires Row to satisfy Record<string, unknown>. A
+ * type alias gets an implicit index signature and satisfies it; an interface
+ * does not. One table that fails stops the whole Database from matching
+ * GenericSchema, at which point EVERY table in every file silently resolves to
+ * `never` and hundreds of unrelated lines start failing. Every other Row here
+ * is a type alias for the same reason.
+ */
+export type CoachingShotTechniqueRow = {
+  id: string;
+  analysis_id: string;
+  t_s: number;
+  striker_court: string | null;
+  /** False is a real answer: the window held no stroke (between points, ball retrieval). */
+  stroke_visible: boolean;
+  paddle_face: string | null;
+  contact_height: string | null;
+  correction: string | null;
+  confidence: string | null;
+  /** The exact window judged — and therefore the exact window to play back. */
+  clip_start_s: number;
+  clip_end_s: number;
+  created_at: string;
+}
+
+export type CoachingShotTechniqueInsert = Omit<CoachingShotTechniqueRow, "id" | "created_at"> & {
+  id?: string;
+  created_at?: string;
+};
+
 export type Database = {
   public: {
     Tables: {
+      coaching_shot_technique: {
+        Row: CoachingShotTechniqueRow;
+        Insert: CoachingShotTechniqueInsert;
+        Update: Partial<CoachingShotTechniqueInsert>;
+        Relationships: [];
+      };
       profiles: {
         Row: ProfileRow;
         Insert: ProfileInsert;

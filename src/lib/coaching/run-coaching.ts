@@ -18,6 +18,10 @@
 // can only be set once the player has told the app "which one is you" —
 // see src/app/api/analyses/[id]/coach/route.ts.
 
+import fsp from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   AnalysisEventRow,
@@ -33,6 +37,9 @@ import type {
 import { buildCoachingFacts } from "./facts";
 import { buildAnalystInput } from "./analyst-facts";
 import { runAnalyst } from "./analyst";
+import { readShotTechnique } from "./technique";
+import { uploadVideo, deleteFile } from "./gemini";
+import { downloadToFile } from "@/lib/storage/r2";
 import { readOverlayBytes, OverlayMissingError } from "./overlay-source";
 import { OVERLAY_LEGEND } from "./overlay-legend";
 import { getAllDrills } from "./drills";
@@ -65,7 +72,9 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     .eq("user_id", userId)
     .maybeSingle();
   if (analysisError) throw analysisError;
-  const analysis = analysisData as (AnalysisRow & { video: { duration_seconds: number | null } | null }) | null;
+  const analysis = analysisData as (AnalysisRow & {
+    video: { duration_seconds: number | null; storage_path: string | null } | null;
+  }) | null;
   if (!analysis) throw new CoachingPipelineError("Analysis not found");
   if (analysis.status !== "completed") {
     throw new CoachingPipelineError("The CV pipeline hasn't finished for this analysis yet.");
@@ -201,6 +210,69 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   }
 
 
+
+  // PASS TWO: look closely at each shot.
+  //
+  // Pass one watched the OVERLAY at 1fps, which finds rallies and shots and
+  // cannot see a swing -- a stroke is a third of a second, so at 1fps it falls
+  // between two frames. This re-watches one short window per shot at 15fps.
+  //
+  // The SOURCE video, not the overlay: technique is read off the body, and the
+  // overlay draws boxes and a skeleton over exactly the thing being judged.
+  //
+  // Failing here never fails the coaching read. The prose, rallies, ratings
+  // and drills are already in hand; technique is an addition, and an addition
+  // that takes the whole analysis down with it is a bad trade.
+  try {
+    const storagePath = analysis.video?.storage_path ?? null;
+    const durationSeconds = Number(analysis.video?.duration_seconds ?? 0);
+    const shotsWithTime = out.shots.filter((sh) => Number.isFinite(sh.t));
+    if (storagePath && durationSeconds > 0 && shotsWithTime.length > 0) {
+      const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "pb-technique-"));
+      const local = path.join(dir, "source.mp4");
+      try {
+        await downloadToFile(storagePath, local);
+        const bytes = await fsp.readFile(local);
+        const file = await uploadVideo(bytes, `${analysisId}-source.mp4`);
+        try {
+          const { technique } = await readShotTechnique({
+            model,
+            file,
+            durationSeconds,
+            shots: shotsWithTime.map((sh) => ({ t: sh.t, player: sh.player })),
+            onLog: (l) => console.error(`[coaching] ${l}`),
+          });
+          if (technique.length > 0) {
+            // Replace rather than accumulate: a re-run of the same analysis
+            // must not leave the previous run's reads beside the new ones,
+            // indistinguishable from them.
+            await supabase.from("coaching_shot_technique").delete().eq("analysis_id", analysisId);
+            const { error } = await supabase.from("coaching_shot_technique").insert(
+              technique.map((t) => ({
+                analysis_id: analysisId,
+                t_s: t.tSeconds,
+                striker_court: t.strikerCourt,
+                stroke_visible: t.strokeVisible,
+                paddle_face: t.paddleFace,
+                contact_height: t.contactHeight,
+                correction: t.correction,
+                confidence: t.confidence,
+                clip_start_s: t.clipStartSeconds,
+                clip_end_s: t.clipEndSeconds,
+              }))
+            );
+            if (error) throw error;
+          }
+        } finally {
+          await deleteFile(file.name).catch(() => {});
+        }
+      } finally {
+        await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.warn(`[coaching] per-shot technique skipped: ${describeError(err)}`);
+  }
 
   // Rallies now come from the analyst, not the segmenter.
   const rallyRows = out.rallies.map((r) => ({

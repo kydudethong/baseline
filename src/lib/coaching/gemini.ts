@@ -213,7 +213,8 @@ export async function generateJSONFromText<T>(opts: {
 async function callGemini(
   model: string,
   body: Record<string, unknown>,
-  onLog?: (line: string) => void
+  onLog?: (line: string) => void,
+  onUsage?: (usage: UsageInfo) => void
 ): Promise<string> {
   let delay = 5000;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -224,7 +225,23 @@ async function callGemini(
     if (res.ok) {
       const json = (await res.json()) as {
         candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        usageMetadata?: {
+          promptTokenCount?: number;
+          candidatesTokenCount?: number;
+          thoughtsTokenCount?: number;
+        };
       };
+      // Reported because it is the ONLY way to confirm a video config was
+      // honoured. If fps is raised from 1 to 10 and promptTokenCount does not
+      // rise roughly tenfold, the API ignored the field -- which it does
+      // silently, with a perfectly normal-looking answer built from one frame
+      // per second. A plausible answer from the wrong frames is the failure
+      // mode this exists to catch.
+      onUsage?.({
+        promptTokens: json.usageMetadata?.promptTokenCount ?? null,
+        outputTokens: json.usageMetadata?.candidatesTokenCount ?? null,
+        thoughtsTokens: json.usageMetadata?.thoughtsTokenCount ?? null,
+      });
       const text = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
       if (!text) throw new GeminiError("Gemini returned no content — the response may have been truncated.");
       return text;
@@ -253,18 +270,78 @@ async function callGemini(
   throw new GeminiError("unreachable");
 }
 
+
+/**
+ * How much of the video Gemini looks at, and how closely.
+ *
+ * DEFAULTS ARE 1 FPS AND LOW RESOLUTION, which is what this client did
+ * implicitly before these existed. At that rate a pickleball swing -- about a
+ * third of a second from backswing to contact -- falls entirely between two
+ * sampled frames, so the model is not being cagey when it declines to comment
+ * on technique: it genuinely never saw the stroke.
+ *
+ * THE CONSTRAINT IS CONTEXT, NOT COST. At low resolution a frame is ~66 tokens
+ * and audio ~32/s, so 1fps is ~100 tokens per second of video and 10fps is
+ * ~690. A 20-minute game at 10fps is ~830k tokens, which barely fits a 1M
+ * window, and a 30-minute one does not fit at all. Raising fps over a whole
+ * match is therefore not an option; raising it over a ONE-SECOND window around
+ * a shot costs a few hundred tokens and shows the entire stroke. That is what
+ * startOffsetSeconds/endOffsetSeconds are for.
+ *
+ * Field names here are the REST spellings (snake_case, "10s" strings for
+ * offsets), which differ from the client SDKs' -- if the API starts rejecting
+ * one, that is the first thing to check.
+ */
+export interface VideoConfig {
+  /** Frames sampled per second of video. Omit for the API default of 1. */
+  fps?: number;
+  startOffsetSeconds?: number;
+  endOffsetSeconds?: number;
+  /** "low" is the default; "high" spends ~4x the tokens per frame on detail. */
+  mediaResolution?: "low" | "medium" | "high";
+}
+
+/** Token accounting, so a caller can VERIFY a video config actually applied. */
+export interface UsageInfo {
+  promptTokens: number | null;
+  outputTokens: number | null;
+  thoughtsTokens: number | null;
+}
+
+function videoPart(file: UploadedFile, cfg?: VideoConfig) {
+  const part: Record<string, unknown> = {
+    file_data: { mime_type: file.mimeType, file_uri: file.uri },
+  };
+  if (!cfg) return part;
+  const meta: Record<string, unknown> = {};
+  if (cfg.fps !== undefined) meta.fps = cfg.fps;
+  if (cfg.startOffsetSeconds !== undefined) meta.start_offset = `${cfg.startOffsetSeconds}s`;
+  if (cfg.endOffsetSeconds !== undefined) meta.end_offset = `${cfg.endOffsetSeconds}s`;
+  if (Object.keys(meta).length > 0) part.video_metadata = meta;
+  return part;
+}
+
+function mediaResolutionFor(cfg?: VideoConfig): Record<string, unknown> {
+  if (!cfg?.mediaResolution) return {};
+  return {
+    media_resolution: `MEDIA_RESOLUTION_${cfg.mediaResolution.toUpperCase()}`,
+  };
+}
+
 export async function generateJSON<T>(opts: {
   model: string;
   file: UploadedFile;
   prompt: string;
   schema: Record<string, unknown>;
   maxOutputTokens?: number;
+  video?: VideoConfig;
   onLog?: (line: string) => void;
+  onUsage?: (usage: UsageInfo) => void;
 }): Promise<T> {
   const body = {
     contents: [{
       parts: [
-        { file_data: { mime_type: opts.file.mimeType, file_uri: opts.file.uri } },
+        videoPart(opts.file, opts.video),
         { text: opts.prompt },
       ],
     }],
@@ -272,12 +349,13 @@ export async function generateJSON<T>(opts: {
       response_mime_type: "application/json",
       response_schema: sanitiseSchema(opts.schema),
       maxOutputTokens: opts.maxOutputTokens ?? 32000,
+      ...mediaResolutionFor(opts.video),
     },
   };
 
   // The retry, quota and 404 handling all live in callGemini; duplicating it
   // here is how the two copies drift.
-  const text = await callGemini(opts.model, body, opts.onLog);
+  const text = await callGemini(opts.model, body, opts.onLog, opts.onUsage);
   try {
     return JSON.parse(text) as T;
   } catch {

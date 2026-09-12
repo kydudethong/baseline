@@ -13,6 +13,7 @@ import { netBandImagePx, netLineImagePx, type NetBand, type NetCrossing } from "
 import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
 import { smoothPoseFrames } from "./pose-smooth";
 import { gateImplausibleLimbs } from "./pose-limbs";
+import { majoritySide, partnerGap, partnerOf, zoneBreakdown, type PlayerPositions } from "./positioning";
 import { makeCvProxy } from "@/lib/video/ffmpeg";
 import path from "node:path";
 import { describeError } from "@/lib/analysis/describe-error";
@@ -826,6 +827,41 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     log(`pose: ${beforeSmoothing} frames smoothed (3-point median within bursts); `
       + `${limbGate.stats.dropped} joint(s) dropped for stretching a limb past its own length`
       + (limbGate.stats.unmeasured ? ` (${limbGate.stats.unmeasured} bone(s) had too few samples to judge)` : ""));
+  }
+
+  // Positioning, which needs no ball at all.
+  //
+  // Logged rather than persisted for now: these are new numbers and the first
+  // thing to establish is whether they are RIGHT on real footage, which
+  // reading them off a run tells you without committing a schema to them. The
+  // conversion to feet is frame-aware, so the values are comparable between
+  // clips shot with different quad kinds -- which the raw court units are not.
+  if (courtCalibration.confidence > 0) {
+    const frame = courtFrameFor(courtCalibration.quadKind);
+    const positions: PlayerPositions[] = movement.map((m) => ({
+      playerId: m.playerId,
+      samples: m.samples.map((s) => ({
+        timestampSeconds: s.timestampSeconds, courtX: s.courtX, courtY: s.courtY,
+      })),
+    }));
+    for (const p of positions) {
+      if (p.samples.length === 0) continue;
+      const z = zoneBreakdown(p.samples, frame);
+      const side = majoritySide(p.samples, frame);
+      log(`position ${p.playerId} (${side}): kitchen ${Math.round(z.kitchen * 100)}%, `
+        + `transition ${Math.round(z.transition * 100)}%, back ${Math.round(z.back * 100)}% `
+        + `of ${z.samples} samples`);
+      const mate = partnerOf(p.playerId, positions, frame);
+      if (mate) {
+        const g = partnerGap(p.samples, mate.samples, frame);
+        if (g.samples > 0) {
+          log(`  partner gap with ${mate.playerId}: mean ${g.meanFeet}ft, max ${g.maxFeet}ft, `
+            + `${Math.round(g.fractionWide * 100)}% of the time wider than 12ft`);
+        }
+      }
+    }
+  } else {
+    log("position: skipped — no calibrated court, so court positions are unavailable");
   }
 
   // The overlay is rendered here, at the end, from the values the run actually
