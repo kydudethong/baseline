@@ -123,32 +123,70 @@ export async function listCourtPresets(
   return (data ?? []).map(fromRow).filter((p): p is CourtPreset => p !== null);
 }
 
+/**
+ * Create a preset, or replace the one already using that name.
+ *
+ * FIND-THEN-WRITE RATHER THAN UPSERT, and not by preference. The unique index
+ * is on (user_id, lower(name)) so that "Home court" and "home court" are one
+ * court rather than two. Postgres infers an ON CONFLICT target by matching the
+ * index EXACTLY, and a plain column list cannot match a lower() expression
+ * index -- it raises 42P10, "no unique or exclusion constraint matching the ON
+ * CONFLICT specification", which is precisely what this used to do.
+ *
+ * The alternatives were worse: a plain (user_id, name) index would make the
+ * names case-sensitive, and PostgREST gives no way to name an expression index
+ * as the conflict target.
+ *
+ * Re-saving a name overwrites that court on purpose. "Save" on a court you
+ * already have means the camera moved and these corners are the better ones.
+ */
 export async function saveCourtPreset(
   supabase: SupabaseClient,
   userId: string,
   preset: Omit<CourtPreset, "id" | "lastUsedAt">
 ): Promise<CourtPreset> {
-  const { data, error } = await supabase
-    .from("court_presets")
-    .upsert(
-      {
-        user_id: userId,
-        name: preset.name.trim(),
-        corners: preset.corners,
-        frame_width_px: preset.frameWidthPx,
-        frame_height_px: preset.frameHeightPx,
-        line_color_hex: preset.lineColorHex,
-        match_mode: preset.matchMode,
-        last_used_at: new Date().toISOString(),
-      },
-      // Re-saving a name overwrites that court rather than erroring or making
-      // a second one: "save" on a court you already have means the camera
-      // moved and these corners are the better ones.
-      { onConflict: "user_id,name" }
-    )
-    .select()
-    .single();
+  const name = preset.name.trim();
+  const row = {
+    user_id: userId,
+    name,
+    corners: preset.corners,
+    frame_width_px: preset.frameWidthPx,
+    frame_height_px: preset.frameHeightPx,
+    line_color_hex: preset.lineColorHex,
+    match_mode: preset.matchMode,
+    last_used_at: new Date().toISOString(),
+  };
+
+  // Matched in JS rather than with ilike: a name containing % or _ would be
+  // read as a wildcard and could update the WRONG court. The list is per-user
+  // and small, so there is nothing to gain from pushing it into SQL.
+  const findExisting = async (): Promise<string | null> => {
+    const { data, error } = await supabase
+      .from("court_presets").select("id,name").eq("user_id", userId);
+    if (error) throw error;
+    const hit = (data ?? []).find(
+      (r: { name: string }) => r.name.toLowerCase() === name.toLowerCase()
+    );
+    return hit ? String((hit as { id: string }).id) : null;
+  };
+
+  const write = async (id: string | null) => {
+    const q = id
+      ? supabase.from("court_presets").update(row).eq("id", id).eq("user_id", userId)
+      : supabase.from("court_presets").insert(row);
+    return q.select().single();
+  };
+
+  let { data, error } = await write(await findExisting());
+
+  // 23505 is the unique index firing because another save landed between the
+  // lookup and the insert. The index is doing exactly its job; re-resolve and
+  // update rather than surfacing a constraint name to the user.
+  if (error && (error as { code?: string }).code === "23505") {
+    ({ data, error } = await write(await findExisting()));
+  }
   if (error) throw error;
+
   const out = fromRow(data as Record<string, unknown>);
   if (!out) throw new Error("Saved preset came back in a shape this build cannot read.");
   return out;

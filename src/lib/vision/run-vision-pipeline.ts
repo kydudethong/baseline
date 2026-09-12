@@ -12,6 +12,7 @@ import type { ClusteredRally } from "./rallies";
 import { netBandImagePx, netLineImagePx, type NetBand, type NetCrossing } from "./rallies-net";
 import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
 import { smoothPoseFrames } from "./pose-smooth";
+import { gateImplausibleLimbs } from "./pose-limbs";
 import { makeCvProxy } from "@/lib/video/ffmpeg";
 import path from "node:path";
 import { describeError } from "@/lib/analysis/describe-error";
@@ -814,7 +815,18 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // worst possible debugging aid.
   const beforeSmoothing = poses.length;
   poses = smoothPoseFrames(poses);
-  if (beforeSmoothing > 0) log(`pose: smoothed ${beforeSmoothing} frames (3-point median within bursts)`);
+
+  // Then the limb gate, and in this order on purpose: smoothing can rescue a
+  // joint that was only slightly off, so gating first would throw away
+  // keypoints the median was about to fix. Gating second only ever sees what
+  // survived, and drops what is still geometrically impossible.
+  const limbGate = gateImplausibleLimbs(poses);
+  poses = limbGate.frames;
+  if (beforeSmoothing > 0) {
+    log(`pose: ${beforeSmoothing} frames smoothed (3-point median within bursts); `
+      + `${limbGate.stats.dropped} joint(s) dropped for stretching a limb past its own length`
+      + (limbGate.stats.unmeasured ? ` (${limbGate.stats.unmeasured} bone(s) had too few samples to judge)` : ""));
+  }
 
   // The overlay is rendered here, at the end, from the values the run actually
   // used -- after every fallback has been resolved, so it can never show a
