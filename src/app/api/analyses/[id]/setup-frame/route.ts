@@ -10,6 +10,7 @@ import { downloadToFile } from "@/lib/storage/r2";
 import { setupFrameViaRallySeg, rallySegInstalled } from "@/lib/vision/court-rally-seg";
 import { describeError } from "@/lib/analysis/describe-error";
 import { normaliseLineColor } from "@/lib/db/setup";
+import { medianFrameViaPython } from "@/lib/vision/cv-scripts";
 
 export const runtime = "nodejs";
 export const maxDuration = 600;
@@ -114,6 +115,36 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         { error: `The frame finder could not run on this video (${why}). Mark the court and players by hand instead.` },
         { status: 502 }
       );
+    }
+
+    // Replace the single frame with a player-free median of the whole clip.
+    //
+    // This is what the person drags the court corners onto, and a frame with
+    // four people standing on the baselines is a genuinely harder picture to
+    // mark than an empty court. The median removes them: each pixel is court
+    // in most frames and a body in a few, so the majority wins.
+    //
+    // ONLY IF THE DIMENSIONS MATCH EXACTLY. Every coordinate the browser sends
+    // back is in the space of the image it was shown, and `payload.frame`
+    // below tells it which space that is. An image of a different size here
+    // would silently shift every corner the user marks -- so a mismatch keeps
+    // rally_seg's frame, which was already correct.
+    const fittedW = result.imageSize?.[0] ?? 0;
+    const fittedH = result.imageSize?.[1] ?? 0;
+    if (fittedW > 0 && fittedH > 0) {
+      const medianPath = path.join(tempDir, "median.jpg");
+      const median = await medianFrameViaPython(localPath, medianPath, {
+        maxDimension: Math.max(fittedW, fittedH),
+      });
+      if (median && median.width === fittedW && median.height === fittedH) {
+        await fsp.copyFile(medianPath, jpegPath);
+        console.warn(`[setup-frame ${id}] using a median of ${median.samples} frames`);
+      } else if (median) {
+        console.warn(
+          `[setup-frame ${id}] median was ${median.width}x${median.height}, `
+          + `expected ${fittedW}x${fittedH} — keeping the single frame`
+        );
+      }
     }
 
     // The JPEG is written at the resolution rally_seg worked at, which may be

@@ -329,3 +329,42 @@ export async function detectPlayersViaPython(
 
 export class PaddleModelNotConfiguredError extends Error {}
 
+
+export interface MedianFrameResult {
+  out: string;
+  samples: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * A player-free still of the court, for anything that needs to see the lines.
+ *
+ * Returns null rather than throwing on any failure. Every caller has a real
+ * frame to fall back to, and a court fit on a frame with players in it is the
+ * behaviour that existed before this — degraded, not broken. Losing a whole
+ * analysis because a median could not be computed would be a bad trade for an
+ * improvement to one step.
+ */
+export async function medianFrameViaPython(
+  videoPath: string,
+  outPath: string,
+  opts: { samples?: number; maxDimension?: number } = {}
+): Promise<MedianFrameResult | null> {
+  const args = [videoPath, "--out", outPath];
+  if (opts.samples) args.push("--samples", String(opts.samples));
+  // Default to a cap because the median allocates a float64 copy of the whole
+  // stack: at 1080p over 60 frames that is ~1.5GB resident, which is enough
+  // to OOM the box mid-run.
+  args.push("--max-dim", String(opts.maxDimension ?? 1280));
+  try {
+    // Minutes of timeout would be wrong here: this is a seek-and-decode loop
+    // over a few dozen frames, so anything past a couple of minutes means it
+    // is wedged, and the caller has a fallback.
+    const stdout = await runPython("median_frame.py", args, { timeoutMs: 120_000 });
+    return JSON.parse(stdout) as MedianFrameResult;
+  } catch (err) {
+    console.warn(`[median] could not build a player-free frame: ${(err as Error).message.split("\n")[0]}`);
+    return null;
+  }
+}

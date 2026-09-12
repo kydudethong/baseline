@@ -30,6 +30,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import CourtPresetBar from "./CourtPresetBar";
+
 import { computeHomography, applyHomography } from "@/lib/vision/homography";
 import { courtSegments, type CourtLineRole } from "@/lib/vision/court-model";
 import { sampleLineColor } from "@/lib/vision/sample-color";
@@ -899,6 +901,21 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                   onChange={(e) => setQuadKind(e.target.checked ? "near-half" : "full")} />
                 The far baseline is hidden — I marked the net instead
               </label>
+              <CourtPresetBar
+                corners={corners}
+                lineColorHex={lineColor}
+                matchMode={matchMode}
+                // The video's natural size, which is the space `corners` are
+                // in -- read on demand because it lives on a ref and arrives
+                // after first paint.
+                readFrameSize={() => {
+                  const v = videoRef.current;
+                  return v && v.videoWidth > 0 && v.videoHeight > 0
+                    ? { width: v.videoWidth, height: v.videoHeight }
+                    : null;
+                }}
+                onApply={(next) => { setCorners(next); setStage("court"); }}
+              />
             </div>
 
             <div className="stack g2">
