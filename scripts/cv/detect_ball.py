@@ -59,10 +59,32 @@ def is_ball_class(name: str) -> bool:
 
 
 class RoboflowLocal:
-    """Roboflow model run on this machine via the `inference` package."""
+    """Roboflow model run on this machine via the `inference` package.
 
-    parallel = 1
+    BALL_PARALLEL threads, default 1 (unchanged behaviour).
+
+    The main loop has always supported running several frames at once -- it
+    builds a ThreadPoolExecutor whenever a model reports parallel > 1 -- but
+    the two LOCAL models both reported 1, so on a CPU box the pool was never
+    built and frames went through strictly one at a time. That is the whole
+    reason a 101s clip takes 13-29 minutes: ~1 frame per second, which is
+    roughly ten times slower than this size of model should manage even on two
+    cores, because almost all of it is per-call Python and preprocessing
+    overhead rather than the convolution itself.
+
+    Left at 1 by DEFAULT on purpose. ONNX Runtime's Run() is thread-safe, but
+    `inference` wraps it in its own Python state and does not document being
+    so, and a detector that is subtly wrong under threads is far worse than a
+    slow one -- it would show up as a slightly worse ball track, not as a
+    crash. Raise it, re-run a clip you already have results for, and compare
+    the track before trusting it.
+    """
+
     failed_frames = 0
+
+    @property
+    def parallel(self) -> int:
+        return max(1, int(os.environ.get("BALL_PARALLEL", "1")))
 
     def __init__(self, model_id: str, api_key: str, confidence: float):
         try:
@@ -134,8 +156,49 @@ class RoboflowHosted:
 
 
 class UltralyticsLocal:
+    """Weights run directly through ultralytics -- no Roboflow wrapper.
+
+    This is the FAST local path. RoboflowLocal goes through the `inference`
+    package, which re-does its own preprocessing and session handling on every
+    single call; that per-call overhead, not the convolution, is what makes a
+    101s clip take twenty minutes. Export the trained weights from Roboflow
+    and point BALL_MODEL_PATH at them to come through here instead.
+
+    Threads stay at 1 deliberately: torch already parallelises across cores
+    internally, so a thread pool on top would oversubscribe them and be
+    slower. Batching is where the win is -- one predict() over BALL_BATCH
+    frames amortises the Python and preprocessing cost that dominates at this
+    model size.
+    """
+
     parallel = 1
     failed_frames = 0
+
+    @property
+    def batch_size(self) -> int:
+        return max(1, int(os.environ.get("BALL_BATCH", "8")))
+
+    def predict_many(self, frames):
+        results = self.model.predict(
+            frames, conf=self.confidence, imgsz=self.imgsz, verbose=False
+        )
+        return [self._unpack(r) for r in results]
+
+    def _unpack(self, res):
+        # Must apply the SAME class filter predict() does. A ball model with
+        # more than one class (ball + player, say) would otherwise have every
+        # non-ball box land in the ball track -- a silent accuracy regression
+        # that would look like the detector getting worse, not like a bug in
+        # the batching.
+        out = []
+        names = getattr(res, "names", None)
+        for b in getattr(res, "boxes", []) or []:
+            cls_name = names.get(int(b.cls[0]), "") if isinstance(names, dict) else ""
+            if not is_ball_class(cls_name):
+                continue
+            x1, y1, x2, y2 = [float(v) for v in b.xyxy[0].tolist()]
+            out.append(((x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1, float(b.conf[0])))
+        return out
 
     def __init__(self, weights: str, confidence: float, imgsz: int):
         try:
@@ -238,7 +301,29 @@ def main():
             remaining = (total_to_process - frames_processed) / max(rate, 1e-6)
             print(f"[ball] {frames_processed}/{total_to_process} frames · seen in {frames_with_ball} · ~{remaining / 60:.1f} min left", file=sys.stderr, flush=True)
 
+    # Three ways to get predictions, in order of preference:
+    #   predict_many  -- one model call over a batch (ultralytics). Fastest,
+    #                    because the per-call overhead is what dominates.
+    #   thread pool   -- several independent calls in flight (hosted API).
+    #   one at a time -- the fallback, and what every local model used to do.
+    batch_size = max(1, int(getattr(model, "batch_size", 1))) if hasattr(model, "predict_many") else 1
     pool = ThreadPoolExecutor(max_workers=parallel) if parallel > 1 else None
+    flush_at = batch_size if batch_size > 1 else (parallel * 2 if pool else 1)
+
+    def flush(batch):
+        if not batch:
+            return
+        idxs = [b[0] for b in batch]
+        imgs = [b[1] for b in batch]
+        if batch_size > 1:
+            preds = model.predict_many(imgs)
+        elif pool is not None:
+            preds = pool.map(model.predict, imgs)
+        else:
+            preds = [model.predict(i) for i in imgs]
+        for bf, p in zip(idxs, preds):
+            record(bf, p)
+
     for start_s, end_s in windows:
         start_f = int(start_s * fps)
         end_f = int(end_s * fps)
@@ -250,18 +335,12 @@ def main():
             if not ok:
                 break
             if (f - start_f) % step == 0:
-                if pool is None:
-                    record(f, model.predict(frame))
-                else:
-                    batch.append((f, frame))
-                    if len(batch) >= parallel * 2:
-                        for (bf, preds) in zip([b[0] for b in batch], pool.map(model.predict, [b[1] for b in batch])):
-                            record(bf, preds)
-                        batch = []
+                batch.append((f, frame))
+                if len(batch) >= flush_at:
+                    flush(batch)
+                    batch = []
             f += 1
-        if pool is not None and batch:
-            for (bf, preds) in zip([b[0] for b in batch], pool.map(model.predict, [b[1] for b in batch])):
-                record(bf, preds)
+        flush(batch)
     if pool is not None:
         pool.shutdown(wait=True)
     cap.release()

@@ -183,3 +183,66 @@ export async function extractFrames(
     timestampSeconds: Math.round((i / fps) * 100) / 100,
   }));
 }
+
+/**
+ * A smaller copy of the video for the CV passes to read, or null when the
+ * source is already small enough to be worth reading directly.
+ *
+ * WHY. detect_ball.py opens the ORIGINAL file with cv2 and decodes every
+ * frame at native resolution. Frames for the player and pose passes go
+ * through extractFrames(), which already downscales -- the ball pass is the
+ * one that does not, so a 4K game is decoded at 4K and then handed to a
+ * detector that immediately letterboxes it down to its own input size. The
+ * pixels are thrown away, but the decode was still paid for: roughly 9x the
+ * work of the 720p the model actually sees.
+ *
+ * NULL WHEN IT WOULD NOT HELP, and that is the important half. Transcoding is
+ * not free -- it is a full decode plus a full encode -- so on a source that is
+ * already at or below the target it is pure added cost, several minutes spent
+ * to save nothing. Ky's own test clip is 1280x720, so for that clip this
+ * function correctly does nothing at all. The win is on real game footage
+ * shot at 1080p or 4K.
+ *
+ * Audio is dropped because nothing downstream reads it any more (the audio
+ * contact detector is gone), not because it speeds up decoding -- cv2 ignores
+ * audio streams either way. It just makes the proxy smaller on disk.
+ */
+export async function makeCvProxy(
+  filePath: string,
+  outputPath: string,
+  opts: { maxWidth?: number; sourceWidth?: number | null } = {}
+): Promise<string | null> {
+  const maxWidth = opts.maxWidth ?? 1280;
+  const sourceWidth = opts.sourceWidth ?? (await probeVideo(filePath)).width;
+
+  // Unknown width is treated as "leave it alone". Guessing wrong in the other
+  // direction costs a pointless transcode on every run.
+  if (!sourceWidth || sourceWidth <= maxWidth) return null;
+
+  try {
+    await execFileAsync("ffmpeg", [
+      "-y", "-i", filePath,
+      "-an",
+      // -2 keeps the height even, which h264 requires; min() means this can
+      // only ever shrink, never upscale a source that slipped past the guard.
+      "-vf", `scale='min(${maxWidth},iw)':-2`,
+      // veryfast, because this transcode is overhead paid to save decode time
+      // later. A slower preset would make a smaller file and spend more time
+      // than it saves -- the file size is not what we are optimising.
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+      "-pix_fmt", "yuv420p",
+      outputPath,
+    ], { maxBuffer: 16 * 1024 * 1024 });
+    return outputPath;
+  } catch (err) {
+    // Never fatal. A failed proxy means the CV passes read the original and
+    // run slower, which is exactly what they did before this existed. Losing
+    // a whole analysis over a speed optimisation would be a bad trade.
+    const stderr = (err as { stderr?: string })?.stderr ?? "";
+    console.warn(
+      `[proxy] could not build a downscaled proxy, falling back to the original: `
+      + stderr.trimEnd().split("\n").slice(-2).join(" ")
+    );
+    return null;
+  }
+}

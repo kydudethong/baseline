@@ -29,12 +29,36 @@ const POSE_MODEL_PATH = path.join(process.cwd(), "models", "yolov8n-pose.pt");
 
 export class PythonCvError extends Error {}
 
+/**
+ * How long any one CV script may run before it is presumed wedged.
+ *
+ * There was no bound here at all, and the failure it allowed is the worst
+ * kind: a run sat on "Tracking the ball" for TEN HOURS. Nothing in the stack
+ * could end it. execFile without `timeout` waits forever; the AbortSignal
+ * only fires when a human presses stop; and `inference`'s get_model() pulls
+ * model weights over HTTPS with no timeout of its own, so a half-open
+ * connection hangs the interpreter rather than failing it. A stalled download
+ * and a healthy slow pass look identical from Node.
+ *
+ * 45 minutes is deliberately generous -- the slowest honest ball pass
+ * measured on this app is ~29 minutes for a 101s clip -- because killing real
+ * work is worse than waiting. What matters is that the number is finite.
+ */
+const DEFAULT_CV_TIMEOUT_MS = 45 * 60 * 1000;
+
+export function cvTimeoutMs(): number {
+  const raw = Number(process.env.CV_STEP_TIMEOUT_MS ?? DEFAULT_CV_TIMEOUT_MS);
+  // A zero or negative timeout would kill every script the instant it started.
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_CV_TIMEOUT_MS;
+}
+
 async function runPython(
   scriptName: string,
   args: string[],
-  opts: { maxBuffer?: number; streamStderr?: boolean; stdin?: string } = {}
+  opts: { maxBuffer?: number; streamStderr?: boolean; stdin?: string; timeoutMs?: number } = {}
 ): Promise<string> {
   const scriptPath = path.join(SCRIPTS_DIR, scriptName);
+  const timeoutMs = opts.timeoutMs ?? cvTimeoutMs();
   try {
     const child = execFileAsync(cvPython(), [scriptPath, ...args], {
       maxBuffer: opts.maxBuffer ?? 20 * 1024 * 1024,
@@ -42,6 +66,12 @@ async function runPython(
       // "stop once the current Python script finishes", which for a full-clip
       // ball pass is minutes away.
       signal: activeRunSignal(),
+      // The backstop for everything the signal cannot reach: a wedged
+      // download, a deadlocked native extension, a script waiting on a socket
+      // nobody will ever answer. SIGKILL rather than SIGTERM because a process
+      // stuck inside a C extension may never handle a catchable signal.
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
     });
     // Long-running scripts report progress on stderr; forward it live so a
     // ten-minute ball pass doesn't look like a hang.
@@ -56,6 +86,21 @@ async function runPython(
     return stdout;
   } catch (err) {
     const stderr = (err as { stderr?: string })?.stderr ?? "";
+    // Tell a timeout apart from a crash. They need opposite fixes -- a crash
+    // is a bug in the script, a timeout is usually the network or the box --
+    // and a timeout reported as "exited with code null" sends every
+    // investigation to the wrong place.
+    const killedByTimeout = Boolean((err as { killed?: boolean })?.killed)
+      && !activeRunSignal()?.aborted;
+    if (killedByTimeout) {
+      throw new PythonCvError(
+        `${scriptName} was still running after ${Math.round(timeoutMs / 60_000)} min and was stopped. `
+        + "This usually means it was waiting on something that never answered — a model download "
+        + "or a hosted inference call — rather than doing slow work. "
+        + "Raise CV_STEP_TIMEOUT_MS if this clip genuinely needs longer.\n"
+        + stderr.trimEnd().split("\n").slice(-4).join("\n")
+      );
+    }
     // Name the interpreter. "ultralytics is not installed" is baffling when
     // you have just installed it and watched it import -- because the shell
     // you tested in and the shell this server inherited its PATH from are not
