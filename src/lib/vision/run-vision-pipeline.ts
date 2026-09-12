@@ -11,6 +11,7 @@ import { ballGatePolygonPx, calibrationFromSetup, courtForeshorteningAt, isPlaus
 import type { ClusteredRally } from "./rallies";
 import { netBandImagePx, netLineImagePx, type NetBand, type NetCrossing } from "./rallies-net";
 import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
+import { smoothPoseFrames } from "./pose-smooth";
 import { makeCvProxy } from "@/lib/video/ffmpeg";
 import path from "node:path";
 import { describeError } from "@/lib/analysis/describe-error";
@@ -799,6 +800,21 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
       shots = [];
     }
   }
+
+  // Smooth the skeletons before anything reads them.
+  //
+  // Here, rather than inside the pose step, because BOTH pose passes have to
+  // be in hand first: the 5fps baseline and the high-rate bursts land in one
+  // array, and a frame's neighbours may come from the other pass. Smoothing
+  // either pass alone would miss exactly the frames that matter.
+  //
+  // Before the overlay and before the return, so the drawn skeletons, the
+  // stored keypoints and the measured mechanics are all the same numbers --
+  // an overlay that disagreed with the data it was rendered from would be the
+  // worst possible debugging aid.
+  const beforeSmoothing = poses.length;
+  poses = smoothPoseFrames(poses);
+  if (beforeSmoothing > 0) log(`pose: smoothed ${beforeSmoothing} frames (3-point median within bursts)`);
 
   // The overlay is rendered here, at the end, from the values the run actually
   // used -- after every fallback has been resolved, so it can never show a

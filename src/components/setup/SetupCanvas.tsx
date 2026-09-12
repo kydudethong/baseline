@@ -832,6 +832,26 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             ) : "white lines"}
             {" — change either under “Something’s wrong”."}
           </p>
+          {/*
+            Presets belong in the MAIN view, not only inside "Something's
+            wrong". Saving a court is not error recovery -- the moment you most
+            want to save one is when the detector got it RIGHT, which is
+            exactly the moment this panel is showing and the fix-it panel is
+            not. And a returning player wants to APPLY a saved court before
+            touching anything, not after declaring something broken.
+          */}
+          <CourtPresetBar
+            corners={corners}
+            lineColorHex={lineColor}
+            matchMode={matchMode}
+            readFrameSize={() => {
+              const v = videoRef.current;
+              return v && v.videoWidth > 0 && v.videoHeight > 0
+                ? { width: v.videoWidth, height: v.videoHeight }
+                : null;
+            }}
+            onApply={(next) => { setCorners(next); setFixing(true); setStage("court"); }}
+          />
           <div className="row g2">
             <button
               type="button"
