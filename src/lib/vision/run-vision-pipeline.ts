@@ -1,21 +1,18 @@
 import { getPhase2VisionProvider, playerDetectionIsLocal } from "./provider-v2";
 import { analyzeMovementWithCalibration } from "./provider-v2";
-import { hitsToUnknownShotEvents, detectFootworkFoundation } from "./events";
-import { computeAppearanceSignaturesViaPython, detectBallViaPython, BallModelNotConfiguredError, ballModelConfigured } from "./cv-scripts";
-import { buildBallTrack, detectBounces, detectHits, STRICT_HIT_PARAMS, newHitScanStats, type BallDetection, type BallHit, type BallTrackPoint, type BallTrackStats } from "./ball";
-import { classifyRally, courtFrameFor, sideOf as courtSideOf, type Shot } from "./shots";
+import { detectFootworkFoundation } from "./events";
+import { computeAppearanceSignaturesViaPython } from "./cv-scripts";
+import type { BallDetection, BallTrackPoint, BallTrackStats } from "./ball";
+import { courtFrameFor, sideOf as courtSideOf, type Shot } from "./shots";
 import type { AnalysisStage } from "@/lib/db/types";
 import { StageTimer } from "@/lib/analysis/stage-timer";
-import { SWING_WINDOW_S, measureSwing } from "./swing";
-import { ballGatePolygonPx, calibrationFromSetup, courtForeshorteningAt, isPlausibleCourtQuad, playerGatePolygonPx, pointInPolygon, transformToCourtCoordinates } from "./court";
+import { calibrationFromSetup, isPlausibleCourtQuad, playerGatePolygonPx, pointInPolygon, transformToCourtCoordinates } from "./court";
 import type { ClusteredRally } from "./rallies";
-import { netBandImagePx, netLineImagePx, type NetBand, type NetCrossing } from "./rallies-net";
+import { netBandImagePx, netLineImagePx, type NetCrossing } from "./rallies-net";
 import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
 import { smoothPoseFrames } from "./pose-smooth";
 import { gateImplausibleLimbs } from "./pose-limbs";
 import { majoritySide, partnerGap, partnerOf, zoneBreakdown, type PlayerPositions } from "./positioning";
-import { makeCvProxy } from "@/lib/video/ffmpeg";
-import path from "node:path";
 import { describeError } from "@/lib/analysis/describe-error";
 import { detectCourtViaRallySeg, rallySegCourtEnabled } from "./court-rally-seg";
 import {
@@ -481,327 +478,68 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // configured, or when ball detection fails; there is no fallback that
   // finds rallies without ball data, so that clip gets NO rallies and NO
   // shots, honestly, rather than a guessed boundary from something else.
-  let ballTrack: VisionPipelineOutput["ballTrack"] = { points: [], stats: null, diagnostics: {}, rawDetections: [] };
-  let shots: Shot[] = [];
+  const ballTrack: VisionPipelineOutput["ballTrack"] = { points: [], stats: null, diagnostics: {}, rawDetections: [] };
+  const shots: Shot[] = [];
   // Always empty now: crossings were rally evidence and nothing computes them.
   // Kept as a field so the overlay renderer's shape does not have to change.
   const netCrossings: NetCrossing[] = [];
-  let netLinePx: [[number, number], [number, number]] | null = null;
-  let netBandPx: NetBand | null = null;
   // Always 0: dead balls were counted by the segmenters that are gone.
   const deadBallCount = 0;
-  let ballGatePx: Array<[number, number]> | null = null;
+  const ballGatePx: Array<[number, number]> | null = null;
   // Hoisted so the overlay, which is rendered at the very end from the values
   // the run actually used, can draw what the paddle model and the audio gate
   // produced instead of only reporting counts in the log.
   // Hoisted so the overlay renderer at the end can draw the boundaries that
   // actually won, rather than whichever segmenter happened to run last.
-  let ralliesUsed: ClusteredRally[] = [];
-  let rallyOutput: AnalysisRallyOutput[] = [];
-  if (!ballModelConfigured()) {
-    knownLimitations.push(
-      "No ball detector configured (BALL_MODEL_ID) — rally boundaries come from ball hits, not player movement or audio, so no rallies could be found at all and no shot types were classified."
-    );
-  } else {
-    try {
-      // Ball presence/movement is the primary signal for "is a rally
-      // happening", not player speed (see clusterRalliesFromHits in
-      // rallies.ts) -- player movement between points turned out not to
-      // be a reliable "nothing's happening" signal (players routinely
-      // walk briskly for several seconds to retrieve the ball or
-      // reposition between points), so this scans the ball across the
-      // WHOLE clip up front rather than only inside player-motion-
-      // derived windows like before. Costs more ball-detector calls per
-      // clip than the old windowed approach, which is the trade Ky
-      // approved after seeing it roughly doubled worst-clip rally F1 in
-      // testing (0.167 -> 0.348 across the 3 labeled clips).
-      stage("ball", `detecting the ball across the full ${input.videoDurationSeconds.toFixed(0)}s clip — first run downloads the model…`);
-      // Read a downscaled copy rather than the original where that is
-      // cheaper. Returns null -- and costs nothing -- when the source is
-      // already at or below the target, which is the common case for phone
-      // footage at 720p. See makeCvProxy for why this is conditional.
-      // No temp dir means nowhere to put the proxy, so read the original --
-      // the same path taken when the source is already small enough.
-      const ballProxy = input.tempDir
-        ? await makeCvProxy(
-            input.videoPath,
-            path.join(input.tempDir, "cv-proxy.mp4"),
-            { sourceWidth: input.frameWidthPx }
-          )
-        : null;
-      if (ballProxy) {
-        log(`ball: reading a ${1280}px-wide proxy instead of the ${input.frameWidthPx}px original`);
-      }
-      // Tag detection failures so the catch below can tell them apart from a
-      // failure in hit-scanning or shot classification. Blaming a full,
-      // healthy ball track on "ball detection failed" sends every future
-      // investigation to the wrong place -- which is exactly what happened.
-      const raw = await detectBallViaPython(ballProxy ?? input.videoPath, [[0, input.videoDurationSeconds]])
-        .catch((err) => { (err as { stage?: string }).stage = "detection"; throw err; });
-      // Drop balls belonging to other courts BEFORE the track is built.
-      // Filtering afterwards cannot help: the tracker has already chosen
-      // between candidates frame by frame, and once it has followed a
-      // neighbouring rally for a second the damage is a real-looking track of
-      // somebody else's ball.
-      const ballGate = ballGatePolygonPx(courtCalibration, input.frameHeightPx);
-      ballGatePx = ballGate;
-      let ballDetections = raw.detections;
-      if (ballGate) {
-        const before = ballDetections.length;
-        ballDetections = ballDetections.filter((d) => pointInPolygon(
-          [d.x * input.frameWidthPx, d.y * input.frameHeightPx], ballGate
-        ));
-        const dropped = before - ballDetections.length;
-        log(`ball gate: kept ${ballDetections.length} of ${before} detections`
-          + ` (${dropped} on other courts or off this one)`);
-      } else {
-        knownLimitations.push(
-          "Without a usable court, balls on neighbouring courts could not be excluded from the ball track."
-        );
-      }
-      const built = buildBallTrack(ballDetections, raw.fps, raw.framesProcessed);
-      log(`ball: seen in ${Math.round(built.stats.coverage * 100)}% of ${built.stats.framesProcessed} frames (${JSON.stringify(raw.diagnostics.modelSource)})`);
-      ballTrack = { points: built.points, stats: built.stats, diagnostics: raw.diagnostics, rawDetections: ballDetections };
-      if (built.stats.coverage < 0.15) {
-        knownLimitations.push(
-          `The ball was found in only ${Math.round(built.stats.coverage * 100)}% of frames — rally boundaries and shot types below are low-confidence; a camera with the whole court in frame and a ball model trained on this camera angle improves this.`
-        );
-      }
-      const ctx = {
-        calibration: courtCalibration,
-        frame: courtFrameFor(courtCalibration.quadKind),
-        frameWidthPx: input.frameWidthPx,
-        frameHeightPx: input.frameHeightPx,
-        playerTracks: tracks,
-        ballFps: raw.fps,
-      };
-      const overheadAt = (playerId: string, t: number): boolean | null => {
-        let best: PlayerPoseFrame | null = null;
-        let bestDt = 0.3;
-        for (const p of poses) {
-          if (p.playerId !== playerId) continue;
-          const dt = Math.abs(p.timestampSeconds - t);
-          if (dt < bestDt) {
-            bestDt = dt;
-            best = p;
-          }
-        }
-        if (!best) return null;
-        const kp = (name: string) => best!.keypoints.find((k) => k.name === name);
-        const ls = kp("left_shoulder"), rs = kp("right_shoulder"), lw = kp("left_wrist"), rw = kp("right_wrist");
-        const shoulderY = [ls, rs].filter((k) => k && k.yNorm !== null && (k.confidence ?? 0) >= 0.3).map((k) => k!.yNorm!);
-        const wristY = [lw, rw].filter((k) => k && k.yNorm !== null && (k.confidence ?? 0) >= 0.3).map((k) => k!.yNorm!);
-        if (shoulderY.length === 0 || wristY.length === 0) return null;
-        return Math.min(...wristY) < Math.min(...shoulderY) - 0.03; // a wrist clearly above the shoulders
-      };
-      // Scan the whole track once for hits, then group hits directly
-      // into rallies -- a hit is the strongest evidence a rally is
-      // actually live, so it decides the boundary, not the other way
-      // around.
-      // One physical speed floor, expressed correctly everywhere on the court.
-      // Built once here because it needs the frame height to turn the track's
-      // normalized rows back into the pixel rows the calibration is in.
-      const foreshorteningAt = (yNorm: number): number | null =>
-        courtForeshorteningAt(courtCalibration, yNorm * input.frameHeightPx);
+  const ralliesUsed: ClusteredRally[] = [];
+  const rallyOutput: AnalysisRallyOutput[] = [];
+  // BALL TRACKING IS GONE, and with it contacts, shot records, swing mechanics
+  // and the pose bursts that hung off them. What used to be ~300 lines here is
+  // this comment.
+  //
+  // WHY, in the order the evidence arrived:
+  //
+  //  1. Its output was wrong often enough to poison everything downstream. Of
+  //     five contact timestamps checked against the footage by a VLM, two were
+  //     not strokes at all (a player bouncing the ball between points; a point
+  //     that had already ended) and one was late by more than half a second.
+  //     Every shot record, every swing measurement and every rally boundary
+  //     was built on those timestamps.
+  //
+  //  2. It was the most expensive stage by far -- a full 1080p->720p proxy
+  //     transcode, then Roboflow's `inference` package (which loads torch,
+  //     ONNX Runtime and probes for Qwen-VL, SAM and gaze models it never
+  //     uses), then detection over thousands of frames. On a 14-minute clip it
+  //     was the only stage that never finished; court, players and pose
+  //     together took 24 minutes and the ball stage killed the machine.
+  //
+  //  3. Nothing needs it any more. Gemini finds rallies and shots from the
+  //     overlay, and reads technique from a high-frame-rate clip of each shot
+  //     -- measured, on the same second of footage: at 1fps "no stroke is
+  //     visible"; at 15fps "paddle open, contact at knee level, bend the knees
+  //     more to get down to the level of the low bounce rather than swinging
+  //     predominantly with the arm from an upright posture", high confidence.
+  //     That is better than anything the contact-driven mechanics produced.
+  //
+  // What still happens here: court, player tracks, pose at VISION_FPS, and
+  // movement. Those are measurements, and measurement is what this pipeline is
+  // for now. Interpretation belongs to the coaching pass.
+  knownLimitations.push(
+    "Ball position is not tracked. Rally boundaries, shot types and technique are read from the "
+    + "video by the coaching pass instead, which sees the stroke itself rather than inferring it "
+    + "from where the ball was."
+  );
 
-      stage("contacts", "finding ball contacts");
-      const hitStats = newHitScanStats();
-      const allHitsWide = detectHits(built.points, tracks, overheadAt, hitStats,
-        STRICT_HIT_PARAMS, foreshorteningAt);
-      // Zero hits is a common and previously silent outcome, and every cause
-      // needs a different fix: too few observed points, every candidate too
-      // slow, or a ball that never visibly turns. Say which.
-      log(`hits: ${hitStats.hits} from ${hitStats.observed} observed of `
-        + `${hitStats.points} track points · rejected `
-        + `${hitStats.rejectedSlow} too slow, ${hitStats.rejectedStraight} too straight, `
-        + `${hitStats.rejectedSpacing} too close together, ${hitStats.rejectedGapEdge} beside a gap`
-        + ` · sharpest turn ${hitStats.bestTurnDeg.toFixed(0)}°`);
-
-      // AUDIO CONTACTS AND THE POSE-DERIVED PADDLE ARE BOTH GONE.
-      //
-      // Audio: measured on this clip it turned 51 contacts into 63 -- 100
-      // onsets of which 16 survived the ball-agreement gate. A 24% lift, for
-      // a whole Python pass, a second signal to reason about, and a gate with
-      // five distinct rejection reasons. It bought contacts that shot
-      // classification no longer needs, because shot types are Gemini's job
-      // now and it reads them off the video rather than off a contact list.
-      //
-      // Paddle from pose: it fed exactly one +0.1 confidence term and drew a
-      // shape on the overlay. Four detection models were measured before it
-      // and none worked; the arm-derived estimate was the honest fallback,
-      // and with technique judgment moving to a model that watches the
-      // footage, an estimated paddle position is a thing to be wrong about
-      // rather than a thing to reason from.
-      //
-      // Both are in git if the trade turns out badly.
-
-      // RALLY BOUNDARIES ARE GEMINI'S. Everything that used to live here --
-      // hit clustering, contact clustering, net-crossing segmentation,
-      // rally_seg, keep-alive extension and the two bounce rules -- has been
-      // removed, and this is the whole of what replaced it.
-      //
-      // WHY, given net crossings measured 6/6 on ky-720p. Because it was never
-      // only a segmenter: run-coaching.ts refused to call Gemini at all when
-      // the local pass found zero rallies, so a bad court fit or a sparse ball
-      // track silently produced "not enough movement data" instead of asking
-      // the component that is better at this. Gemini found 7/7 auditing the
-      // overlay and caught two real segmenter bugs that Ky then confirmed by
-      // watching the footage: a rally ended at 29s when play ran to 33.5s, and
-      // keep-alive holding rally 6 open 3.2s past a finished point. A fallback
-      // that gates the thing it is a fallback FOR is not a safety net.
-      //
-      // The net LINE AND BAND are both still computed, because both are pure
-      // court geometry rather than rally evidence, and the overlay legend --
-      // which IS the prompt -- tells Gemini what the band means: a ball inside
-      // it cannot be assigned to a side, because from behind a baseline the
-      // net stands between the camera and the far court. That ambiguity is
-      // real and Gemini should see it marked.
-      //
-      // CROSSINGS are not computed. Those are rally evidence, and drawing them
-      // would hand Gemini the answer to the question it is being asked, which
-      // is the mistake --hide-rallies exists to prevent.
-      netBandPx = netBandImagePx(courtCalibration, input.frameWidthPx, input.frameHeightPx);
-      netLinePx = netBandPx?.base
-        ?? netLineImagePx(courtCalibration, input.frameWidthPx, input.frameHeightPx);
-
-      stage("rallies", "leaving rally boundaries to the coaching pass");
-      ralliesUsed = [];
-      rallyOutput = [];
-      log("rallies: not segmented here — Gemini draws them from the overlay");
-
-      // A swing lasts about a third of a second. At VISION_FPS (5) that is one
-      // or two frames, so the pose data physically cannot contain a swing --
-      // which is why the technique read was two numbers averaged over a whole
-      // rally. Sampling the whole clip fast enough would be ~6x the pose work
-      // on footage that is mostly players standing still; sampling in bursts
-      // around the contacts puts the frames where the information is.
-      //
-      // These land in the same `poses` array as the 5 fps pass, so they are
-      // persisted, drawn on the overlay, and read by the coaching layer with
-      // no separate plumbing.
-      if (input.tempDir && allHitsWide.length > 0) {
-        try {
-          const { extractFrameWindows } = await import("@/lib/video/ffmpeg");
-          const { estimatePosesForFrames } = await import("./pose");
-          const burstFps = Math.min(30, Math.max(12, raw.sourceFps || raw.fps || 24));
-          const windows = allHitsWide.map((h) => ({
-            startSeconds: Math.max(0, h.t - SWING_WINDOW_S),
-            endSeconds: Math.min(input.videoDurationSeconds, h.t + SWING_WINDOW_S),
-          }));
-          const burstFrames = await extractFrameWindows(input.videoPath, input.tempDir, windows, {
-            fps: burstFps,
-            maxDimension: Math.max(input.frameWidthPx, 1280),
-          });
-          if (burstFrames.length > 0) {
-            // Burst frames sit BETWEEN the 5 fps track samples, so pose-to-track
-            // matching needs a tolerance or every one of them is dropped.
-            const burstPoses = await estimatePosesForFrames(burstFrames, tracks, 1 / input.visionFps);
-            // Deduplicate before merging. A burst window starts at a contact
-            // time and steps at the burst rate, so some of its frames land on
-            // exactly the 5 fps grid the first pass already covered. Those
-            // duplicates would be written to player_keypoints twice and then
-            // counted twice by every average built from them.
-            const seen = new Set(poses.map((p) => `${p.playerId}@${p.timestampSeconds.toFixed(3)}`));
-            const fresh = burstPoses.filter((p) => {
-              const key = `${p.playerId}@${p.timestampSeconds.toFixed(3)}`;
-              if (seen.has(key)) return false;
-              seen.add(key);
-              return true;
-            });
-            poses = [...poses, ...fresh].sort((a, b) => a.timestampSeconds - b.timestampSeconds);
-            log(`swing detail: ${burstFrames.length} extra frames at ${burstFps.toFixed(0)} fps around `
-              + `${allHitsWide.length} contacts → ${fresh.length} more pose readings `
-              + `(${burstPoses.length - fresh.length} were duplicates of the 5 fps pass) `
-              + `· ${poses.length} poses total`);
-          } else {
-            log("swing detail: no burst frames were produced — technique stays at rally-level averages");
-          }
-        } catch (err) {
-          // Never let the technique extra take down an analysis that otherwise worked.
-          knownLimitations.push(
-            `Close-up pose around contacts failed, so shot-by-shot technique was not measured: ${describeError(err).split("\n")[0]}`
-          );
-          log(`swing detail failed: ${describeError(err).split("\n")[0]}`);
-        }
-      } else if (!input.tempDir) {
-        knownLimitations.push(
-          "Shot-by-shot technique was not measured: no scratch directory was available for close-up pose sampling."
-        );
-      }
-
-      // MEASUREMENT IS OURS; INTERPRETATION IS GEMINI'S.
-      //
-      // One pass over the whole clip rather than one per rally, because there
-      // are no rallies here any more. classifyRally still earns its place: it
-      // computes where the hitter stood, where the ball landed, the zones,
-      // approximate speed, arc, and whether the ball bounced first. All of
-      // that is measurement.
-      //
-      // What it ALSO produces is a shot type, and that is not ours under Ky's
-      // split -- so type, category and outcome are cleared below rather than
-      // shipped as though this system still decided them. analyst-facts.ts
-      // already withholds shot types from the prompt, so Gemini was never
-      // biased by them; but analysis_shots feeds the UI directly, and a
-      // "third_shot_drop" sitting there would be this system asserting
-      // something it no longer works out.
-      stage("shots", "measuring each contact");
-      const allHits: BallHit[] = allHitsWide;
-      if (allHits.length > 0) {
-        const pts = built.points;
-        const bounces = detectBounces(pts, allHits.map((h) => h.t));
-        shots.push(...classifyRally(
-          { rallyIdx: 0, startS: 0, endS: input.videoDurationSeconds, hits: allHits, bounces, ballPoints: pts },
-          ctx
-        ));
-        for (const sh of shots) {
-          sh.type = "unknown";
-          sh.category = "unknown";
-          sh.outcome = "unknown";
-        }
-      }
-
-
-      // Mechanics belong to the SHOT, and are measured here rather than in the
-      // coaching layer for two reasons: the pose bursts and the shots both
-      // exist at this point, and doing it here means a clip has mechanics even
-      // when no coaching read was ever generated. facts.ts computed them for
-      // the tagged self player only; measuring per shot covers whoever actually
-      // hit it, so an opponent's swing is available too.
-      //
-      // A shot with no attributed player, or one the burst never covered,
-      // keeps `mechanics` UNDEFINED. It is never an object of nulls: a coach —
-      // human or model — handed a knee angle of null still writes about knees.
-      stage("mechanics", "measuring your swing at each contact");
-      let measured = 0;
-      for (const shot of shots) {
-        if (!shot.playerId) continue;
-        const forPlayer = poses.filter((pp) => pp.playerId === shot.playerId);
-        if (forPlayer.length === 0) continue;
-        const m = measureSwing(forPlayer, shot.t);
-        if (m.samples < 4 || m.confidence < 0.3) continue;
-        const anyField = m.kneeAngleAtContactDeg !== null || m.contactHeightTorsos !== null
-          || m.backswingShoulders !== null || m.wristSpeedIntoContact !== null;
-        if (!anyField) continue;
-        shot.mechanics = m;
-        measured += 1;
-      }
-      log(`mechanics: measured on ${measured} of ${shots.length} shots`
-        + `${shots.length ? ` (${Math.round((measured / shots.length) * 100)}%)` : ""}`);
-
-      log(`  ${allHits.length} contact(s) measured; shot types are left to the coaching pass`);
-      events.push(...hitsToUnknownShotEvents(allHits));
-    } catch (err) {
-      if (err instanceof BallModelNotConfiguredError) {
-        knownLimitations.push(err.message);
-      } else {
-        const stage = (err as { stage?: string }).stage === "detection" ? "Ball detection" : "Shot analysis";
-        const detail = describeError(err).split("\n")[0];
-        knownLimitations.push(`${stage} failed, so shot types were not classified: ${detail}`);
-        log(`${stage.toLowerCase()} failed: ${detail}`);
-      }
-      shots = [];
-    }
-  }
+  // The net line and band survive the ball's removal, because they are COURT
+  // geometry and always were -- they happened to be computed inside the ball
+  // block, which nearly took them out with it. The overlay draws both, and the
+  // legend (which IS the prompt) tells the model what the band means: a ball
+  // inside it cannot be assigned to a side, because from behind a baseline the
+  // net stands between the camera and the far court. Dropping them would have
+  // left the legend describing something no longer drawn.
+  const netBandPx = netBandImagePx(courtCalibration, input.frameWidthPx, input.frameHeightPx);
+  const netLinePx = netBandPx?.base
+    ?? netLineImagePx(courtCalibration, input.frameWidthPx, input.frameHeightPx);
 
   // Smooth the skeletons before anything reads them.
   //
