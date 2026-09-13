@@ -219,6 +219,13 @@ export async function makeCvProxy(
   // direction costs a pointless transcode on every run.
   if (!sourceWidth || sourceWidth <= maxWidth) return null;
 
+  // Announced BEFORE the work, not after. A transcode of a large clip takes
+  // minutes during which ffmpeg prints nothing, and a silent gap in the log is
+  // indistinguishable from a hang -- which is the exact ambiguity that made the
+  // ten-hour run so hard to diagnose.
+  console.warn(`[proxy] transcoding ${sourceWidth}px -> ${maxWidth}px for the CV passes; `
+    + "this takes a few minutes on a long clip and the log is quiet until it finishes");
+
   try {
     await execFileAsync("ffmpeg", [
       "-y", "-i", filePath,
@@ -232,7 +239,21 @@ export async function makeCvProxy(
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
       "-pix_fmt", "yuv420p",
       outputPath,
-    ], { maxBuffer: 16 * 1024 * 1024 });
+    ], {
+      maxBuffer: 16 * 1024 * 1024,
+      // BOUNDED, because the proxy is an optimisation and an optimisation must
+      // never be able to hang a run. This spawn bypassed cv-scripts.ts's
+      // runPython, which is where CV_STEP_TIMEOUT_MS lives -- so the unbounded
+      // wait that once left a run sitting on "Tracking the ball" for ten hours
+      // was quietly reintroduced here by a helper that does not go through it.
+      //
+      // 20 minutes is far past any honest transcode: at veryfast a 10-minute
+      // 1080p clip is a few minutes on 8 cores. Past that it is wedged, and the
+      // catch below falls back to reading the original, which is exactly what
+      // happened before this function existed.
+      timeout: Number(process.env.PROXY_TIMEOUT_MS ?? 20 * 60 * 1000),
+      killSignal: "SIGKILL",
+    });
     return outputPath;
   } catch (err) {
     // Never fatal. A failed proxy means the CV passes read the original and

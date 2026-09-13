@@ -4,6 +4,7 @@ import { getAnalysisForUser } from "@/lib/db/analyses";
 import { getAnalysisView } from "@/lib/db/analysis-view";
 import { recentRunSamples } from "@/lib/db/run-history";
 import { estimateRuntime } from "@/lib/analysis/eta";
+import { livenessOf } from "@/lib/analysis/heartbeat";
 
 export const runtime = "nodejs";
 
@@ -43,6 +44,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       ? estimateRuntime(clipS, await recentRunSamples(supabase, user.id))
       : null;
 
+    // Is there still a process behind this row? The stage label alone cannot
+    // say: it is the last value written, so a run that died mid-stage shows
+    // the same spinner as one working through it -- for 32 minutes on a stage
+    // with an 8-minute timeout, or for ten hours.
+    const liveness = livenessOf(analysis.status, analysis.heartbeat_at ?? null);
+
     return NextResponse.json({
       status: analysis.status,
       errorMessage: analysis.error_message,
@@ -50,6 +57,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       updatedAt: analysis.updated_at,
       startedAt: analysis.started_at ?? null,
       eta,
+      looksDead: liveness.looksDead,
+      quietForSeconds: liveness.quietForSeconds,
     }, { headers: { "Cache-Control": "no-store" } });
   }
 

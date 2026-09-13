@@ -93,6 +93,8 @@ export type AnalysisRow = {
   started_at: string | null;
   /** Stamped on 'completed' or 'failed'. Null while running. */
   finished_at: string | null;
+  /** Touched every ~15s by the live run. Quiet on a 'processing' row = dead, not busy. */
+  heartbeat_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -156,6 +158,7 @@ export type AnalysisInsert = {
   debug_video_bucket?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
+  heartbeat_at?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -175,6 +178,7 @@ export type AnalysisUpdate = {
   debug_video_bucket?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
+  heartbeat_at?: string | null;
   created_at?: string;
   updated_at?: string;
 };

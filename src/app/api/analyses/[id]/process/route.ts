@@ -3,6 +3,7 @@ import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { getAnalysisForUser } from "@/lib/db/analyses";
 import { runPipeline } from "@/lib/analysis/pipeline";
 import { kickOffPipelineV2 } from "@/lib/analysis/pipeline-v2";
+import { livenessOf } from "@/lib/analysis/heartbeat";
 
 // Uses fs/child_process (ffmpeg, python) — must run on the Node.js runtime, not Edge.
 export const runtime = "nodejs";
@@ -42,12 +43,21 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   // dead and may be restarted.
   const STALE_AFTER_MS = Number(process.env.PROCESSING_STALE_MS || 30 * 60 * 1000);
   if (analysis.status === "processing" || analysis.status === "queued") {
-    const startedAt = Date.parse(analysis.updated_at ?? analysis.created_at ?? "");
-    const age = Number.isFinite(startedAt) ? Date.now() - startedAt : Infinity;
-    if (age < STALE_AFTER_MS) {
-      return NextResponse.json({ error: "Already processing." }, { status: 409 });
+    // A quiet heartbeat is a far better answer than the 30-minute window, and
+    // it arrives ~28 minutes sooner. The window stays as the fallback for rows
+    // written before 0014 and by older builds, which have no heartbeat at all
+    // and must not be presumed dead on missing data.
+    const { looksDead, quietForSeconds } = livenessOf(analysis.status, analysis.heartbeat_at ?? null);
+    if (looksDead) {
+      console.warn(`[process] restarting ${id}: no heartbeat for ${quietForSeconds}s — its process is gone`);
+    } else {
+      const startedAt = Date.parse(analysis.updated_at ?? analysis.created_at ?? "");
+      const age = Number.isFinite(startedAt) ? Date.now() - startedAt : Infinity;
+      if (age < STALE_AFTER_MS) {
+        return NextResponse.json({ error: "Already processing." }, { status: 409 });
+      }
+      console.warn(`[process] restarting analysis ${id}, stuck in ${analysis.status} for ${Math.round(age / 60000)} min`);
     }
-    console.warn(`[process] restarting analysis ${id}, stuck in ${analysis.status} for ${Math.round(age / 60000)} min`);
   }
 
   const useV2 = (process.env.PIPELINE_VERSION ?? "v2") !== "v1";

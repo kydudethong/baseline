@@ -18,6 +18,7 @@ import { LOCAL_BUCKET, R2_BUCKET, debugVideoDir, debugVideoKey, debugVideoObject
 import { isLocalDev } from "@/lib/deployment";
 import type { AnalysisProgress, AnalysisStage } from "@/lib/db/types";
 import { CoachingPipelineError, runCoachingPipeline } from "@/lib/coaching/run-coaching";
+import { startHeartbeat } from "./heartbeat";
 
 const VISION_FPS = Number(process.env.VISION_FPS ?? "5");
 
@@ -70,6 +71,14 @@ export async function runPipelineV2(
   // processing started. These three throws used to happen outside it, and
   // kickOffPipelineV2's catch only console.errors -- a silent no-op.
   let tempDir: string | null = null;
+  // Started here, beside runStarted() and beginRun(), because the three answer
+  // the same question from different angles: is this run alive. The watchdog
+  // asks it to decide whether to sleep the machine, the registry to decide
+  // whether "stop" has anything to abort, and this so a READER can tell a run
+  // that is working from one whose process no longer exists. Nothing else can
+  // tell those apart -- every timeout in this codebase catches a hung process,
+  // and none catches a dead one.
+  const heartbeat = startHeartbeat(supabase, analysisId);
 
   try {
     const analysis = await getAnalysisForUser(supabase, userId, analysisId);
@@ -287,6 +296,10 @@ export async function runPipelineV2(
     await updateAnalysisStatus(supabase, analysisId, "failed", { errorMessage: message });
     throw err;
   } finally {
+    // Before anything else in here: once this returns, the row must stop
+    // claiming to be alive. A heartbeat that outlived its run would be worse
+    // than none, because it would vouch for a process that has exited.
+    heartbeat.stop();
     runFinished();
     clearActiveRunSignal(controller.signal);
     endRun(analysisId, controller);

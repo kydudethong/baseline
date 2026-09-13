@@ -50,6 +50,12 @@ export function AnalysisProgress({
   const [unreachable, setUnreachable] = useState(false);
   const [eta, setEta] = useState<Eta | null>(null);
   const [startedAt, setStartedAt] = useState<string | null>(null);
+  // Reported by the server from the run's own heartbeat. The stage label below
+  // cannot answer this: it is the last value WRITTEN, so a run whose process
+  // died mid-stage shows exactly the same spinner as one still working -- for
+  // 32 minutes on a stage with an 8-minute timeout, or for ten hours.
+  const [looksDead, setLooksDead] = useState(false);
+  const [quietForSeconds, setQuietForSeconds] = useState<number | null>(null);
   // Ticks once a second purely so elapsed time moves. The poll is every few
   // seconds and stays that way; a clock that only advanced when the network
   // answered would stutter.
@@ -67,6 +73,7 @@ export function AnalysisProgress({
         const data = await res.json() as {
           status: string; progress: Progress | null;
           eta?: Eta | null; startedAt?: string | null;
+          looksDead?: boolean; quietForSeconds?: number | null;
         };
         if (!alive) return;
         setUnreachable(false);
@@ -74,6 +81,8 @@ export function AnalysisProgress({
         setStatus(data.status);
         setEta(data.eta ?? null);
         setStartedAt(data.startedAt ?? null);
+        setLooksDead(data.looksDead === true);
+        setQuietForSeconds(data.quietForSeconds ?? null);
         // The run ended. Re-render the page once so the finished analysis (or
         // the failure) replaces this panel, then stop polling.
         if (data.status !== "processing" && data.status !== "queued" && !finished.current) {
@@ -117,11 +126,24 @@ export function AnalysisProgress({
     <section className="card stack g3">
       <div className="row" style={{ justifyContent: "space-between", gap: 12, flexWrap: "nowrap", alignItems: "flex-start" }}>
         <div style={{ minWidth: 0 }}>
-          <p className="eyebrow">Analysing</p>
-          <p className="sm" style={{ margin: 0 }}>
-            {etaSentence(eta, elapsedS ?? 0)} You can leave this page — the analysis
-            keeps running and will be here when you come back.
-          </p>
+          <p className="eyebrow">{looksDead ? "Stopped" : "Analysing"}</p>
+          {looksDead ? (
+            // Said plainly, because the alternative is what happened twice: a
+            // spinner that means nothing, and no way to tell from this page
+            // that there is nothing left to wait for.
+            <p className="sm" style={{ margin: 0 }}>
+              This run stopped responding
+              {quietForSeconds !== null ? ` ${humanDuration(quietForSeconds)} ago` : ""} — its
+              server was almost certainly restarted or ran out of memory partway through.
+              Nothing is still working on it, so waiting will not help. Press{" "}
+              <strong>Stop analysis</strong> and run it again; your video is untouched.
+            </p>
+          ) : (
+            <p className="sm" style={{ margin: 0 }}>
+              {etaSentence(eta, elapsedS ?? 0)} You can leave this page — the analysis
+              keeps running and will be here when you come back.
+            </p>
+          )}
         </div>
         {elapsedS !== null ? (
           <p className="xs num" style={{ margin: 0, whiteSpace: "nowrap" }}>
