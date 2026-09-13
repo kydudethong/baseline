@@ -26,8 +26,19 @@ export interface CourtCorners {
 }
 
 export interface CourtCalibration {
-  /** How this calibration was produced. Never silently swapped for a fake one. */
-  method: "classical-cv-hsv-contour" | "rally_seg-classical" | "manual" | "mock";
+  /**
+   * How this calibration was produced. Never silently swapped for a fake one.
+   *
+   * "not-marked" means nobody told us where the court is and nothing tried to
+   * guess -- distinct from a detector that ran and failed, which is why it is
+   * its own value rather than a zero-confidence "manual".
+   *
+   * "classical-cv-hsv-contour" and "rally_seg-classical" are no longer
+   * produced: both automatic detectors were removed (see run-vision-pipeline).
+   * They stay in the union because analyses recorded before that still carry
+   * them, and reading old rows must not become a type error.
+   */
+  method: "classical-cv-hsv-contour" | "rally_seg-classical" | "manual" | "mock" | "not-marked";
   /** 0 means "could not calibrate" — corners will be null in that case. */
   confidence: number;
   /** Pixel coordinates in the source frame used for calibration. */

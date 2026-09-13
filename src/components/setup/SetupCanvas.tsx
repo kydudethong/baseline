@@ -799,47 +799,88 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
 
       {/* --- the verdict ----------------------------------------------- */}
       {!fixing ? (
-        <div className="card stack g3">
-          <div className="row g2" style={{ justifyContent: "space-between" }}>
-            <span className="eyebrow">Does this look right?</span>
-            <span className={`pill ${ready ? "p-good" : courtDone ? "p-warn" : "p-neutral"}`}>
+        <div className="card stack g4">
+          <div className="row g2" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <span className="eyebrow">Set up this clip</span>
+            <span className={`pill ${ready ? "p-good" : "p-warn"}`}>
               <span className="dot" />
-              {ready ? "Ready to analyse"
-                : courtDone ? `Court found · ${players.length} player${players.length === 1 ? "" : "s"} · pick yourself`
-                : "Court not found"}
+              {ready ? "Ready to analyse" : `${(courtDone ? 1 : 0) + (selfChosen ? 1 : 0)} of 2 done`}
             </span>
           </div>
-          <p className="sm measure" style={{ margin: 0, opacity: 0.8 }}>
-            Blue lines are the court, pink is the net with its real height. Click
-            the player who is <strong>you</strong> — they turn yellow.
-            {courtDone ? " Drag any corner and everything moves with it." : ""}
-            {" "}If a corner sits outside the video, click out in the dark
-            margin where it would be — the dashed line marks the edge of the
-            footage, and a corner beyond it works exactly the same.
-          </p>
-          <p className="sm" style={{ margin: 0, opacity: 0.65 }}>
-            {matchMode === "singles" ? "Singles" : "Doubles"} ·{" "}
-            {lineColor ? (
-              <>
-                lines sampled as{" "}
-                <span style={{
-                  display: "inline-block", width: 10, height: 10, borderRadius: 3,
-                  background: lineColor, border: "1px solid var(--line)",
-                  verticalAlign: "middle",
-                }} />{" "}
-                {lineColor}
-              </>
-            ) : "white lines"}
-            {" — change either under “Something’s wrong”."}
-          </p>
+
           {/*
-            Presets belong in the MAIN view, not only inside "Something's
-            wrong". Saving a court is not error recovery -- the moment you most
-            want to save one is when the detector got it RIGHT, which is
-            exactly the moment this panel is showing and the fix-it panel is
-            not. And a returning player wants to APPLY a saved court before
-            touching anything, not after declaring something broken.
+            TWO STEPS AS TILES, not four paragraphs of grey prose.
+            Setup has exactly two requirements and the old panel expressed them
+            as explanation -- a reader had to parse three sentences at 0.65
+            opacity to work out what was being asked, and the tools for the
+            NORMAL path sat behind a button labelled "Something's wrong", which
+            made marking a court feel like error recovery. State, instruction
+            and the action that satisfies it now live together in one tile
+            each, colour-carried so the eye lands on whichever is unfinished.
           */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: "var(--a3)" }}>
+            {([
+              {
+                done: courtDone,
+                n: "1",
+                title: "The court",
+                body: courtDone
+                  ? "Marked. Drag any corner to nudge it — the kitchen, centre lines and net follow."
+                  : corners.length === 0
+                    ? "Click the four corners of the court, starting at the near-left."
+                    : `${4 - corners.length} corner${4 - corners.length === 1 ? "" : "s"} to go.`,
+                action: courtDone ? "Adjust corners" : "Mark the corners",
+                onAction: () => { setFixing(true); setStage("court"); },
+              },
+              {
+                done: selfChosen,
+                n: "2",
+                title: "Which player is you",
+                body: selfChosen
+                  ? "Tagged. Everything in the coaching read is about this player."
+                  : players.length === 0
+                    ? "Click yourself on the frame above, at your feet."
+                    : `Click yourself on the frame above — ${players.length} player${players.length === 1 ? "" : "s"} found. You turn yellow.`,
+                action: selfChosen ? "Change who is you" : null,
+                onAction: () => { setFixing(true); setStage("players"); },
+              },
+            ]).map((step) => (
+              <div
+                key={step.n}
+                className="stack g2"
+                style={{
+                  padding: "var(--a4)",
+                  borderRadius: "var(--r3)",
+                  // Colour carries the state so it reads before the words do:
+                  // finished recedes, unfinished is where the eye goes.
+                  background: step.done ? "var(--good-wash)" : "var(--warn-wash)",
+                  border: `1px solid ${step.done ? "var(--good)" : "var(--warn)"}`,
+                }}
+              >
+                <div className="row g2" style={{ alignItems: "center" }}>
+                  <span style={{
+                    width: 22, height: 22, borderRadius: "50%", display: "grid", placeItems: "center",
+                    background: step.done ? "var(--good)" : "var(--warn)", color: "#fff",
+                    fontSize: 12, fontWeight: 700, flex: "none",
+                  }}>
+                    {step.done ? "✓" : step.n}
+                  </span>
+                  <strong style={{ fontSize: 15 }}>{step.title}</strong>
+                </div>
+                <p className="sm" style={{ margin: 0, color: step.done ? "var(--good)" : "var(--warn)" }}>
+                  {step.body}
+                </p>
+                {step.action ? (
+                  <div>
+                    <button type="button" className="btn btn-sm btn-soft" onClick={step.onAction}>
+                      {step.action}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+
           <CourtPresetBar
             corners={corners}
             lineColorHex={lineColor}
@@ -852,17 +893,19 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             }}
             onApply={(next) => { setCorners(next); setFixing(true); setStage("court"); }}
           />
-          <div className="row g2">
+
+          <div className="row g2" style={{ alignItems: "center", flexWrap: "wrap" }}>
             <button
               type="button"
               className="btn btn-primary"
               disabled={saving || !ready}
+              title={ready ? undefined : "Finish both steps above first"}
               onClick={() => save(true)}
             >
               {saving ? "Saving…" : "Looks right — analyse"}
             </button>
             <button type="button" className="btn btn-soft" onClick={() => setFixing(true)}>
-              Something&apos;s wrong
+              More settings
             </button>
             {!embedded ? (
               <button type="button" className="btn btn-ghost" disabled={saving} onClick={() => save(false)}>
@@ -870,16 +913,55 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
               </button>
             ) : null}
           </div>
+
+          {/*
+            The detail that used to be three paragraphs of body copy. It is all
+            still true and occasionally needed -- the off-frame corner trick in
+            particular is not guessable -- but it is reference, not instruction,
+            and reference that shouts drowns the two things actually being
+            asked for.
+          */}
+          <details>
+            <summary className="sm" style={{ cursor: "pointer", color: "var(--ink-3)" }}>
+              What the colours mean, and marking a corner that is off-screen
+            </summary>
+            <div className="stack g2" style={{ marginTop: "var(--a2)" }}>
+              <p className="sm measure" style={{ margin: 0, color: "var(--ink-2)" }}>
+                Blue lines are the court. Pink is the net, drawn at its real height.
+                Green boxes are tracked players; the one you pick turns yellow.
+              </p>
+              <p className="sm measure" style={{ margin: 0, color: "var(--ink-2)" }}>
+                If a corner sits outside the video, click out in the dark margin where
+                it would be — the dashed line marks the edge of the footage, and a
+                corner beyond it works exactly the same.
+              </p>
+              <p className="sm" style={{ margin: 0, color: "var(--ink-3)" }}>
+                {matchMode === "singles" ? "Singles" : "Doubles"} ·{" "}
+                {lineColor ? (
+                  <>
+                    lines sampled as{" "}
+                    <span style={{
+                      display: "inline-block", width: 10, height: 10, borderRadius: 3,
+                      background: lineColor, border: "1px solid var(--line)",
+                      verticalAlign: "middle",
+                    }} />{" "}
+                    {lineColor}
+                  </>
+                ) : "white lines"}
+                {" — change either under “More settings”."}
+              </p>
+            </div>
+          </details>
         </div>
       ) : (
         <div className="card stack g4">
           <div className="row g2" style={{ justifyContent: "space-between" }}>
-            <span className="eyebrow">Fix it yourself</span>
+            <span className="eyebrow">More settings</span>
             <button
               type="button"
               className="btn btn-soft btn-sm"
               onClick={() => setFixing(false)}
-              title="Close these tools and go back to the summary"
+              title="Close these tools and go back"
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M3 8.5 6.2 12 13 4.5" stroke="currentColor" strokeWidth="2"
@@ -901,7 +983,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
 
           <div className="grid2">
             <div className="stack g2">
-              <strong style={{ fontSize: 14 }}>The court or net is wrong</strong>
+              <strong style={{ fontSize: 14 }}>Court &amp; net</strong>
               <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
                 {courtDone
                   ? "Drag any corner to nudge it. The kitchen line, centre lines and net follow the corners — when those land on the paint, the geometry is right. A corner can sit outside the video: drag it out into the margin past the dashed edge."
@@ -921,25 +1003,12 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                   onChange={(e) => setQuadKind(e.target.checked ? "near-half" : "full")} />
                 The far baseline is hidden — I marked the net instead
               </label>
-              <CourtPresetBar
-                corners={corners}
-                lineColorHex={lineColor}
-                matchMode={matchMode}
-                // The video's natural size, which is the space `corners` are
-                // in -- read on demand because it lives on a ref and arrives
-                // after first paint.
-                readFrameSize={() => {
-                  const v = videoRef.current;
-                  return v && v.videoWidth > 0 && v.videoHeight > 0
-                    ? { width: v.videoWidth, height: v.videoHeight }
-                    : null;
-                }}
-                onApply={(next) => { setCorners(next); setStage("court"); }}
-              />
+              {/* Presets live in the MAIN view now. Two copies of one control
+                  in two panels is two places for the same state to disagree. */}
             </div>
 
             <div className="stack g2">
-              <strong style={{ fontSize: 14 }}>The lines are not white</strong>
+              <strong style={{ fontSize: 14 }}>Line colour</strong>
               <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
                 The court fitter looks for white paint. If yours is blue,
                 yellow or black it will not find the court at all — no amount

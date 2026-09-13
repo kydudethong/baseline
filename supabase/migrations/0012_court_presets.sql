@@ -58,6 +58,7 @@ alter table public.court_presets enable row level security;
 
 -- A preset is personal data: it says where someone plays. Owner-only, all
 -- four verbs, no shared read.
+drop policy if exists "court_presets are owner-only" on public.court_presets;
 create policy "court_presets are owner-only" on public.court_presets
   for all
   using (auth.uid() = user_id)

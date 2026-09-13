@@ -14,9 +14,8 @@ import { smoothPoseFrames } from "./pose-smooth";
 import { gateImplausibleLimbs } from "./pose-limbs";
 import { majoritySide, partnerGap, partnerOf, zoneBreakdown, type PlayerPositions } from "./positioning";
 import { describeError } from "@/lib/analysis/describe-error";
-import { detectCourtViaRallySeg, rallySegCourtEnabled } from "./court-rally-seg";
 import {
-  matchTracksToSetup, rallySegOverridesForSetup,
+  matchTracksToSetup,
   type PreAnalysisSetup,
 } from "@/lib/db/setup";
 import type {
@@ -175,69 +174,68 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // court can drop confidence to 0 on one frame while a frame a few
   // seconds away calibrates fine. Try several evenly-spaced candidates and
   // keep the highest-confidence result, rather than gambling on one frame.
-  let courtCalibration: CourtCalibration | null = null;
-
-  // 1. What the user marked by hand during setup. Four clicks on the painted
-  //    lines beat anything either detector can fit, and nothing should ever
-  //    silently overrule a person who looked at the frame.
+  // THE COURT COMES FROM THE PERSON WHO LOOKED AT THE FRAME. Both automatic
+  // detectors are gone.
+  //
+  // They were not removed for being slow -- marked corners resolve in zero
+  // seconds and always did. They were removed for being wrong in ways that
+  // could not be fixed by tuning:
+  //
+  //   rally_seg fitted quads over Hough-clustered line segments and took a
+  //   consensus across frames. On real footage it reported "2 of 45 agreed,
+  //   line support 0.64" and refused the fit -- a fit whose line support was
+  //   BETTER than one previously verified to within 10px of hand-marked
+  //   corners. Players stand on the lines, so most per-frame fits disagree,
+  //   and the vote is diluted by frames that fitted something else badly.
+  //
+  //   detect_court.py masked the playing SURFACE by hue, which means faded
+  //   asphalt, indoor wood and any third palette give it nothing to grab, and
+  //   two adjacent courts of one colour merge into a single blob. Its
+  //   minAreaRect fallback then returned a plausible-looking rectangle in the
+  //   wrong place, which is worse than returning nothing.
+  //
+  // A wrong court is worse than no court: the homography turns pixels into
+  // feet, so every distance, zone and side label downstream is confidently
+  // wrong with nothing on screen to say so. Four clicks are more accurate than
+  // either detector, take ten seconds, and a saved court preset means a venue
+  // is marked once rather than once per upload.
   const marked = calibrationFromSetup(input.setup ?? null, input.frameWidthPx, input.frameHeightPx);
-  if (marked) {
-    courtCalibration = marked;
-    log("court: using the corners you marked during setup");
-  }
+  let courtCalibration: CourtCalibration = marked ?? {
+    // Not a failure, and not a guess: an explicit "nobody told us where the
+    // court is". Confidence 0 is the signal every consumer already honours,
+    // so no downstream code needs a new case.
+    method: "not-marked",
+    confidence: 0,
+    quadKind: null,
+    cornersImagePx: null,
+    frameTimestampSeconds: 0,
+    diagnostics: { reason: "no corners marked in setup and automatic detection has been removed" },
+  };
+  log(marked
+    ? "court: using the corners you marked during setup"
+    : "court: not marked — spatial metrics will be null for this run");
 
-  // 2. rally_seg's classical fit. It searches quads over Hough-clustered line
-  //    segments and scores each on the paint it explains *and* the regions it
-  //    claims are blank, then takes the consensus across independently fitted
-  //    frames. On low-tripod footage this app's own contour detector returns a
-  //    ~60px sliver and calls it 0.777 confident; rally_seg lands within ~10px
-  //    of hand-marked corners on the same clip.
-  if (!courtCalibration && rallySegCourtEnabled()) {
-    courtCalibration = await detectCourtViaRallySeg(
-      input.videoPath, [input.frameWidthPx, input.frameHeightPx], (l) => log(`  court: ${l}`),
-      rallySegOverridesForSetup(input.setup ?? null)
-    );
-    if (courtCalibration) {
-      const d = courtCalibration.diagnostics as { agreement?: number };
-      log(`court: rally_seg fitted (${courtCalibration.quadKind}), line support `
-        + `${courtCalibration.confidence.toFixed(3)}, ${Math.round((d.agreement ?? 0) * 100)}% frame agreement`);
-    }
-  }
-
-  // 3. This app's own detector. Court geometry doesn't change within a
-  //    fixed-camera clip, but which frame it runs on matters: a player over
-  //    the paint, motion blur, or a neighbouring court caught by the colour
-  //    mask can drop confidence to 0 on one frame and not the next.
-  if (!courtCalibration) {
-    const candidateIndices = [0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95].map((f) => Math.floor(input.frames.length * f));
-    for (const idx of candidateIndices) {
-      const frame = input.frames[idx];
-      if (!frame) continue;
-      const candidate = await provider.detectCourt(frame);
-      if (!courtCalibration || candidate.confidence > courtCalibration.confidence) {
-        courtCalibration = candidate;
-      }
-      if (courtCalibration.confidence >= 0.8) break; // good enough, stop spending calls
-    }
-    courtCalibration ??= await provider.detectCourt(input.frames[0]);
-    log(`court calibration confidence ${courtCalibration.confidence}${courtCalibration.quadKind ? ` (${courtCalibration.quadKind})` : ""}`);
-  }
-
-  // Confidence is a detector's self-assessment; plausibility is a fact about
-  // the quad. A geometrically impossible court is worse than none, because
-  // every consumer treats a non-zero confidence as permission to measure.
+  // Plausibility is a fact about the quad, not a self-assessment. Still worth
+  // checking on MARKED corners: a mis-drag or a stale preset applied to a
+  // differently framed video can produce a geometrically impossible court, and
+  // every consumer treats non-zero confidence as permission to measure.
   if (courtCalibration.confidence > 0
       && !isPlausibleCourtQuad(courtCalibration, input.frameWidthPx, input.frameHeightPx)) {
-    log(`court: rejecting an implausible quad reported at ${courtCalibration.confidence.toFixed(3)} confidence`);
+    log("court: the marked corners are geometrically impossible for this frame — discarding");
     knownLimitations.push(
-      "The detected court was geometrically impossible for this frame and was discarded — "
-      + "movement distances and in/out calls are unavailable. Mark the four corners in setup to fix this."
+      "The court corners marked in setup are geometrically impossible for this footage — they were "
+      + "discarded, so distances and court zones are unavailable. Re-mark the four corners, or "
+      + "re-apply your saved court if the camera moved."
     );
     courtCalibration = { ...courtCalibration, confidence: 0, cornersImagePx: null };
   }
 
   if (courtCalibration.confidence === 0) {
-    knownLimitations.push("Court calibration failed on every candidate frame tried — movement metrics will be null for every player.");
+    knownLimitations.push(
+      "No court was marked, so nothing could be measured in feet: court position, kitchen-line "
+      + "time and movement distances are unavailable, and players on neighbouring courts could not "
+      + "be excluded. Mark the four corners in setup and run it again."
+    );
   }
 
   // Player detection, one Roboflow call per sampled frame. Sequential

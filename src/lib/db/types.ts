@@ -693,9 +693,49 @@ export type CoachingShotTechniqueInsert = Omit<CoachingShotTechniqueRow, "id" | 
   created_at?: string;
 };
 
+export type CoachingPracticePlanRow = {
+  id: string;
+  analysis_id: string;
+  focus: string;
+  total_minutes: number | null;
+  /** What a later analysis can confirm or refute — the closed loop reads this. */
+  success_looks_like: string | null;
+  created_at: string;
+};
+export type CoachingPracticePlanInsert = Omit<CoachingPracticePlanRow, "id" | "created_at">
+  & { id?: string; created_at?: string };
+
+export type CoachingPracticeBlockRow = {
+  id: string;
+  plan_id: string;
+  idx: number;
+  kind: "warmup" | "drill" | "game" | "cooldown";
+  name: string;
+  drill_slug: string | null;
+  minutes: number | null;
+  how: string;
+  success: string | null;
+  targets: string | null;
+  created_at: string;
+};
+export type CoachingPracticeBlockInsert = Omit<CoachingPracticeBlockRow, "id" | "created_at">
+  & { id?: string; created_at?: string };
+
 export type Database = {
   public: {
     Tables: {
+      coaching_practice_plans: {
+        Row: CoachingPracticePlanRow;
+        Insert: CoachingPracticePlanInsert;
+        Update: Partial<CoachingPracticePlanInsert>;
+        Relationships: [];
+      };
+      coaching_practice_blocks: {
+        Row: CoachingPracticeBlockRow;
+        Insert: CoachingPracticeBlockInsert;
+        Update: Partial<CoachingPracticeBlockInsert>;
+        Relationships: [];
+      };
       coaching_shot_technique: {
         Row: CoachingShotTechniqueRow;
         Insert: CoachingShotTechniqueInsert;

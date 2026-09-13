@@ -198,13 +198,15 @@ begin
   loop
     execute format($f$
       drop policy if exists "%1$s_select_own" on public.%1$I;
-      create policy "%1$s_select_own" on public.%1$I
+      drop policy if exists "%1$s_select_own" on public.;
+create policy "%1$s_select_own" on public.%1$I
         for select using (
           exists (select 1 from public.analyses a where a.id = %1$I.analysis_id and a.user_id = auth.uid())
         );
 
       drop policy if exists "%1$s_service_write" on public.%1$I;
-      create policy "%1$s_service_write" on public.%1$I
+      drop policy if exists "%1$s_service_write" on public.;
+create policy "%1$s_service_write" on public.%1$I
         for all to service_role using (true) with check (true);
     $f$, t);
   end loop;
@@ -223,11 +225,13 @@ begin
         for select using (auth.uid() = user_id);
 
       drop policy if exists "%1$s_insert_own" on public.%1$I;
-      create policy "%1$s_insert_own" on public.%1$I
+      drop policy if exists "%1$s_insert_own" on public.;
+create policy "%1$s_insert_own" on public.%1$I
         for insert with check (auth.uid() = user_id);
 
       drop policy if exists "%1$s_update_own" on public.%1$I;
-      create policy "%1$s_update_own" on public.%1$I
+      drop policy if exists "%1$s_update_own" on public.;
+create policy "%1$s_update_own" on public.%1$I
         for update using (auth.uid() = user_id);
 
       drop policy if exists "%1$s_service_write" on public.%1$I;

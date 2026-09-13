@@ -54,6 +54,7 @@ alter table public.coaching_shot_technique enable row level security;
 
 -- Readable and writable only through the owning analysis, matching how every
 -- other coaching table is gated.
+drop policy if exists "shot technique follows its analysis" on public.coaching_shot_technique;
 create policy "shot technique follows its analysis" on public.coaching_shot_technique
   for all
   using (exists (

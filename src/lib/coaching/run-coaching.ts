@@ -38,6 +38,7 @@ import { buildCoachingFacts } from "./facts";
 import { buildAnalystInput } from "./analyst-facts";
 import { runAnalyst } from "./analyst";
 import { readShotTechnique } from "./technique";
+import { buildPracticePlan } from "./practice-plan";
 import { uploadVideo, deleteFile } from "./gemini";
 import { downloadToFile } from "@/lib/storage/r2";
 import { readOverlayBytes, OverlayMissingError } from "./overlay-source";
@@ -272,6 +273,52 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     }
   } catch (err) {
     console.warn(`[coaching] per-shot technique skipped: ${describeError(err)}`);
+  }
+
+  // A session the player can actually run, from what the analysis found.
+  //
+  // Text-only and last: the video has already been watched twice, everything
+  // this needs is in `out`, and it costs a fraction of a cent. Wrapped like the
+  // technique pass because a missing practice plan is a missing nice-to-have --
+  // the read, the ratings and the drills are already written by now, and losing
+  // those to a failure in the final optional step would be absurd.
+  try {
+    const plan = await buildPracticePlan({
+      model, analyst: out, drills: allDrills,
+      onLog: (l) => console.error(`[coaching] ${l}`),
+    });
+    if (plan) {
+      // Replace, never accumulate: a re-run must not leave last time's session
+      // sitting beside this one, indistinguishable from it.
+      await supabase.from("coaching_practice_plans").delete().eq("analysis_id", analysisId);
+      const { data: planRow, error: planErr } = await supabase
+        .from("coaching_practice_plans")
+        .insert({
+          analysis_id: analysisId,
+          focus: plan.focus,
+          total_minutes: plan.totalMinutes,
+          success_looks_like: plan.successLooksLike,
+        })
+        .select()
+        .single();
+      if (planErr) throw planErr;
+      const { error: blockErr } = await supabase.from("coaching_practice_blocks").insert(
+        plan.blocks.map((b) => ({
+          plan_id: planRow.id,
+          idx: b.idx,
+          kind: b.kind,
+          name: b.name,
+          drill_slug: b.drillSlug,
+          minutes: b.minutes,
+          how: b.how,
+          success: b.success,
+          targets: b.targets,
+        }))
+      );
+      if (blockErr) throw blockErr;
+    }
+  } catch (err) {
+    console.warn(`[coaching] practice plan skipped: ${describeError(err)}`);
   }
 
   // Rallies now come from the analyst, not the segmenter.
