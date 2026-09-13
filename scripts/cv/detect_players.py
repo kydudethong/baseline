@@ -77,6 +77,18 @@ def main() -> int:
     model = YOLO(args.model)
     frames = []
     done = 0
+    # Progress on stderr, like detect_ball.py already does.
+    #
+    # This pass is the longest silent stretch in the whole pipeline -- 4,121
+    # frames on a 14-minute clip, in one call, printing nothing until it
+    # finishes. A quiet stage is indistinguishable from a dead one from
+    # outside, which has now cost several evenings of guessing whether a run
+    # was working or gone. Saying "2400/4121, ~6 min left" costs one line every
+    # few seconds and removes the question.
+    import time as _time
+    t0 = _time.time()
+    print(f"[players] {len(paths)} frames at imgsz {args.imgsz}, batch {args.batch}",
+          file=sys.stderr, flush=True)
     for start in range(0, len(paths), args.batch):
         chunk = paths[start : start + args.batch]
         try:
@@ -89,6 +101,11 @@ def main() -> int:
             for p in chunk:
                 frames.append({"imagePath": p, "players": [], "error": str(exc)[:200]})
             done += len(chunk)
+        if done % 200 < args.batch or done == len(paths):
+            rate = done / max(1e-6, _time.time() - t0)
+            remaining = (len(paths) - done) / max(rate, 1e-6)
+            print(f"[players] {done}/{len(paths)} frames · {rate:.1f} fps · "
+                  f"~{remaining / 60:.1f} min left", file=sys.stderr, flush=True)
             continue
 
         for path, res in zip(chunk, results):
@@ -114,6 +131,11 @@ def main() -> int:
             frames.append({"imagePath": path, "players": players})
 
         done += len(chunk)
+        if done % 200 < args.batch or done == len(paths):
+            rate = done / max(1e-6, _time.time() - t0)
+            remaining = (len(paths) - done) / max(rate, 1e-6)
+            print(f"[players] {done}/{len(paths)} frames · {rate:.1f} fps · "
+                  f"~{remaining / 60:.1f} min left", file=sys.stderr, flush=True)
         print(f"[players] {done}/{len(paths)} frames", file=sys.stderr, flush=True)
 
     out = json.dumps({"frames": frames, "model": os.path.basename(args.model)})

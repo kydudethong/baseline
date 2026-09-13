@@ -4,6 +4,7 @@ import { getAnalysisForUser } from "@/lib/db/analyses";
 import { runPipeline } from "@/lib/analysis/pipeline";
 import { kickOffPipelineV2 } from "@/lib/analysis/pipeline-v2";
 import { livenessOf } from "@/lib/analysis/heartbeat";
+import { runningCount } from "@/lib/analysis/run-registry";
 
 // Uses fs/child_process (ffmpeg, python) — must run on the Node.js runtime, not Edge.
 export const runtime = "nodejs";
@@ -58,6 +59,23 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       }
       console.warn(`[process] restarting analysis ${id}, stuck in ${analysis.status} for ${Math.round(age / 60000)} min`);
     }
+  }
+
+  // ONE RUN PER MACHINE. Refused rather than queued, because a second
+  // concurrent run does not just halve the cores -- it used to corrupt the
+  // first one, since the abort signal was process-wide and the later run took
+  // ownership of it. That specific bug is fixed (run-registry uses
+  // AsyncLocalStorage now), but two analyses sharing 8 cores still means both
+  // take twice as long and the machine is twice as likely to run out of
+  // memory, and neither is what anyone wants from pressing Analyse.
+  if (runningCount() > 0) {
+    return NextResponse.json(
+      {
+        error: "Another analysis is already running on this server. "
+          + "Wait for it to finish and try again — running two at once makes both slower.",
+      },
+      { status: 409 }
+    );
   }
 
   const useV2 = (process.env.PIPELINE_VERSION ?? "v2") !== "v1";

@@ -19,6 +19,7 @@ import { isLocalDev } from "@/lib/deployment";
 import type { AnalysisProgress, AnalysisStage } from "@/lib/db/types";
 import { CoachingPipelineError, runCoachingPipeline } from "@/lib/coaching/run-coaching";
 import { startHeartbeat } from "./heartbeat";
+import { withRunSignal } from "./run-registry";
 
 const VISION_FPS = Number(process.env.VISION_FPS ?? "5");
 
@@ -80,6 +81,12 @@ export async function runPipelineV2(
   // and none catches a dead one.
   const heartbeat = startHeartbeat(supabase, analysisId);
 
+  // Everything below runs inside this run's own signal. setActiveRunSignal
+  // stays as the fallback for any path that somehow escapes the store, but the
+  // store is what makes two concurrent runs safe: without it, the second run
+  // to start silently owns the signal that every LATER subprocess of the first
+  // one is spawned with, and finishing the second kills the first.
+  return withRunSignal(controller.signal, async () => {
   try {
     const analysis = await getAnalysisForUser(supabase, userId, analysisId);
     if (!analysis) throw new Error("Analysis not found");
@@ -307,6 +314,7 @@ export async function runPipelineV2(
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
     }
   }
+  });
 }
 
 // How many sampled frames get a persisted JPEG for the debug page. Deliberately

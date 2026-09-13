@@ -52,6 +52,33 @@ export function cvTimeoutMs(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_CV_TIMEOUT_MS;
 }
 
+/**
+ * A timeout proportional to the work, for the passes that scale with frames.
+ *
+ * A FLAT NUMBER WAS WRONG AND I SHOULD HAVE SEEN IT. 45 minutes was chosen
+ * against a 101-second clip, where every stage finishes in single-digit
+ * minutes. A 14-minute clip produces 4,121 frames, and a stage that honestly
+ * needs an hour on that footage would be SIGKILLed by a bound tuned on
+ * something 8x smaller -- killing real work and reporting it as "waiting on
+ * something that never answered", which is exactly the wrong diagnosis.
+ *
+ * So the bound scales with frame count, with a floor for short clips and a
+ * ceiling that still catches a genuine hang. `secondsPerFrame` is deliberately
+ * loose: it is not a performance target, it is the point past which something
+ * is clearly broken rather than slow.
+ */
+export function frameScaledTimeoutMs(
+  frameCount: number,
+  secondsPerFrame = 3,
+  floorMs = 10 * 60 * 1000,
+  ceilingMs = 3 * 60 * 60 * 1000
+): number {
+  const override = Number(process.env.CV_STEP_TIMEOUT_MS ?? NaN);
+  if (Number.isFinite(override) && override > 0) return override;
+  const scaled = Math.max(0, frameCount) * secondsPerFrame * 1000;
+  return Math.min(ceilingMs, Math.max(floorMs, scaled));
+}
+
 async function runPython(
   scriptName: string,
   args: string[],
@@ -204,8 +231,14 @@ export interface RawPoseResult {
 /** Runs pose estimation on one or more full frames in a single Python process (model loaded once). */
 export async function estimatePoseViaPython(imagePaths: string[]): Promise<RawPoseResult[]> {
   if (imagePaths.length === 0) return [];
+  // streamStderr, like the ball and player passes. This is the longest stage in
+  // the pipeline on a full-length clip and it printed nothing at all, so from
+  // outside it was indistinguishable from a hang -- which is precisely the
+  // ambiguity that has cost several evenings of guessing.
   const stdout = await runPython("estimate_pose.py", [...imagePaths, "--model", POSE_MODEL_PATH], {
     maxBuffer: 50 * 1024 * 1024,
+    streamStderr: true,
+    timeoutMs: frameScaledTimeoutMs(imagePaths.length),
   });
   return stdout
     .split("\n")
@@ -317,7 +350,7 @@ export async function detectPlayersViaPython(
     await fsp.writeFile(framesJson, JSON.stringify(framePaths), "utf8");
     await runPython("detect_players.py",
       ["--frames-json", framesJson, "--model", model, "--out", outPath],
-      { streamStderr: true });
+      { streamStderr: true, timeoutMs: frameScaledTimeoutMs(framePaths.length) });
     const raw = JSON.parse(await fsp.readFile(outPath, "utf8")) as RawPlayerDetections;
     const byPath = new Map<string, RawPlayerDetections["frames"][number]["players"]>();
     for (const f of raw.frames) byPath.set(f.imagePath, f.players);

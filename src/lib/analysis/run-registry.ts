@@ -20,6 +20,8 @@
  * to clear.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
+
 export class RunCancelledError extends Error {
   readonly cancelled = true;
   constructor(message = "Analysis stopped.") {
@@ -83,37 +85,54 @@ export function cancelRun(analysisId: string, reason = "Analysis stopped."): boo
 /**
  * The signal every subprocess started by the current run should honour.
  *
- * Module-level rather than a parameter on each of the dozen spawn sites. The
- * alternative is threading an AbortSignal through every helper and every
- * caller of every helper, where ONE missed call site is an unkillable
- * four-minute Python process -- the exact thing cancelling exists to stop. One
- * place to set it is one place to get it wrong.
+ * PER-RUN, via AsyncLocalStorage, and it has to be. This was a single
+ * module-level variable, on the reasoning that "the machine runs one analysis
+ * at a time". That stopped being true the moment two analyses overlapped, and
+ * the failure was vicious: run B's setActiveRunSignal overwrote run A's, so
+ * every subprocess A started AFTERWARDS was tied to B's lifetime. Finishing or
+ * cancelling B killed A mid-pass, and A reported "The operation was aborted"
+ * with nothing anywhere to say who had aborted it. Observed exactly that:
+ * player detection dying at 528 of 4121 frames.
  *
- * Correct because the machine runs one analysis at a time; a run has this
- * process to itself. If that ever stops being true this has to become per-run
- * state keyed by analysis id, and the spawn sites have to take it as an
- * argument after all.
+ * AsyncLocalStorage is the right shape because the signal has to follow the
+ * async call chain rather than the clock. A run's pipeline awaits through a
+ * dozen layers before it spawns anything, and every one of those frames stays
+ * inside the store, so a spawn site deep in cv-scripts.ts reads ITS OWN run's
+ * signal without anyone threading a parameter through.
  */
-let activeSignal: AbortSignal | undefined;
+const signalStore = new AsyncLocalStorage<AbortSignal>();
+
+/**
+ * Fallback for anything not yet running inside the store.
+ *
+ * Kept so a call path that has not been wrapped degrades to the old behaviour
+ * rather than silently losing cancellation -- an unkillable four-minute Python
+ * process is worse than a shared one.
+ */
+let legacyActiveSignal: AbortSignal | undefined;
+
+/** Run `fn` with `signal` as the active one for everything it awaits. */
+export function withRunSignal<T>(signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+  return signalStore.run(signal, fn);
+}
 
 export function setActiveRunSignal(signal: AbortSignal | undefined): void {
-  activeSignal = signal;
+  legacyActiveSignal = signal;
 }
 
 /**
- * Clear the active signal, but only if it is still the one you set.
+ * Clear the fallback, but only if it is still the one you set.
  *
- * The same trap endRun() guards: a run that was replaced eventually unwinds,
- * and if it cleared unconditionally it would strip the signal off its
- * SUCCESSOR -- whose subprocesses would then spawn unkillable. Clearing
- * conditionally makes the late finally harmless.
+ * The trap this guards: a run that was replaced eventually unwinds, and if it
+ * cleared unconditionally it would strip the signal off its SUCCESSOR, whose
+ * subprocesses would then spawn unkillable.
  */
 export function clearActiveRunSignal(signal: AbortSignal | undefined): void {
-  if (!signal || activeSignal === signal) activeSignal = undefined;
+  if (!signal || legacyActiveSignal === signal) legacyActiveSignal = undefined;
 }
 
 export function activeRunSignal(): AbortSignal | undefined {
-  return activeSignal;
+  return signalStore.getStore() ?? legacyActiveSignal;
 }
 
 export function isRunning(analysisId: string): boolean {
@@ -127,5 +146,5 @@ export function runningCount(): number {
 /** Testing seam. */
 export function __resetRunRegistry(): void {
   running.clear();
-  activeSignal = undefined;
+  legacyActiveSignal = undefined;
 }

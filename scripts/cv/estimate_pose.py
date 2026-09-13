@@ -28,7 +28,9 @@ Prints one JSON object per line to stdout (JSONL), one per input image:
 }
 """
 import sys
+import os
 import json
+import time
 import argparse
 
 # COCO 17-keypoint order, as produced by YOLOv8-pose.
@@ -45,6 +47,17 @@ def main():
     parser.add_argument("image_paths", nargs="+")
     parser.add_argument("--model", default=None, help="Path to a yolov8*-pose.pt weights file")
     parser.add_argument("--conf", type=float, default=0.25)
+    # BATCHED, because this was one model call per image over every sampled
+    # frame of the clip -- 4,121 of them on a 14-minute video -- and it was by
+    # far the longest stage in the pipeline. detect_players.py right next door
+    # already batches; pose simply never did. One call over N frames amortises
+    # the per-call Python, preprocessing and postprocessing cost that dominates
+    # at this model size, exactly as it did for the ball detector.
+    parser.add_argument("--batch", type=int, default=int(os.environ.get("POSE_BATCH", "16")))
+    # Pinned rather than left to ultralytics' default, so the cost per frame
+    # does not silently depend on the source resolution: a 1080p frame and a
+    # 720p frame should cost the same here.
+    parser.add_argument("--imgsz", type=int, default=int(os.environ.get("POSE_IMGSZ", "640")))
     args = parser.parse_args()
 
     if not args.model:
@@ -55,57 +68,76 @@ def main():
 
     model = YOLO(args.model)
 
-    for image_path in args.image_paths:
+    paths = args.image_paths
+    done = 0
+    t0 = time.time()
+    print(f"[pose] {len(paths)} frames at imgsz {args.imgsz}, batch {args.batch}",
+          file=sys.stderr, flush=True)
+
+    for start in range(0, len(paths), args.batch):
+        chunk = paths[start : start + args.batch]
         try:
-            results = model(image_path, verbose=False, conf=args.conf)
+            batch_results = model(chunk, verbose=False, conf=args.conf, imgsz=args.imgsz)
         except Exception as exc:  # noqa: BLE001 — surface as data, not a crash
-            print(json.dumps({"imagePath": image_path, "error": str(exc), "people": []}))
+            # One bad batch must not lose the rest of the clip. Every frame in
+            # it is reported as its own failure, so the shape of the output is
+            # identical to the unbatched version and no caller has a new case.
+            for image_path in chunk:
+                print(json.dumps({"imagePath": image_path, "error": str(exc), "people": []}))
+            done += len(chunk)
             continue
 
-        r = results[0]
-        h, w = r.orig_shape
-        people = []
+        for image_path, r in zip(chunk, batch_results):
+            h, w = r.orig_shape
+            people = []
 
-        boxes = r.boxes
-        kpts = r.keypoints
+            boxes = r.boxes
+            kpts = r.keypoints
 
-        n = 0 if boxes is None else len(boxes)
-        for i in range(n):
-            cls = int(boxes.cls[i]) if boxes.cls is not None else None
-            if cls != 0:  # class 0 = person in COCO
-                continue
-            conf = float(boxes.conf[i]) if boxes.conf is not None else None
-            xywhn = boxes.xywhn[i].tolist()  # [x_center, y_center, w, h], normalized
+            n = 0 if boxes is None else len(boxes)
+            for i in range(n):
+                cls = int(boxes.cls[i]) if boxes.cls is not None else None
+                if cls != 0:  # class 0 = person in COCO
+                    continue
+                conf = float(boxes.conf[i]) if boxes.conf is not None else None
+                xywhn = boxes.xywhn[i].tolist()  # [x_center, y_center, w, h], normalized
 
-            keypoints = []
-            if kpts is not None and kpts.xy is not None:
-                xy = kpts.xy[i]  # (17, 2) pixel coords
-                conf_arr = kpts.conf[i] if kpts.conf is not None else None
-                for k, name in enumerate(COCO_KEYPOINT_NAMES):
-                    if k >= xy.shape[0]:
-                        break
-                    px, py = float(xy[k][0]), float(xy[k][1])
-                    kconf = float(conf_arr[k]) if conf_arr is not None else None
-                    keypoints.append({
-                        "name": name,
-                        "xNorm": px / w if w else None,
-                        "yNorm": py / h if h else None,
-                        "confidence": kconf,
-                    })
+                keypoints = []
+                if kpts is not None and kpts.xy is not None:
+                    xy = kpts.xy[i]  # (17, 2) pixel coords
+                    conf_arr = kpts.conf[i] if kpts.conf is not None else None
+                    for k, name in enumerate(COCO_KEYPOINT_NAMES):
+                        if k >= xy.shape[0]:
+                            break
+                        px, py = float(xy[k][0]), float(xy[k][1])
+                        kconf = float(conf_arr[k]) if conf_arr is not None else None
+                        keypoints.append({
+                            "name": name,
+                            "xNorm": px / w if w else None,
+                            "yNorm": py / h if h else None,
+                            "confidence": kconf,
+                        })
 
-            people.append({
-                "boxImageNorm": {
-                    "x": xywhn[0] - xywhn[2] / 2,
-                    "y": xywhn[1] - xywhn[3] / 2,
-                    "width": xywhn[2],
-                    "height": xywhn[3],
-                },
-                "detectionConfidence": conf,
-                "keypoints": keypoints,
-            })
+                people.append({
+                    "boxImageNorm": {
+                        "x": xywhn[0] - xywhn[2] / 2,
+                        "y": xywhn[1] - xywhn[3] / 2,
+                        "width": xywhn[2],
+                        "height": xywhn[3],
+                    },
+                    "detectionConfidence": conf,
+                    "keypoints": keypoints,
+                })
 
-        print(json.dumps({"imagePath": image_path, "people": people}))
-        sys.stdout.flush()
+            print(json.dumps({"imagePath": image_path, "people": people}))
+            sys.stdout.flush()
+
+        done += len(chunk)
+        if done % 200 < args.batch or done == len(paths):
+            rate = done / max(1e-6, time.time() - t0)
+            print(f"[pose] {done}/{len(paths)} frames · {rate:.1f} fps · "
+                  f"~{(len(paths) - done) / max(rate, 1e-6) / 60:.1f} min left",
+                  file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":

@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  RunCancelledError, activeRunSignal, beginRun, cancelRun, clearActiveRunSignal,
-  endRun, isCancellation, isRunning, runningCount, setActiveRunSignal,
-  __resetRunRegistry,
-} from "./run-registry";
+import { RunCancelledError, activeRunSignal, beginRun, cancelRun, clearActiveRunSignal, endRun, isCancellation, isRunning, runningCount, setActiveRunSignal, __resetRunRegistry, withRunSignal } from "./run-registry";
 
 test("a registered run can be cancelled and its signal aborts", () => {
   __resetRunRegistry();
@@ -127,4 +123,40 @@ test("the active signal is what subprocesses would be spawned with", () => {
   cancelRun("a1");
   assert.equal(activeRunSignal()?.aborted, true, "an in-flight spawn sees the abort");
   __resetRunRegistry();
+});
+
+test("two concurrent runs do not share an abort signal", async () => {
+  // The bug this covers, observed in production: player detection died at 528
+  // of 4121 frames with "The operation was aborted", because the signal was a
+  // single module-level variable. The SECOND run to start owned it, so every
+  // later subprocess of the FIRST was tied to the second's lifetime.
+  __resetRunRegistry();
+  const a = beginRun("analysis-a");
+  const b = beginRun("analysis-b");
+
+  const seen: Record<string, AbortSignal | undefined> = {};
+  await Promise.all([
+    withRunSignal(a.signal, async () => {
+      await new Promise((r) => setTimeout(r, 5));   // let b interleave
+      seen.a = activeRunSignal();
+    }),
+    withRunSignal(b.signal, async () => {
+      seen.b = activeRunSignal();
+    }),
+  ]);
+
+  assert.equal(seen.a, a.signal, "run A must still see its own signal");
+  assert.equal(seen.b, b.signal, "run B must see its own");
+  assert.notEqual(seen.a, seen.b);
+});
+
+test("cancelling one run leaves the other's signal untouched", async () => {
+  __resetRunRegistry();
+  const a = beginRun("analysis-a");
+  beginRun("analysis-b");
+  cancelRun("analysis-b");
+
+  await withRunSignal(a.signal, async () => {
+    assert.equal(activeRunSignal()?.aborted, false, "A must not be aborted by B's cancel");
+  });
 });
