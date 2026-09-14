@@ -1,5 +1,6 @@
 import type { MovementMetricRow } from "@/lib/db/types";
 import type { PlayerPositioning } from "@/lib/vision/positioning";
+import { assignRoles, roleNameMap } from "@/lib/vision/player-roles";
 
 /**
  * Where you stood — kitchen-line time, time to the kitchen, partner gap.
@@ -33,6 +34,13 @@ export function PositioningPanel({
 
   if (rows.length === 0) return null;
 
+  // Role names from the same rule the overlay uses, so the boxes on the video
+  // and the cards on this page never call the same person two different things.
+  const names = roleNameMap(assignRoles(
+    rows.map((r) => r.label),
+    selfLabels,
+    (id) => rows.find((r) => r.label === id)?.p.side ?? null
+  ));
   const mine = new Set(selfLabels);
   const ordered = [...rows].sort((a, b) => Number(mine.has(b.label)) - Number(mine.has(a.label)));
 
@@ -52,7 +60,7 @@ export function PositioningPanel({
           return (
             <article key={label} className={`card stack g3${isSelf ? "" : " muted-card"}`}>
               <div className="row g2">
-                <span className="h3" style={{ margin: 0 }}>{isSelf ? "You" : label}</span>
+                <span className="h3" style={{ margin: 0 }}>{names.get(label) ?? label}</span>
                 <span className="pill p-neutral">{p.side === "near" ? "near side" : "far side"}</span>
                 <span className="pill p-good mla">
                   {Math.round(p.zones.kitchen * 100)}% at the kitchen

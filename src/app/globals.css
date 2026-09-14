@@ -588,8 +588,13 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .take-ic.good{background:var(--good-wash);color:var(--good)}
 .take-ic.warn{background:var(--warn-wash);color:var(--warn)}
 .take-ic.bad{background:var(--bad-wash);color:var(--bad)}
-.take-t{font-size:14px;font-weight:600;color:var(--ink);line-height:1.35}
-.take-d{font-size:13px;color:var(--ink-3);line-height:1.45;margin-top:2px}
+/* BLOCK, not inline. These were plain spans, so the title and the detail ran
+   together on one line with no separator at all -- "...below net heightLower
+   your paddle head..." -- and the margin-top below did nothing, because
+   vertical margins do not apply to inline boxes. It read like a rendering
+   failure because it was one. */
+.take-t{display:block;font-size:14px;font-weight:600;color:var(--ink);line-height:1.35}
+.take-d{display:block;font-size:13px;color:var(--ink-3);line-height:1.45;margin-top:3px}
 
 /* ---- Breakdown row (full width, under both columns) ---------------------
    The reference had "8.5/10 Forehand · good swing path, slight grip issue".

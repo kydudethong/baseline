@@ -392,6 +392,12 @@ RULES THAT MATTER MORE THAN COMPLETENESS
   where on the face contact was made. Those are not visible at any frame rate
   from this camera angle, and a read that claims them is a read that invented
   them.
+- WRITE IT THE WAY YOU WOULD SAY IT ON A COURT. No abbreviations the reader
+  has to decode: say "the kitchen line", never "NVZ" or "the NVZ line"; say
+  "the non-volley zone" only if you have already said kitchen. Same for any
+  other initialism -- if a club player would not say it out loud to a partner
+  mid-game, do not write it. A reader who has to look up a term stops reading,
+  and being precise is not the same as being technical.
 - Prefer patterns over single shots. Three dinks taken with straight legs is a
   coaching point; one is noise.
 - Use the measured numbers where they support you. "Knees at 172° on all four

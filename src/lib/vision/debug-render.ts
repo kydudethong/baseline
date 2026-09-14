@@ -62,6 +62,8 @@ export interface DebugRenderInput {
   rallies: ClusteredRally[];
   tracks: PlayerTrack[];
   poses: PlayerPoseFrame[];
+  /** playerId -> "You" / "Partner" / "Opponent 1". Optional; ids are the fallback. */
+  roleNames?: Map<string, string>;
   /** Paddle boxes, when a paddle model ran — drawn so a bad model is visible, not just reported. */
   paddles?: Array<{ t: number; x: number; y: number; w?: number; h?: number; playerId: string | null; confidence: number; source?: "detected" | "pose"; angleDeg?: number }>;
   /** Contacts confirmed from audio + ball agreement, flashed on the overlay. */
@@ -130,6 +132,11 @@ export function buildOverlayData(input: DebugRenderInput): unknown {
       })),
       tracks: input.tracks.map((t) => ({
         playerId: t.playerId,
+        // The name drawn on the box. Roles rather than track ids, because this
+        // overlay is the thing the coaching model watches -- if the boxes say
+        // "Partner" and "Opponent 1", the coaching that comes back says them
+        // too, and the reader never has to decode "Player 3".
+        label: input.roleNames?.get(t.playerId) ?? null,
         isSelf: t.playerId === input.selfPlayerId,
         points: t.points.map((p) => ({
           t: Math.round(p.timestampSeconds * 1000) / 1000,

@@ -194,7 +194,11 @@ def main() -> int:
             x2, y2 = int((bx + bw) * w), int((by + bh) * h)
             colour = C_SELF if tr.get("isSelf") else C_PLAYER
             cv2.rectangle(img, (x1, y1), (x2, y2), colour, int(2 * scale), cv2.LINE_AA)
-            label = "YOU" if tr.get("isSelf") else tr.get("playerId", "")
+            # The role name when the run supplied one ("You", "Partner",
+            # "Opponent 1"), the track id otherwise. Drawn rather than the id
+            # because a reader -- and the coaching model watching this video --
+            # should never have to decode "player_3".
+            label = tr.get("label") or ("YOU" if tr.get("isSelf") else tr.get("playerId", ""))
             cv2.putText(img, label, (x1, max(14, y1 - 6)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45 * scale, colour, 1, cv2.LINE_AA)
 

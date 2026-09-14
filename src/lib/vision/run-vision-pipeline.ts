@@ -12,6 +12,7 @@ import { netBandImagePx, netLineImagePx, type NetCrossing } from "./rallies-net"
 import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
 import { smoothPoseFrames } from "./pose-smooth";
 import { gateImplausibleLimbs } from "./pose-limbs";
+import { assignRoles, roleNameMap } from "./player-roles";
 import {
   majoritySide, partnerGap, partnerOf, zoneBreakdown,
   type PlayerPositions, type PlayerPositioning, type PartnerGapResult,
@@ -644,7 +645,17 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   let debugVideoUrl: string | null = null;
   if (debugRenderEnabled() && input.debugId) {
     stage("overlay", "rendering the annotated overlay — the coaching read is written from it…");
+    // Roles from the positioning pass, which already knows which side of the
+    // net each player spent their time on.
+    const sideByPlayer = new Map(positioning.map((p) => [p.playerId, p.side]));
+    const roleNames = roleNameMap(assignRoles(
+      tracks.map((t) => t.playerId),
+      selfPlayerId ? [selfPlayerId] : [],
+      (id) => sideByPlayer.get(id) ?? null
+    ));
+
     debugVideoUrl = await renderDebugVideo({
+      roleNames,
       videoPath: input.videoPath,
       analysisId: input.debugId,
       durationSeconds: input.videoDurationSeconds,
