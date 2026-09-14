@@ -843,3 +843,41 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
   .sess-block::before{display:none}
   .sess::before{display:none}
 }
+
+/* ---- Practice calendar -------------------------------------------------
+   A month grid, not a list. A list answers "what should I do"; only a grid
+   answers "am I keeping up", and the gap where last week should have been is
+   the thing that gets somebody back on a court. */
+.lbl-sm{font-size:13px;font-weight:600;color:var(--ink)}
+.cal{border:1px solid var(--line);border-radius:var(--r3);overflow:hidden;background:var(--line);box-shadow:var(--lift)}
+.cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line)}
+.cal-head span{background:var(--sunk);padding:8px 6px;text-align:center;font-family:var(--data);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.cal-week{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line)}
+.cal-day{position:relative;display:flex;flex-direction:column;gap:4px;align-items:flex-start;min-height:78px;padding:7px 8px;background:var(--card);border:0;text-align:left;font:inherit;cursor:default;color:var(--ink-3)}
+.cal-day.empty{background:var(--sunk)}
+.cal-day .n{font-family:var(--data);font-size:12px;font-weight:600}
+/* A day with a session earns the page's colour; a rest day does not. The
+   contrast between them IS the information. */
+.cal-day.has{background:var(--blue-wash);color:var(--ink);cursor:pointer}
+.cal-day.has .n{color:var(--blue-deep)}
+.cal-day.has .t{font-size:11px;line-height:1.3;color:var(--ink-2);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.cal-day.done{background:var(--good-wash)}
+.cal-day.done .n{color:var(--good)}
+.cal-day .tick{position:absolute;top:6px;right:8px;color:var(--good);font-weight:700;font-size:13px}
+.cal-day.today{box-shadow:inset 0 0 0 2px var(--blue)}
+.cal-day.open{box-shadow:inset 0 0 0 2px var(--blue-deep)}
+.cal-day:disabled{cursor:default}
+
+.drill-row{display:grid;grid-template-columns:20px 1fr;gap:var(--a3);align-items:start;padding:12px;border:1px solid var(--line);border-radius:var(--r2);background:var(--card)}
+.drill-row.done{background:var(--good-wash);border-color:transparent}
+.drill-row input{margin-top:3px;width:16px;height:16px;accent-color:var(--good)}
+.drill-row .nm{font-size:15px;font-weight:600;color:var(--ink)}
+.drill-row .nm .mins{font-weight:400;color:var(--ink-3);font-size:13px}
+.drill-row .how{font-size:13px;line-height:1.5;color:var(--ink-2)}
+.drill-row .succ{font-size:12px;color:var(--good)}
+.drill-row.done .nm{text-decoration:line-through;text-decoration-color:var(--good);color:var(--ink-2)}
+
+@media (max-width:640px){
+  .cal-day{min-height:58px;padding:5px}
+  .cal-day.has .t{display:none}
+}
