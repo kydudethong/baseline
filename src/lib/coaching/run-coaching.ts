@@ -18,9 +18,6 @@
 // can only be set once the player has told the app "which one is you" —
 // see src/app/api/analyses/[id]/coach/route.ts.
 
-import fsp from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
@@ -37,12 +34,9 @@ import type {
 import { buildCoachingFacts } from "./facts";
 import { buildAnalystInput } from "./analyst-facts";
 import { runAnalyst } from "./analyst";
-import { readShotTechnique } from "./technique";
 import { buildPracticePlan } from "./practice-plan";
 import { matchPlaystyles } from "./pro-playstyles";
 import { shotRowsFromAnalyst } from "./shot-rows";
-import { uploadVideo, deleteFile } from "./gemini";
-import { downloadToFile } from "@/lib/storage/r2";
 import { readOverlayBytes, OverlayMissingError } from "./overlay-source";
 import { OVERLAY_LEGEND } from "./overlay-legend";
 import { getAllDrills } from "./drills";
@@ -214,82 +208,69 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
 
 
 
-  // PASS TWO: look closely at each shot.
+  // TECHNIQUE, from the pass that already happened.
   //
-  // Pass one watched the OVERLAY at 1fps, which finds rallies and shots and
-  // cannot see a swing -- a stroke is a third of a second, so at 1fps it falls
-  // between two frames. This re-watches one short window per shot at 15fps.
+  // This used to be a second Gemini call per shot over a SECOND upload of a
+  // SECOND video, because the first pass watched at 1fps and a pickleball
+  // stroke lasts about a third of a second -- the entire swing fell between
+  // two sampled frames, so a closer look was the only way to see one.
   //
-  // The SOURCE video, not the overlay: technique is read off the body, and the
-  // overlay draws boxes and a skeleton over exactly the thing being judged.
+  // The single pass now runs at 10fps, where a stroke is three frames, and it
+  // fills the technique fields on the shots it is already reporting. So there
+  // is nothing left to re-watch: no second upload of the source video, no
+  // second set of calls, and no possibility of the two passes disagreeing
+  // about when a shot happened, which was a real failure mode -- pass two
+  // matched shots to pass one by timestamp, and a few tenths of drift attached
+  // a correction to the wrong swing.
   //
-  // Failing here never fails the coaching read. The prose, rallies, ratings
-  // and drills are already in hand; technique is an addition, and an addition
-  // that takes the whole analysis down with it is a bad trade.
+  // ONE COST, STATED. The pass watches the OVERLAY, because the gold box is
+  // what identifies which player to coach, and technique is now read off a
+  // body with a box and a skeleton drawn over it. If far-court technique comes
+  // back thin, thinning the overlay is the first thing to try.
   try {
-    const storagePath = analysis.video?.storage_path ?? null;
-    const durationSeconds = Number(analysis.video?.duration_seconds ?? 0);
-    const shotsWithTime = out.shots.filter((sh) => Number.isFinite(sh.t));
-    if (storagePath && durationSeconds > 0 && shotsWithTime.length > 0) {
-      const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "pb-technique-"));
-      const local = path.join(dir, "source.mp4");
-      try {
-        await downloadToFile(storagePath, local);
-        const bytes = await fsp.readFile(local);
-        const file = await uploadVideo(bytes, `${analysisId}-source.mp4`);
-        try {
-          const { technique, patterns } = await readShotTechnique({
-            model,
-            file,
-            durationSeconds,
-            shots: shotsWithTime.map((sh) => ({ t: sh.t, player: sh.player })),
-            // The tagged player(s). A real player can span several track
-            // labels (no re-identification), which is why this is a list and
-            // why analyses.self_player_label is stored comma-separated.
-            subjectLabels: (analysis.self_player_label ?? "")
-              .split(",")
-              .map((l) => l.trim())
-              .filter(Boolean),
-            onLog: (l) => console.error(`[coaching] ${l}`),
-          });
-          // Patterns are the thing the per-shot pass could not produce: a
-          // statement across several shots, which only something watching them
-          // together can make. Logged for now rather than given a column --
-          // the first question is whether they are any good on real footage,
-          // and reading them off a run answers that without committing a
-          // schema to them.
-          for (const p of patterns) console.error(`[coaching] technique pattern: ${p}`);
+    const subjectLabels = new Set(
+      (analysis.self_player_label ?? "").split(",").map((l) => l.trim()).filter(Boolean)
+        .map((l) => l.toLowerCase().replace(/[^a-z0-9]/g, ""))
+    );
+    const technique = (out.shots ?? [])
+      .filter((sh) => Number.isFinite(sh.t))
+      // Only the subject's. The model is told to leave these null elsewhere,
+      // but a model that fills them in anyway must not end up storing an
+      // opponent's mechanics under this player's name.
+      .filter((sh) => subjectLabels.size === 0
+        || subjectLabels.has(String(sh.player ?? "").toLowerCase().replace(/[^a-z0-9]/g, "")))
+      .filter((sh) => sh.stroke_visible !== undefined || sh.correction || sh.contact_height || sh.paddle_face);
 
-          if (technique.length > 0) {
-            // Replace rather than accumulate: a re-run of the same analysis
-            // must not leave the previous run's reads beside the new ones,
-            // indistinguishable from them.
-            await supabase.from("coaching_shot_technique").delete().eq("analysis_id", analysisId);
-            const { error } = await supabase.from("coaching_shot_technique").insert(
-              technique.map((t) => ({
-                analysis_id: analysisId,
-                t_s: t.tSeconds,
-                striker_court: t.strikerCourt,
-                stroke_visible: t.strokeVisible,
-                paddle_face: t.paddleFace,
-                contact_height: t.contactHeight,
-                correction: t.correction,
-                confidence: t.confidence,
-                clip_start_s: t.clipStartSeconds,
-                clip_end_s: t.clipEndSeconds,
-              }))
-            );
-            if (error) throw error;
-          }
-        } finally {
-          await deleteFile(file.name).catch(() => {});
-        }
-      } finally {
-        await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
-      }
+    if (technique.length > 0) {
+      // Replace rather than accumulate: a re-run must not leave the previous
+      // run's reads beside the new ones, indistinguishable from them.
+      await supabase.from("coaching_shot_technique").delete().eq("analysis_id", analysisId);
+      const { error } = await supabase.from("coaching_shot_technique").insert(
+        technique.map((sh) => ({
+          analysis_id: analysisId,
+          t_s: Math.round(sh.t * 100) / 100,
+          striker_court: null,
+          stroke_visible: sh.stroke_visible === true,
+          paddle_face: sh.paddle_face ?? null,
+          contact_height: sh.contact_height ?? null,
+          correction: sh.correction ?? null,
+          confidence: sh.technique_confidence ?? null,
+          // The window a UI would play to show this note. Derived here rather
+          // than reported by the model: it is arithmetic around a contact time
+          // we already have, and a model asked for it would occasionally
+          // return a window that does not contain its own shot.
+          clip_start_s: Math.max(0, Math.round((sh.t - 1.2) * 100) / 100),
+          clip_end_s: Math.round((sh.t + 0.6) * 100) / 100,
+        }))
+      );
+      if (error) throw error;
+      const seen = technique.filter((sh) => sh.stroke_visible === true).length;
+      console.error(`[coaching] technique on ${technique.length} shot(s), ${seen} with a visible stroke`);
+    } else {
+      console.error("[coaching] no technique was reported on any of the subject's shots");
     }
   } catch (err) {
-    console.warn(`[coaching] per-shot technique skipped: ${describeError(err)}`);
+    console.warn(`[coaching] storing technique failed: ${describeError(err)}`);
   }
 
   // A session the player can actually run, from what the analysis found.
