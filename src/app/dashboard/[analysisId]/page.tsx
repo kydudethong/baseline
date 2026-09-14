@@ -9,6 +9,7 @@ import { getPhase2Data } from "@/lib/db/vision";
 import { getProfile } from "@/lib/db/profiles";
 import { getCoachingData } from "@/lib/db/coaching";
 import { getBlueprintsForAnalysis } from "@/lib/db/blueprints";
+import { getPracticePlan } from "@/lib/db/practice-plan";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { ProcessingControls } from "@/components/dashboard/ProcessingControls";
 import { AnalysisResultPanel } from "@/components/dashboard/AnalysisResultPanel";
@@ -20,6 +21,7 @@ import { computeHomography, applyHomography } from "@/lib/vision/homography";
 import type { CourtCalibrationRow } from "@/lib/db/types";
 import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
 import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
+import { PracticeSessionPanel } from "@/components/dashboard/PracticeSessionPanel";
 import { ShotsPanel } from "@/components/dashboard/ShotsPanel";
 import { AnalysisWorkspace } from "@/components/analysis/AnalysisWorkspace";
 import { EmptyState } from "@/components/analysis/EmptyState";
@@ -130,13 +132,14 @@ async function AnalysisBreakdown({
   supabase: Awaited<ReturnType<typeof createClient>>;
   analysis: AnalysisWithVideo;
 }) {
-  const [phase2, profile, coachingData, blueprints, view, drills] = await Promise.all([
+  const [phase2, profile, coachingData, blueprints, view, drills, practice] = await Promise.all([
     getPhase2Data(supabase, analysis.id),
     getProfile(supabase, analysis.user_id),
     getCoachingData(supabase, analysis.id),
     getBlueprintsForAnalysis(supabase, analysis.id),
     getAnalysisView(supabase, analysis),
     getAllDrills(supabase),
+    getPracticePlan(supabase, analysis.id),
   ]);
   const skillKeysWithBlueprint = new Set(blueprints.map((b) => b.blueprint.skill_key));
   const drillNames: Record<string, string> = {};
@@ -292,9 +295,30 @@ async function AnalysisBreakdown({
         </section>
       ) : null}
 
+      {/* The session plan, written by every run that produces a coaching read.
+          It goes ABOVE the per-skill blueprints because it answers the more
+          immediate question -- "what do I do at practice on Tuesday" -- while a
+          blueprint answers "how do I get good at dinking over six weeks". The
+          blueprints are also opt-in (someone has to press Build), so most
+          analyses have none and this is the only plan on the page. */}
+      {practice && practice.blocks.length > 0 ? (
+        <section className="stack g4">
+          <PracticeSessionPanel
+            plan={practice.plan}
+            blocks={practice.blocks}
+            drillNames={drillNames}
+          />
+        </section>
+      ) : coachingData.read ? (
+        <EmptyState
+          title="No practice session was written for this clip"
+          body="The session plan is the last step of a run and the only optional one — everything above it is already saved. Re-running the analysis usually produces one."
+        />
+      ) : null}
+
       {blueprints.length > 0 ? (
         <section className="stack g4">
-          <h2 className="eyebrow">Your practice plan</h2>
+          <h2 className="eyebrow">Build a skill over several sessions</h2>
           {blueprints.map(({ blueprint, steps }) => (
             <BlueprintPanel key={blueprint.id} analysisId={analysis.id} blueprint={blueprint} steps={steps} />
           ))}

@@ -800,3 +800,36 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
   .actionbar-do{flex:1 1 auto;flex-direction:column;width:100%;min-width:0}
   .actionbar-do .btn{width:100%}
 }
+
+/* ---- Practice session plan -------------------------------------------
+   A session is a sequence, so it is drawn as one: a rule down the left that
+   the blocks hang off, rather than four cards that happen to be stacked.
+   The rule is what says "in this order" without a sentence saying it.
+
+   Colour carries the KIND, not the importance. Warm-up and cool-down are
+   deliberately quieter than the work between them -- a player skimming for
+   "what am I actually here to do" should land on the drill blocks first. */
+.sess{display:flex;flex-direction:column;gap:var(--a3);position:relative;padding-left:var(--a5)}
+.sess::before{content:"";position:absolute;left:7px;top:10px;bottom:10px;width:2px;background:var(--line-strong);border-radius:1px}
+.sess-block{position:relative;background:var(--card);border:1px solid var(--line);border-left:3px solid var(--line-strong);border-radius:var(--r2);padding:var(--a4);box-shadow:var(--lift)}
+.sess-block::before{content:"";position:absolute;left:calc(var(--a5) * -1 + 3px);top:var(--a4);width:10px;height:10px;border-radius:50%;background:var(--line-strong);box-shadow:0 0 0 3px var(--paper)}
+.sess-block.k-drill{border-left-color:var(--blue)}
+.sess-block.k-drill::before{background:var(--blue)}
+.sess-block.k-game{border-left-color:var(--court)}
+.sess-block.k-game::before{background:var(--court)}
+.sess-head{display:flex;align-items:baseline;gap:var(--a3);flex-wrap:wrap}
+.sess-when{font-family:var(--data);font-size:13px;font-weight:600;color:var(--ink)}
+.sess-kind{font-family:var(--data);font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3)}
+.sess-mins{font-family:var(--data);font-size:11px;color:var(--ink-3);margin-left:auto}
+.sess-name{font-family:var(--display);font-size:19px;font-weight:600;letter-spacing:-.015em;margin:6px 0 0}
+.sess-targets{font-size:12px;color:var(--ink-3);margin:2px 0 0}
+.sess-how{margin-top:var(--a3);display:flex;flex-direction:column;gap:6px}
+.sess-how p{font-size:14px;line-height:1.55;color:var(--ink-2);margin:0}
+.sess-success{margin-top:var(--a3);padding:10px 12px;border-radius:var(--r1);background:var(--good-wash);color:var(--good);font-size:13px;line-height:1.5}
+.sess-success strong{color:var(--good)}
+.sess-src{margin:var(--a3) 0 0;font-size:11px;color:var(--ink-3)}
+@media (max-width:560px){
+  .sess{padding-left:var(--a4)}
+  .sess-block::before{display:none}
+  .sess::before{display:none}
+}
