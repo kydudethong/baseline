@@ -38,8 +38,25 @@ function apiKey(): string {
  * the failure path lists what the key can actually call.
  */
 export function analystModel(): string {
-  return process.env.GEMINI_MODEL?.trim() || "gemini-3.8-flash";
+  return process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL;
 }
+
+/**
+ * The model every call uses unless GEMINI_MODEL says otherwise.
+ *
+ * WHY NOT THE NEWEST FLASH. 3.8 Flash is $1.50 per million input tokens and
+ * this pipeline is dominated by video tokens -- a 20-minute game was costing
+ * about $2.50 to analyse, which is more than most consumer subscriptions
+ * charge per MONTH. 3 Flash Preview is $0.50: the same API, the same video
+ * handling, a third of the bill.
+ *
+ * It is a real trade and it is not free. An older model is generally weaker at
+ * video, and this pipeline leans on that harder than most. If coaching reads
+ * get vaguer after this change, GEMINI_MODEL=gemini-3.8-flash puts it back
+ * with no deploy -- and the 404 path in callGemini lists exactly which models
+ * a key can call, so a wrong name fails loudly rather than silently.
+ */
+const DEFAULT_MODEL = "gemini-3-flash-preview";
 
 export async function listModels(): Promise<string[]> {
   const res = await fetch(`${BASE}/v1beta/models?key=${apiKey()}&pageSize=200`);

@@ -33,7 +33,8 @@ import type {
 } from "@/lib/db/types";
 import { buildCoachingFacts } from "./facts";
 import { buildAnalystInput } from "./analyst-facts";
-import { runAnalyst } from "./analyst";
+import { runAnalyst, releaseAnalystFile } from "./analyst";
+import { readTechnique } from "./technique-pass";
 import { buildPracticePlan } from "./practice-plan";
 import { matchPlaystyles } from "./pro-playstyles";
 import { shotRowsFromAnalyst } from "./shot-rows";
@@ -295,69 +296,73 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
 
 
 
-  // TECHNIQUE, from the pass that already happened.
+  // TECHNIQUE: a second pass, narrow and expensive, only where a swing is.
   //
-  // This used to be a second Gemini call per shot over a SECOND upload of a
-  // SECOND video, because the first pass watched at 1fps and a pickleball
-  // stroke lasts about a third of a second -- the entire swing fell between
-  // two sampled frames, so a closer look was the only way to see one.
+  // The scan above runs at 5fps and LOW resolution -- plenty to see a ball
+  // change direction against a paddle, nowhere near enough to see the swing
+  // that did it. This re-watches the windows around the subject's own contacts
+  // at 10fps and high resolution.
   //
-  // The single pass now runs at 10fps, where a stroke is three frames, and it
-  // fills the technique fields on the shots it is already reporting. So there
-  // is nothing left to re-watch: no second upload of the source video, no
-  // second set of calls, and no possibility of the two passes disagreeing
-  // about when a shot happened, which was a real failure mode -- pass two
-  // matched shots to pass one by timestamp, and a few tenths of drift attached
-  // a correction to the wrong swing.
+  // WHY SPLIT AGAIN, having just merged them. One pass at 10fps high
+  // resolution over a whole match is ~3M tokens, and almost all of them buy
+  // nothing: the reader is judged on about fifteen swings, under two seconds
+  // each. Roughly 27 seconds of a 20-minute match is worth looking at closely;
+  // the rest was costing full price to establish, over and over, that nobody
+  // was mid-stroke. Same information, about a sixth of the bill.
   //
-  // ONE COST, STATED. The pass watches the OVERLAY, because the gold box is
-  // what identifies which player to coach, and technique is now read off a
-  // body with a box and a skeleton drawn over it. If far-court technique comes
-  // back thin, thinning the overlay is the first thing to try.
+  // It reuses the OVERLAY upload rather than uploading the source video again:
+  // the boxes cost some clarity on the body, and a second upload of a 500MB
+  // clip costs a minute of wall clock on every single run.
   try {
     const subjectLabels = new Set(
       (analysis.self_player_label ?? "").split(",").map((l) => l.trim()).filter(Boolean)
         .map((l) => l.toLowerCase().replace(/[^a-z0-9]/g, ""))
     );
-    const technique = (out.shots ?? [])
+    const mine = (out.shots ?? [])
       .filter((sh) => Number.isFinite(sh.t))
-      // Only the subject's. The model is told to leave these null elsewhere,
-      // but a model that fills them in anyway must not end up storing an
-      // opponent's mechanics under this player's name.
       .filter((sh) => subjectLabels.size === 0
         || subjectLabels.has(String(sh.player ?? "").toLowerCase().replace(/[^a-z0-9]/g, "")))
-      .filter((sh) => sh.stroke_visible !== undefined || sh.correction || sh.contact_height || sh.paddle_face);
+      .map((sh) => sh.t);
+
+    const { technique, patterns } = analyst.file
+      ? await readTechnique({
+          model,
+          file: analyst.file,
+          shotTimes: mine,
+          durationSeconds: Number(analysis.video?.duration_seconds ?? 0),
+          playerLabel: analysis.self_player_label ?? null,
+          onLog: (l) => console.error(`[coaching] ${l}`),
+        })
+      : { technique: [], patterns: [] as string[] };
+
+    // Patterns are what a burst can say and a single shot cannot: "your first
+    // two drops cleared the net and the third clipped it". Logged rather than
+    // given a column while the open question is whether they are any good.
+    for (const pat of patterns) console.error(`[coaching] technique pattern: ${pat}`);
 
     if (technique.length > 0) {
-      // Replace rather than accumulate: a re-run must not leave the previous
-      // run's reads beside the new ones, indistinguishable from them.
       await supabase.from("coaching_shot_technique").delete().eq("analysis_id", analysisId);
       const { error } = await supabase.from("coaching_shot_technique").insert(
-        technique.map((sh) => ({
+        technique.map((t) => ({
           analysis_id: analysisId,
-          t_s: Math.round(sh.t * 100) / 100,
+          t_s: t.tSeconds,
           striker_court: null,
-          stroke_visible: sh.stroke_visible === true,
-          paddle_face: sh.paddle_face ?? null,
-          contact_height: sh.contact_height ?? null,
-          correction: sh.correction ?? null,
-          confidence: sh.technique_confidence ?? null,
-          // The window a UI would play to show this note. Derived here rather
-          // than reported by the model: it is arithmetic around a contact time
-          // we already have, and a model asked for it would occasionally
-          // return a window that does not contain its own shot.
-          clip_start_s: Math.max(0, Math.round((sh.t - 1.2) * 100) / 100),
-          clip_end_s: Math.round((sh.t + 0.6) * 100) / 100,
+          stroke_visible: t.strokeVisible,
+          paddle_face: t.paddleFace,
+          contact_height: t.contactHeight,
+          correction: t.correction,
+          confidence: t.confidence,
+          clip_start_s: t.clipStartSeconds,
+          clip_end_s: t.clipEndSeconds,
         }))
       );
       if (error) throw error;
-      const seen = technique.filter((sh) => sh.stroke_visible === true).length;
-      console.error(`[coaching] technique on ${technique.length} shot(s), ${seen} with a visible stroke`);
-    } else {
-      console.error("[coaching] no technique was reported on any of the subject's shots");
     }
   } catch (err) {
-    console.warn(`[coaching] storing technique failed: ${describeError(err)}`);
+    console.warn(`[coaching] technique skipped: ${describeError(err)}`);
+  } finally {
+    // The upload was kept alive across both passes; it is finished with now.
+    await releaseAnalystFile(analyst.file);
   }
 
   await coachingProgress(supabase, analysisId, "Measuring where you stood…");

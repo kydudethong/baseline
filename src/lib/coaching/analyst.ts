@@ -22,24 +22,29 @@
  * either.
  */
 
-import { generateJSON, uploadVideo, analystModel, deleteFile } from "./gemini";
+import { generateJSON, uploadVideo, analystModel, deleteFile, type UploadedFile } from "./gemini";
 import { planSegments, planSegmentsForWindows, maxSegmentSeconds, isSampled } from "./technique-segments";
 import { mapWithConcurrency } from "./concurrency";
 import { mergeAnalystOutputs } from "./analyst-merge";
 import { SKILLS, COACHING_DIMENSIONS, type CoachingDimension } from "./types";
 
 /**
- * Frames per second for the one pass.
+ * Frames per second for the SCAN.
  *
- * TEN, up from Gemini's 1fps default, and that change is what let technique
- * stop being a second pass. A pickleball stroke lasts about a third of a
- * second: at 1fps the entire swing falls between two sampled frames, which is
- * why a separate 15fps pass had to exist at all. At 10fps a stroke is three
- * frames -- enough to see a backswing, a contact and a follow-through -- and
- * enough to catch the individual contacts in a fast kitchen exchange, which a
- * 1fps pass structurally could not count.
+ * Five, and the number is a compromise between two things that pull opposite
+ * ways. Gemini's 1fps default cannot count the contacts in a fast kitchen
+ * exchange -- four frames of a four-second rally with six shots in it -- so
+ * the counting this pass is responsible for needs more. But a stroke lasts
+ * about a third of a second, so SEEING a swing needs ten or more, and paying
+ * ten-frames-per-second rates across a whole match to read fifteen swings is
+ * most of a $2.50 bill spent on footage where nothing is being judged.
+ *
+ * So five here, where the job is where/when/who, and ten at high resolution in
+ * the burst pass, where the job is what the body did. Five is comfortably
+ * enough to see a ball change direction against a paddle, which is what a
+ * contact IS.
  */
-export const ANALYST_FPS = 10;
+export const ANALYST_FPS = 5;
 
 /**
  * Segment calls in flight at once.
@@ -51,24 +56,25 @@ export const ANALYST_FPS = 10;
 export const ANALYST_CONCURRENCY = 2;
 
 /**
- * How closely the model looks at each frame — and the biggest single cost dial
- * in this product.
+ * How closely the model looks at each frame of the SCAN.
  *
  * Gemini charges per frame by resolution tier, not by pixel count: roughly 258
- * tokens at high and 66 at low. So this one setting moves the bill by about
- * 4x, and nothing else here comes close.
+ * tokens at high and 66 at low, so this one setting moves the bill by about 4x
+ * and nothing else here comes close.
  *
- * High is the default because this pass now carries technique, and a far-court
- * swing at low resolution is a smudge -- the measured difference between a
- * useful technique note and "distance limited it" is mostly this. But that is
- * a judgement about a trade, not a fact, and it belongs where it can be
- * changed and measured rather than buried in a call site. Set
- * ANALYST_MEDIA_RESOLUTION=low to cut the cost per analysis by roughly four
- * and find out what it actually costs you in quality.
+ * LOW, because of what this pass is for. Finding a rally, seeing a ball change
+ * direction against a paddle and telling four players apart are all coarse
+ * judgements -- they need to know where things are, not what a wrist did.
+ * High resolution is spent where it earns its price: the burst pass, on the
+ * subject's own shots. Paying high rates across a whole match to read fifteen
+ * swings meant most of the bill went on footage nothing was being judged in.
+ *
+ * ANALYST_MEDIA_RESOLUTION=high restores the old behaviour if the scan turns
+ * out to be missing contacts at this tier.
  */
 export function analystMediaResolution(): "low" | "medium" | "high" {
-  const v = (process.env.ANALYST_MEDIA_RESOLUTION ?? "high").toLowerCase();
-  return v === "low" || v === "medium" ? v : "high";
+  const v = (process.env.ANALYST_MEDIA_RESOLUTION ?? "low").toLowerCase();
+  return v === "medium" || v === "high" ? v : "low";
 }
 
 /** Frames per second, overridable for the same reason. */
@@ -120,16 +126,6 @@ export interface AnalystOutput {
     /** Roughly where the ball landed. Null when it was not seen to land. */
     landing_depth?: string | null;
     landing_side?: string | null;
-    // --- Technique, for the tagged player's shots only ---------------------
-    // These used to be a whole second pass over a second upload of a second
-    // video. At 10fps the swing is visible in THIS pass, so they are fields on
-    // the shot that was already being reported rather than a separate call
-    // that had to re-find the same moment.
-    stroke_visible?: boolean | null;
-    paddle_face?: string | null;
-    contact_height?: string | null;
-    correction?: string | null;
-    technique_confidence?: string | null;
   }>;
   playstyle: { summary: string; tendencies: string[]; under_pressure: string };
   /** rating is 1-5, matching coaching_skill_ratings.raw — NOT 1-10. */
@@ -194,26 +190,6 @@ export function analystSchema(): Record<string, unknown> {
             landing_side: {
               type: "string", nullable: true,
               description: "left | middle | right from the hitter's view, or null",
-            },
-            stroke_visible: {
-              type: "boolean", nullable: true,
-              description: "SUBJECT'S SHOTS ONLY. True only if you can actually see the swing across several frames.",
-            },
-            paddle_face: {
-              type: "string", nullable: true,
-              description: "SUBJECT'S SHOTS ONLY. open / closed / neutral / cannot tell.",
-            },
-            contact_height: {
-              type: "string", nullable: true,
-              description: "SUBJECT'S SHOTS ONLY. Relative to the striker's own body.",
-            },
-            correction: {
-              type: "string", nullable: true,
-              description: "SUBJECT'S SHOTS ONLY. The single most useful change, in a coach's words.",
-            },
-            technique_confidence: {
-              type: "string", nullable: true,
-              description: "SUBJECT'S SHOTS ONLY. high / medium / low, and why.",
             },
           },
           required: ["t", "rally_idx", "player", "type", "confidence"],
@@ -372,26 +348,16 @@ YOUR JOB
 7. DRILLS — what to practise, tied to the priority fix. Where one of the
    catalogue drills fits, cite its slug; otherwise leave slug null and name it.
 
-2b. TECHNIQUE, on the subject's shots only. You are watching at 10 frames per
-   second, which is enough to see a backswing, a contact and a follow-through
-   -- a pickleball stroke lasts about a third of a second, so this is three
-   frames rather than the one a 1fps pass would get. For each shot the SUBJECT
-   hits, fill in stroke_visible, paddle_face, contact_height, correction and
-   technique_confidence. Leave all five null on other players' shots: only the
-   subject's technique is coached.
-   "correction" must be something they could do differently next time, phrased
-   as a coach standing courtside would say it -- not a description of what
-   happened. A player in the far court is small in frame: judge what you can,
-   say so in technique_confidence, and neither refuse nor overstate.
-
 RULES THAT MATTER MORE THAN COMPLETENESS
 
-- You CAN see the paddle at this frame rate, on the subject's own shots, and
-  the technique fields are where that goes. Everywhere else -- the coaching
-  prose, the observations, the playstyle -- stay off spin, paddle path and
-  where on the face contact was made. Those are not visible at any frame rate
-  from this camera angle, and a read that claims them is a read that invented
-  them.
+- YOU CANNOT SEE THE PADDLE IN THIS PASS. You are watching at 5 frames per
+  second at low resolution, which is plenty to see where people are, who hit
+  the ball and when it changed direction -- and nowhere near enough to see a
+  swing, which lasts about a third of a second. A separate pass re-watches the
+  subject's own shots closely and writes the technique notes. So: describe
+  position, timing, shot type, patterns and decisions. Do NOT describe the
+  paddle's face, its path, spin, contact height or swing size. A claim about
+  those here is a claim about something you did not see.
 - WRITE IT THE WAY YOU WOULD SAY IT ON A COURT. No abbreviations the reader
   has to decode: say "the kitchen line", never "NVZ" or "the NVZ line"; say
   "the non-volley zone" only if you have already said kitchen. Same for any
@@ -501,16 +467,13 @@ export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[]
   // see: \"paddle face\"" is precise and meaningless to the person it is shown
   // to; it reads like an internal assertion leaking into the product, which is
   // what it was. The fact worth conveying is WHY the claim cannot be checked.
+  // ONE BLOB AGAIN, because technique left this pass. When the scan carried
+  // technique fields there were two standards -- paddle language was legitimate
+  // on an individual shot and not in the prose -- and the audit had to split
+  // the output to apply them. The scan now runs at 5fps and low resolution and
+  // cannot see a paddle anywhere, so every phrase below is forbidden
+  // everywhere in it. The burst pass is audited on its own terms.
   const everything = JSON.stringify(out).toLowerCase();
-  // The same output with the per-shot technique fields stripped: what is left
-  // is every claim that is NOT a direct observation of one swing.
-  const outsideTechnique = JSON.stringify({
-    ...out,
-    shots: (out.shots ?? []).map(({ paddle_face, contact_height, correction, technique_confidence, ...rest }) => {
-      void paddle_face; void contact_height; void correction; void technique_confidence;
-      return rest;
-    }),
-  }).toLowerCase();
 
   for (const phrase of NEVER_VISIBLE) {
     if (everything.includes(phrase)) {
@@ -522,11 +485,11 @@ export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[]
     }
   }
   for (const phrase of NOT_OUTSIDE_TECHNIQUE) {
-    if (outsideTechnique.includes(phrase)) {
+    if (everything.includes(phrase)) {
       problems.push(
-        `The coaching mentions "${phrase}" outside the per-shot technique notes. The paddle is visible on ` +
-          "individual shots at this frame rate, but a general claim about it across a whole match is not " +
-          "something this footage supports."
+        `The read mentions "${phrase}". This pass watches at 5 frames per second and low resolution — ` +
+          "enough to see where people are and when the ball changed direction, and nowhere near enough " +
+          "to see a paddle. Take that part as a guess rather than something observed."
       );
     }
   }
@@ -544,7 +507,7 @@ export async function runAnalyst(opts: {
   input: AnalystInput;
   legend: string;
   onLog?: (line: string) => void;
-}): Promise<{ output: AnalystOutput; problems: string[]; model: string }> {
+}): Promise<{ output: AnalystOutput; problems: string[]; model: string; file: UploadedFile | null }> {
   const model = analystModel();
   const file = await uploadVideo(opts.videoBytes, opts.videoName, "video/mp4", opts.onLog);
   try {
@@ -595,10 +558,23 @@ export async function runAnalyst(opts: {
     const output = mergeAnalystOutputs(parts);
     const problems = auditAnalysis(output, opts.input);
     for (const p of problems) opts.onLog?.(`analyst audit: ${p}`);
-    return { output, problems, model };
-  } finally {
-    // The handle is worth releasing, but a leaked one expires in 48h and must
-    // never fail an analysis that otherwise worked.
+    // The upload handle goes back too, so the burst technique pass can point
+    // at the SAME uploaded file rather than sending a second copy. On a 500MB
+    // clip that is a minute of wall clock saved on every run, and it removes
+    // any chance of the two passes watching different videos.
+    return { output, problems, model, file };
+  } catch (err) {
+    // Only released on the failure path now. On success the caller owns it --
+    // the burst pass needs the same upload -- and releases it when done. A
+    // leaked handle expires on Gemini's side in 48h, which is the reason this
+    // is allowed to be best-effort at all.
     await deleteFile(file.name).catch(() => {});
+    throw err;
   }
+}
+
+/** Release an upload the caller was handed by runAnalyst. Best-effort. */
+export async function releaseAnalystFile(file: UploadedFile | null): Promise<void> {
+  if (!file) return;
+  await deleteFile(file.name).catch(() => {});
 }
