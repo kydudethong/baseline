@@ -520,7 +520,34 @@ async function persistVisionResult(
     const { error } = await supabase.from("movement_metrics").upsert(rows, {
       onConflict: "analysis_id,player_label",
     });
-    if (error) throw new Error(`writing movement_metrics: ${describeError(error)}`);
+    if (error) {
+      // A MISSING OPTIONAL COLUMN MUST NOT FAIL THE WHOLE ANALYSIS.
+      //
+      // `positioning` arrived in 0017, and code ships before a migration is
+      // run -- so there is always a window where the app writes a column the
+      // database does not have yet. PostgREST answers PGRST204, and this
+      // rethrew it, which killed a run that had already done every expensive
+      // thing: the frames, the detection, the pose, the overlay. All of it
+      // discarded because one nice-to-have column was missing.
+      //
+      // The same shape will recur with the next optional column, so the retry
+      // is written to drop whatever the error names rather than `positioning`
+      // specifically.
+      const missing = missingColumnFrom(error);
+      if (!missing) throw new Error(`writing movement_metrics: ${describeError(error)}`);
+
+      console.error(`[pipeline] movement_metrics: this database has no "${missing}" column yet — `
+        + "writing everything else and carrying on. Run the outstanding migration to store it.");
+      const withoutMissing = rows.map((r) => {
+        const copy = { ...r } as Record<string, unknown>;
+        delete copy[missing];
+        return copy as typeof r;
+      });
+      const retry = await supabase.from("movement_metrics").upsert(withoutMissing, {
+        onConflict: "analysis_id,player_label",
+      });
+      if (retry.error) throw new Error(`writing movement_metrics: ${describeError(retry.error)}`);
+    }
   }
 
   // ball_tracks + analysis_shots (cleared above, along with everything else)
@@ -648,3 +675,18 @@ async function persistVisionResult(
   }
 }
 
+/**
+ * The column name from a PostgREST "column not in the schema cache" error, or
+ * null if that is not what this error is.
+ *
+ * PGRST204 is specifically "you sent a column I do not have", which for this
+ * app almost always means a migration has not been run yet on a database the
+ * new code is already talking to. Matching on the code AND extracting the name
+ * keeps the recovery narrow: any other write failure is still a real failure.
+ */
+function missingColumnFrom(error: unknown): string | null {
+  const e = error as { code?: unknown; message?: unknown };
+  if (e?.code !== "PGRST204") return null;
+  const message = typeof e.message === "string" ? e.message : "";
+  return /'([^']+)' column/.exec(message)?.[1] ?? null;
+}
