@@ -290,17 +290,28 @@ export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[]
     }
   }
 
-  // Shots must land on measured contacts. A shot at a time nothing was
-  // observed is invented, and inventing a moment is a different failure from
-  // mislabelling one.
+  // Shots must land on measured contacts -- ONLY when there are measured
+  // contacts to land on.
+  //
+  // This check was written when the ball detector found contacts and the model
+  // only had to label them: a shot at a time nothing observed was invented.
+  // With ball tracking removed there are no measured contacts at all, so the
+  // check inverted itself -- every shot the model correctly FOUND was flagged
+  // as invented, and the "contacts given no shot type" count became the size
+  // of an empty set. Auditing a claim against evidence that no longer exists
+  // does not make the claim wrong; it makes the audit meaningless, and a
+  // grounding report full of false alarms is worse than none because it
+  // trains you to ignore real ones.
   const times = new Set(input.contacts.map((c) => Math.round(c.t * 100)));
-  const invented = (out.shots ?? []).filter((s) => !times.has(Math.round(s.t * 100)));
-  if (invented.length) {
-    problems.push(`${invented.length} shot(s) at times that are not measured contacts (e.g. ${invented[0].t}s)`);
-  }
-  const labelled = (out.shots ?? []).length - invented.length;
-  if (labelled < times.size) {
-    problems.push(`${times.size - labelled} measured contact(s) were given no shot type`);
+  if (times.size > 0) {
+    const invented = (out.shots ?? []).filter((s) => !times.has(Math.round(s.t * 100)));
+    if (invented.length) {
+      problems.push(`${invented.length} shot(s) at times that are not measured contacts (e.g. ${invented[0].t}s)`);
+    }
+    const labelled = (out.shots ?? []).length - invented.length;
+    if (labelled < times.size) {
+      problems.push(`${times.size - labelled} measured contact(s) were given no shot type`);
+    }
   }
 
   const slugs = new Set(input.drillCatalogue.map((d) => d.slug));

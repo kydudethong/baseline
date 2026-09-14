@@ -163,11 +163,28 @@ export function AnalysisWorkspace({
               <RallyTimeline rallies={view.rallies} selectedIdx={rallyIdx} onSelect={selectRally} />
             </section>
           ) : (
+            /*
+              The old copy here explained the NET-CROSSING segmenter: "the ball
+              has to cross the net and come back", and pointed at a tracking
+              overlay to see what the system saw. Nothing tracks the ball any
+              more and no segmenter draws boundaries -- rallies are read from
+              the video by the coaching pass. That message survived the code it
+              described and sent people to inspect a component that no longer
+              exists.
+              The far more common cause is also nameable: with no tagged
+              player, the coaching pass never runs at all, and every panel on
+              this page is empty for that one reason rather than four.
+            */
             <EmptyState
-              title="No rallies were found in this clip"
-              body="The ball has to cross the net and come back for a rally to count. If this
-                    was a real game, the ball may not have been tracked well enough — the
-                    tracking overlay on the technical view shows what the system saw."
+              title={view.analysis.selfPlayerLabels.length > 0
+                ? "No rallies were found in this clip"
+                : "Tag yourself to get a coaching read"}
+              body={view.analysis.selfPlayerLabels.length > 0
+                ? "The coaching pass watched this clip and did not find a point being played. "
+                  + "Short clips, warm-ups and practice feeds often have none."
+                : "Baseline needs to know which player is you before it can read anything — "
+                  + "rallies, technique and drills all describe one person. Pick yourself above "
+                  + "and it will run the coaching pass on this clip."}
             />
           )}
 

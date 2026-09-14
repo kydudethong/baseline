@@ -101,11 +101,6 @@ def main() -> int:
             for p in chunk:
                 frames.append({"imagePath": p, "players": [], "error": str(exc)[:200]})
             done += len(chunk)
-        if done % 200 < args.batch or done == len(paths):
-            rate = done / max(1e-6, _time.time() - t0)
-            remaining = (len(paths) - done) / max(rate, 1e-6)
-            print(f"[players] {done}/{len(paths)} frames · {rate:.1f} fps · "
-                  f"~{remaining / 60:.1f} min left", file=sys.stderr, flush=True)
             continue
 
         for path, res in zip(chunk, results):
@@ -136,7 +131,6 @@ def main() -> int:
             remaining = (len(paths) - done) / max(rate, 1e-6)
             print(f"[players] {done}/{len(paths)} frames · {rate:.1f} fps · "
                   f"~{remaining / 60:.1f} min left", file=sys.stderr, flush=True)
-        print(f"[players] {done}/{len(paths)} frames", file=sys.stderr, flush=True)
 
     out = json.dumps({"frames": frames, "model": os.path.basename(args.model)})
     if args.out:
