@@ -295,8 +295,18 @@ export interface PlaystyleMatch {
   divergences: string[];
 }
 
-/** Fewer rated skills than this and the shape is noise, not a resemblance. */
-export const MIN_RATED_SKILLS = 6;
+/**
+ * Fewer rated skills than this and the shape is noise, not a resemblance.
+ *
+ * FOUR, down from six. The analyst is told to rate "only skills this clip
+ * supports" and to omit a skill rather than invent a number -- which is the
+ * right instruction, and means a two-minute clip legitimately comes back with
+ * four or five ratings. Six was set without checking that, and it silently
+ * turned the whole feature off on exactly the short clips people test with.
+ * Four is still enough for a shape: three points can only ever describe a
+ * plane, and with two the cosine of the centred vectors is +/-1 for everyone.
+ */
+export const MIN_RATED_SKILLS = 4;
 
 /**
  * Closest pros by SHAPE, best first. Empty when there is not enough to compare.

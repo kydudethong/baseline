@@ -69,7 +69,14 @@ export async function recomputeFromStored(supabase: Client, analysisId: string):
   // movement_metrics
   let movementCount = 0;
   if (tracks.length > 0) {
-    const rows: Omit<MovementMetricRow, "id" | "created_at">[] = tracks.map((t) => {
+    // `positioning` is deliberately absent from this shape, not set to null.
+    // PostgREST's upsert only updates the columns present in the body, so
+    // omitting it PRESERVES whatever the original run stored; writing null
+    // would silently wipe a correct positioning summary. This path exists to
+    // redo movement after the court corners are corrected, and it has neither
+    // the partner set nor the return-of-serve times to rebuild positioning.
+    type MovementRecomputeRow = Omit<MovementMetricRow, "id" | "created_at" | "positioning">;
+    const rows: MovementRecomputeRow[] = tracks.map((t) => {
       const m = analyzeMovement(t, calibration, width, height);
       return {
         analysis_id: analysisId,

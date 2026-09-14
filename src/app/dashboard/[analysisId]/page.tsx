@@ -23,6 +23,7 @@ import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
 import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
 import { PracticeSessionPanel } from "@/components/dashboard/PracticeSessionPanel";
 import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel";
+import { PositioningPanel } from "@/components/dashboard/PositioningPanel";
 import type { PlaystyleMatch } from "@/lib/coaching/pro-playstyles";
 import { ShotsPanel } from "@/components/dashboard/ShotsPanel";
 import { AnalysisWorkspace } from "@/components/analysis/AnalysisWorkspace";
@@ -286,11 +287,20 @@ async function AnalysisBreakdown({
         />
       )}
 
+      {/* Where they stood. Above the pro comparison because it is a fact about
+          this clip rather than an interpretation of it, and because kitchen
+          time is the number most likely to change what someone does at their
+          next session. */}
+      <PositioningPanel movement={phase2.movement} selfLabels={selfLabels} />
+
       {/* Directly after the skill radar, and that placement is the argument:
           the match IS the radar, read as a shape. Somebody who has just looked
           at their own profile can see why a particular pro came back, which is
           what stops "you play like X" from being a horoscope. */}
-      <PlaystyleMatchPanel matches={playstyleMatches(coachingData.read?.coaching_json ?? null)} />
+      <PlaystyleMatchPanel
+        matches={playstyleMatches(coachingData.read?.coaching_json ?? null)}
+        hasRead={hasRead}
+      />
 
       {coachingData.skills.length > 0 ? (
         <section className="stack g4">

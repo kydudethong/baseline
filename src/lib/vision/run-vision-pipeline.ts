@@ -12,7 +12,10 @@ import { netBandImagePx, netLineImagePx, type NetCrossing } from "./rallies-net"
 import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
 import { smoothPoseFrames } from "./pose-smooth";
 import { gateImplausibleLimbs } from "./pose-limbs";
-import { majoritySide, partnerGap, partnerOf, zoneBreakdown, type PlayerPositions } from "./positioning";
+import {
+  majoritySide, partnerGap, partnerOf, zoneBreakdown,
+  type PlayerPositions, type PlayerPositioning, type PartnerGapResult,
+} from "./positioning";
 import { describeError } from "@/lib/analysis/describe-error";
 import {
   matchTracksToSetup,
@@ -108,6 +111,8 @@ export interface VisionPipelineOutput {
   poses: PlayerPoseFrame[];
   movement: PlayerMovementMetrics[];
   footwork: ReturnType<typeof detectFootworkFoundation>[];
+  /** Where each player stood. Empty when the court was not calibrated. */
+  positioning: PlayerPositioning[];
   events: AnalysisEvent[];
   /** Rally boundaries as the segmenter drew them, with the evidence behind each. */
   rallies: AnalysisRallyOutput[];
@@ -567,11 +572,16 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
 
   // Positioning, which needs no ball at all.
   //
-  // Logged rather than persisted for now: these are new numbers and the first
-  // thing to establish is whether they are RIGHT on real footage, which
-  // reading them off a run tells you without committing a schema to them. The
-  // conversion to feet is frame-aware, so the values are comparable between
-  // clips shot with different quad kinds -- which the raw court units are not.
+  // PERSISTED now, not just logged. These were logged while the open question
+  // was whether the numbers are right on real footage -- reading them off a
+  // run answers that without committing a schema. They have been read off
+  // several runs and they hold up, so they are returned and stored (0017) and
+  // the page shows them. A metric computed on every run and visible to nobody
+  // is the same as one that does not exist.
+  //
+  // The conversion to feet is frame-aware, so values are comparable between
+  // clips shot with different quad kinds -- which raw court units are not.
+  const positioning: PlayerPositioning[] = [];
   if (courtCalibration.confidence > 0) {
     const frame = courtFrameFor(courtCalibration.quadKind);
     const positions: PlayerPositions[] = movement.map((m) => ({
@@ -588,13 +598,41 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
         + `transition ${Math.round(z.transition * 100)}%, back ${Math.round(z.back * 100)}% `
         + `of ${z.samples} samples`);
       const mate = partnerOf(p.playerId, positions, frame);
+      let gap: PartnerGapResult | null = null;
       if (mate) {
-        const g = partnerGap(p.samples, mate.samples, frame);
-        if (g.samples > 0) {
-          log(`  partner gap with ${mate.playerId}: mean ${g.meanFeet}ft, max ${g.maxFeet}ft, `
-            + `${Math.round(g.fractionWide * 100)}% of the time wider than 12ft`);
+        gap = partnerGap(p.samples, mate.samples, frame);
+        if (gap.samples > 0) {
+          log(`  partner gap with ${mate.playerId}: mean ${gap.meanFeet}ft, max ${gap.maxFeet}ft, `
+            + `${Math.round(gap.fractionWide * 100)}% of the time wider than 12ft`);
         }
       }
+
+      // Seconds at the kitchen line, derived from the fraction rather than
+      // counted separately: the samples are evenly spaced, so the fraction
+      // times the tracked span IS the time, and computing it twice invites the
+      // two to disagree.
+      const span = p.samples.length > 1
+        ? p.samples[p.samples.length - 1].timestampSeconds - p.samples[0].timestampSeconds
+        : 0;
+
+      positioning.push({
+        playerId: p.playerId,
+        side,
+        zones: { kitchen: z.kitchen, transition: z.transition, back: z.back },
+        samples: z.samples,
+        kitchenSeconds: Math.round(z.kitchen * span * 10) / 10,
+        trackedSeconds: Math.round(span * 10) / 10,
+        partnerId: mate?.playerId ?? null,
+        partnerGapMeanFeet: gap?.meanFeet ?? null,
+        partnerGapMaxFeet: gap?.maxFeet ?? null,
+        partnerGapFractionWide: gap && gap.samples > 0 ? gap.fractionWide : null,
+        // Filled in by the coaching layer, which is the only thing that knows
+        // when a return of serve happened -- the trigger for this metric is
+        // Gemini's to identify, and the vision pipeline runs before it.
+        secondsToKitchenMedian: null,
+        approachesMeasured: 0,
+        approachesNeverArrived: 0,
+      });
     }
   } else {
     log("position: skipped — no calibrated court, so court positions are unavailable");
@@ -667,6 +705,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     poses,
     movement,
     footwork,
+    positioning,
     events,
     ballTrack,
     shots,

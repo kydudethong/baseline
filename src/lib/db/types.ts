@@ -380,11 +380,21 @@ export type MovementMetricRow = {
   transformed_sample_count: number;
   total_sample_count: number;
   footwork: unknown;
+  /** 0017 — PlayerPositioning, or null when the court was not calibrated. */
+  positioning: unknown;
   created_at: string;
 };
-export type MovementMetricInsert = Omit<MovementMetricRow, "id" | "created_at"> & {
+export type MovementMetricInsert = Omit<MovementMetricRow, "id" | "created_at" | "positioning"> & {
   id?: string;
   created_at?: string;
+  /**
+   * OPTIONAL on insert, on purpose. PostgREST's upsert updates only the
+   * columns present in the body, so a writer that has no positioning to offer
+   * (recompute.ts, which redoes movement after the court is corrected) omits
+   * the key and PRESERVES what the original run stored. Requiring it would
+   * force that writer to send null and silently wipe a correct summary.
+   */
+  positioning?: unknown;
 };
 export type MovementMetricUpdate = Partial<MovementMetricInsert>;
 

@@ -37,6 +37,7 @@ import { runAnalyst } from "./analyst";
 import { buildPracticePlan } from "./practice-plan";
 import { matchPlaystyles } from "./pro-playstyles";
 import { shotRowsFromAnalyst } from "./shot-rows";
+import { fillApproachTimes } from "./approach-times";
 import { readOverlayBytes, OverlayMissingError } from "./overlay-source";
 import { OVERLAY_LEGEND } from "./overlay-legend";
 import { getAllDrills } from "./drills";
@@ -70,7 +71,12 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     .maybeSingle();
   if (analysisError) throw analysisError;
   const analysis = analysisData as (AnalysisRow & {
-    video: { duration_seconds: number | null; storage_path: string | null } | null;
+    // width/height too: the approach-time pass re-derives court positions from
+    // the raw tracks, and that projection is in pixels before it is in feet.
+    video: {
+      duration_seconds: number | null; storage_path: string | null;
+      width: number | null; height: number | null;
+    } | null;
   }) | null;
   if (!analysis) throw new CoachingPipelineError("Analysis not found");
   if (analysis.status !== "completed") {
@@ -272,6 +278,18 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   } catch (err) {
     console.warn(`[coaching] storing technique failed: ${describeError(err)}`);
   }
+
+  // Time to the kitchen after a return -- the half of the positioning metrics
+  // the vision run could not compute, because the trigger is a shot type and
+  // shot types are the model's judgement now.
+  await fillApproachTimes(
+    supabase,
+    analysisId,
+    (out.shots ?? []).filter((sh) => sh.type === "return" && Number.isFinite(sh.t)).map((sh) => sh.t),
+    analysis.video?.width ?? 1920,
+    analysis.video?.height ?? 1080,
+    (l) => console.error(`[coaching] ${l}`)
+  );
 
   // A session the player can actually run, from what the analysis found.
   //

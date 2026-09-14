@@ -500,6 +500,7 @@ async function persistVisionResult(
   // movement_metrics — one row per track, with footwork attached
   if (result.movement.length > 0) {
     const footworkByPlayer = new Map(result.footwork.map((f) => [f.playerId, f]));
+    const positioningByPlayer = new Map((result.positioning ?? []).map((p) => [p.playerId, p]));
     const rows = result.movement.map((m) => ({
       analysis_id: analysisId,
       player_label: m.playerId,
@@ -511,6 +512,10 @@ async function persistVisionResult(
       transformed_sample_count: m.transformedSampleCount,
       total_sample_count: m.totalSampleCount,
       footwork: footworkByPlayer.get(m.playerId) ?? null,
+      // 0017. Null when the court was not calibrated -- none of it is
+      // computable without court coordinates, and a row of zeroes would read
+      // as "this player never went to the kitchen" rather than "nobody looked".
+      positioning: positioningByPlayer.get(m.playerId) ?? null,
     }));
     const { error } = await supabase.from("movement_metrics").upsert(rows, {
       onConflict: "analysis_id,player_label",

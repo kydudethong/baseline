@@ -881,3 +881,27 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
   .cal-day{min-height:58px;padding:5px}
   .cal-day.has .t{display:none}
 }
+
+/* ---- Positioning -------------------------------------------------------
+   A stacked bar of the three court zones, because the SHAPE is the finding:
+   20/30/50 is a different player from 50/30/20 and reading that off three
+   percentages takes a beat longer than seeing it. */
+.zonebar{display:flex;height:14px;border-radius:var(--rf);overflow:hidden;background:var(--sunk)}
+.zonebar .z{display:block;height:100%}
+.zonebar .z.kitchen{background:var(--good)}
+.zonebar .z.transition{background:var(--blue-bright)}
+.zonebar .z.back{background:var(--line-strong)}
+.zonekey{display:flex;gap:var(--a4);flex-wrap:wrap;font-size:11px;color:var(--ink-3)}
+.zonekey span{display:inline-flex;align-items:center;gap:5px}
+.zonekey i{width:9px;height:9px;border-radius:2px;display:inline-block}
+.zonekey i.kitchen{background:var(--good)}
+.zonekey i.transition{background:var(--blue-bright)}
+.zonekey i.back{background:var(--line-strong)}
+
+.posgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--a4)}
+.posgrid .num{font-family:var(--score);font-size:24px;font-weight:800;color:var(--blue-deep);letter-spacing:-.01em;font-variant-numeric:tabular-nums;line-height:1}
+.posgrid .num.empty{color:var(--ink-3);font-weight:600}
+.posgrid .lbl{font-size:12px;font-weight:600;color:var(--ink);margin-top:5px}
+.posgrid .sub{font-size:11px;color:var(--ink-3);margin-top:2px}
+/* Other players are context, not the subject. */
+.muted-card{opacity:.72}

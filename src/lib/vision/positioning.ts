@@ -238,3 +238,36 @@ export function majoritySide(samples: PositionSample[], frame: CourtFrame): Cour
   for (const s of samples) if (sideOfCourt(s.courtY, frame) === "near") near++;
   return near * 2 >= samples.length ? "near" : "far";
 }
+
+/**
+ * One player's positioning summary for a clip — the persisted shape.
+ *
+ * Everything here is either a fraction, a count, or feet/seconds, and nothing
+ * is in raw court units: this is the record a UI renders and a coach reads,
+ * and court units are meaningless outside the homography that produced them.
+ *
+ * The three approach fields are filled in AFTER the vision run, by the
+ * coaching layer: the trigger for "time to the kitchen" is the return of
+ * serve, which only the model watching the video can identify. They are part
+ * of this shape rather than a separate one because they are the same
+ * question — where was this player, and when — and splitting them across two
+ * records would mean joining them back together at every read.
+ */
+export interface PlayerPositioning {
+  playerId: string;
+  side: CourtSide;
+  zones: { kitchen: number; transition: number; back: number };
+  samples: number;
+  /** Seconds spent at the kitchen line, from the fraction and the tracked span. */
+  kitchenSeconds: number;
+  trackedSeconds: number;
+  partnerId: string | null;
+  partnerGapMeanFeet: number | null;
+  partnerGapMaxFeet: number | null;
+  /** Fraction of shared samples wider than the "hole in the middle" threshold. */
+  partnerGapFractionWide: number | null;
+  /** Median seconds to reach the kitchen after a return. Null until measured. */
+  secondsToKitchenMedian: number | null;
+  approachesMeasured: number;
+  approachesNeverArrived: number;
+}

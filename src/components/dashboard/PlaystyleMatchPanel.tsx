@@ -16,8 +16,36 @@ import { skillName } from "@/lib/coaching/types";
  * ranked names read as what it is, a similarity ordering, and the gap between
  * first and second tells you how much to trust the top one.
  */
-export function PlaystyleMatchPanel({ matches }: { matches: PlaystyleMatch[] }) {
-  if (matches.length === 0) return null;
+export function PlaystyleMatchPanel({
+  matches,
+  hasRead,
+}: {
+  matches: PlaystyleMatch[];
+  /** Whether a coaching read exists at all, which decides WHICH nothing this is. */
+  hasRead: boolean;
+}) {
+  // RENDERING NOTHING WAS THE BUG. `return null` on an empty list meant three
+  // completely different situations looked identical from the page: no
+  // coaching read yet, a read written before this feature existed, and a read
+  // whose ratings were too few or too flat to have a shape. The first is
+  // "tag yourself", the second is "re-run", the third is "this clip was too
+  // short" -- and a silent gap tells you to do none of them. A feature the
+  // user cannot tell is missing is a feature that does not exist.
+  if (matches.length === 0) {
+    if (!hasRead) return null; // the page already says "tag yourself" above.
+    return (
+      <section className="stack g3">
+        <span className="eyebrow" style={{ color: "var(--blue)" }}>Closest pro playstyle</span>
+        <div className="note">
+          <strong style={{ color: "var(--ink)" }}>No pro comparison for this clip.</strong>{" "}
+          Matching compares the SHAPE of your skill ratings, so it needs several skills rated and
+          some variation between them. A short clip often produces neither — and a read written
+          before this feature existed has no comparison stored at all. Re-running the coaching read
+          on a longer clip is what fixes both.
+        </div>
+      </section>
+    );
+  }
   const [top, ...rest] = matches;
 
   return (
