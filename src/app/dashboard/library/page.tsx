@@ -5,6 +5,7 @@ import { getSignedDownloadUrl } from "@/lib/storage/r2";
 import { listAnalysesForUser, type AnalysisWithVideo } from "@/lib/db/analyses";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { PlayIcon } from "@/components/motifs/Motifs";
+import { LibraryCardMenu } from "@/components/dashboard/LibraryCardMenu";
 
 export const metadata: Metadata = { title: "Library — Baseline" };
 export const dynamic = "force-dynamic";
@@ -33,12 +34,19 @@ function formatDuration(seconds: number | null | undefined): string | null {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export default async function LibraryPage() {
+export default async function LibraryPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ show?: string }>;
+}) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const analyses = user ? await listAnalysesForUser(supabase, user.id) : [];
+  const showArchived = (await searchParams)?.show === "archived";
+  const analyses = user
+    ? await listAnalysesForUser(supabase, user.id, { include: showArchived ? "archived" : "active" })
+    : [];
   const rows = await withVideoUrls(supabase, analyses);
   // "N games analyzed" counted uploads, including ones that failed or never
   // ran. Say what is actually true of each group.
@@ -49,16 +57,28 @@ export default async function LibraryPage() {
       <div className="sec-head">
         <div className="stack g1">
           <span className="eyebrow">Library</span>
-          <h1 className="h1">Every game you&apos;ve uploaded</h1>
+          <h1 className="h1">{showArchived ? "Removed games" : "Every game you\u2019ve uploaded"}</h1>
           <p className="sm">
-            {analyses.length === 0
-              ? "Upload your first match to get started."
-              : `${analyses.length} uploaded · ${readyCount} with a finished breakdown`}
+            {showArchived
+              ? analyses.length === 0
+                ? "Nothing removed. Anything you take out of your library shows up here."
+                : `${analyses.length} removed — hidden from your library, calendar and trends, but not deleted.`
+              : analyses.length === 0
+                ? "Upload your first match to get started."
+                : `${analyses.length} uploaded · ${readyCount} with a finished breakdown`}
           </p>
         </div>
-        <Link href="/dashboard/new" className="btn btn-optic mla">
-          + Analyze a game
-        </Link>
+        <div className="row g2 mla">
+          <Link
+            href={showArchived ? "/dashboard/library" : "/dashboard/library?show=archived"}
+            className="btn btn-soft"
+          >
+            {showArchived ? "Back to your games" : "Removed"}
+          </Link>
+          <Link href="/dashboard/new" className="btn btn-optic">
+            + Analyze a game
+          </Link>
+        </div>
       </div>
 
       {analyses.length === 0 ? (
@@ -80,8 +100,11 @@ export default async function LibraryPage() {
           {rows.map(({ analysis, videoUrl }) => {
             const duration = formatDuration(analysis.video?.duration_seconds);
             return (
+              /* The menu buttons sit OUTSIDE the Link, not inside it: a
+                 button nested in an anchor both acts and navigates, so
+                 "Remove" would also open the analysis it just removed. */
+              <div key={analysis.id} className="stack g3">
               <Link
-                key={analysis.id}
                 href={`/dashboard/${analysis.id}`}
                 className="stack g3"
                 style={{ textDecoration: "none", color: "inherit" }}
@@ -170,6 +193,12 @@ export default async function LibraryPage() {
                   })}
                 </p>
               </Link>
+              <LibraryCardMenu
+                analysisId={analysis.id}
+                title={analysis.title}
+                archived={Boolean(analysis.archived_at)}
+              />
+              </div>
             );
           })}
         </div>

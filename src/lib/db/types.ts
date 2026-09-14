@@ -95,9 +95,66 @@ export type AnalysisRow = {
   finished_at: string | null;
   /** Touched every ~15s by the live run. Quiet on a 'processing' row = dead, not busy. */
   heartbeat_at: string | null;
+  /**
+   * Set when the player archives this analysis — 0016. Archived rows are
+   * hidden from the library, the calendar and trends but keep every dependent
+   * row, so un-archiving is an update rather than a re-upload. Permanent
+   * deletion is a separate operation that removes the row and cascades.
+   */
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 };
+
+// --- Practice calendar — 0016_archive_and_calendar.sql ----------------------
+
+export type PracticePlanRow = {
+  id: string;
+  user_id: string;
+  /** First day of the month this plan covers. */
+  month: string;
+  sessions_per_month: number | null;
+  /** 0 = Sunday .. 6 = Saturday. */
+  play_days: number[];
+  focus: string | null;
+  targets: string[];
+  source_analysis_ids: string[];
+  created_at: string;
+  updated_at: string;
+};
+export type PracticePlanInsert = Omit<PracticePlanRow, "id" | "created_at" | "updated_at">
+  & { id?: string; created_at?: string; updated_at?: string };
+
+export type PracticeSessionRow = {
+  id: string;
+  plan_id: string;
+  scheduled_on: string;
+  kind: "practice" | "match" | "rest" | "assessment";
+  title: string;
+  focus: string | null;
+  minutes: number | null;
+  completed_at: string | null;
+  notes: string | null;
+  created_at: string;
+};
+export type PracticeSessionInsert = Omit<PracticeSessionRow, "id" | "created_at">
+  & { id?: string; created_at?: string };
+
+export type PracticeSessionDrillRow = {
+  id: string;
+  session_id: string;
+  idx: number;
+  drill_slug: string | null;
+  name: string;
+  minutes: number | null;
+  how: string | null;
+  success: string | null;
+  targets: string | null;
+  completed_at: string | null;
+  created_at: string;
+};
+export type PracticeSessionDrillInsert = Omit<PracticeSessionDrillRow, "id" | "created_at">
+  & { id?: string; created_at?: string };
 
 /** Stages in pipeline order. A UI shows these as done / running / not yet. */
 export type AnalysisStage =
@@ -159,6 +216,8 @@ export type AnalysisInsert = {
   started_at?: string | null;
   finished_at?: string | null;
   heartbeat_at?: string | null;
+  /** 0016. Null restores; a timestamp archives. */
+  archived_at?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -179,6 +238,8 @@ export type AnalysisUpdate = {
   started_at?: string | null;
   finished_at?: string | null;
   heartbeat_at?: string | null;
+  /** 0016. Null restores; a timestamp archives. */
+  archived_at?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -724,6 +785,24 @@ export type CoachingPracticeBlockInsert = Omit<CoachingPracticeBlockRow, "id" | 
 export type Database = {
   public: {
     Tables: {
+      practice_plans: {
+        Row: PracticePlanRow;
+        Insert: PracticePlanInsert;
+        Update: Partial<PracticePlanInsert>;
+        Relationships: [];
+      };
+      practice_sessions: {
+        Row: PracticeSessionRow;
+        Insert: PracticeSessionInsert;
+        Update: Partial<PracticeSessionInsert>;
+        Relationships: [];
+      };
+      practice_session_drills: {
+        Row: PracticeSessionDrillRow;
+        Insert: PracticeSessionDrillInsert;
+        Update: Partial<PracticeSessionDrillInsert>;
+        Relationships: [];
+      };
       coaching_practice_plans: {
         Row: CoachingPracticePlanRow;
         Insert: CoachingPracticePlanInsert;

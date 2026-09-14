@@ -7,13 +7,28 @@ type Client = SupabaseClient<Database>;
 /** `videos.analysis_id` is unique, so this is genuinely a 1:1 embed, not an array. */
 export type AnalysisWithVideo = AnalysisRow & { video: VideoRow | null };
 
-export async function listAnalysesForUser(supabase: Client, userId: string) {
-  const { data, error } = await supabase
+/**
+ * The player's analyses, newest first.
+ *
+ * Archived rows are excluded by default rather than filtered by each caller.
+ * That direction matters: a caller that forgets the filter shows the player
+ * something they removed, which is the failure that makes archiving feel
+ * broken. A caller that wants them has to ask, and there is exactly one --
+ * the archive view itself.
+ */
+export async function listAnalysesForUser(
+  supabase: Client,
+  userId: string,
+  opts: { include?: "active" | "archived" | "all" } = {}
+) {
+  let query = supabase
     .from("analyses")
     .select("*, video:videos(*)")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
+    .eq("user_id", userId);
+  if (opts.include === "archived") query = query.not("archived_at", "is", null);
+  else if (opts.include !== "all") query = query.is("archived_at", null);
 
+  const { data, error } = await query.order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as AnalysisWithVideo[];
 }
@@ -31,6 +46,7 @@ export async function listAnalysisSummariesForUser(supabase: Client, userId: str
     .from("analyses")
     .select("id, title, status, created_at")
     .eq("user_id", userId)
+    .is("archived_at", null)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
