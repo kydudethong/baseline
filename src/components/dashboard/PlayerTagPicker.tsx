@@ -66,6 +66,9 @@ export function PlayerTagPicker({
   const [error, setError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [startedAt, setStartedAt] = useState<number | null>(null);
+  // The server's own words for what it is doing, rather than this component's
+  // guess from elapsed time.
+  const [stage, setStage] = useState<string | null>(null);
 
   // The clock only runs while a read is in flight, and resets each time one
   // starts. Driven by an interval rather than by the fetch, because the point
@@ -101,6 +104,7 @@ export function PlayerTagPicker({
     setError(null);
     setElapsedSeconds(0);
     setStartedAt(Date.now());
+    setStage(null);
     try {
       const res = await fetch(`/api/analyses/${analysisId}/coach`, {
         method: "POST",
@@ -114,6 +118,13 @@ export function PlayerTagPicker({
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Could not generate a coaching read.");
+
+      // The request only STARTS the run now — it answers in milliseconds and
+      // the pipeline carries on server-side. So the wait happens here, by
+      // polling, and the crucial property is that closing this tab no longer
+      // kills anything: the run finishes either way and the read is there when
+      // the page is next opened.
+      await waitForRead(analysisId, (line) => setStage(line));
       router.refresh();
       dialog?.close();
     } catch (err) {
@@ -246,12 +257,11 @@ export function PlayerTagPicker({
                 possible proof that nothing has hung. */}
             <span className="status-line">
               <span className="dot" />
-              {stageFor(elapsedSeconds)} · {formatElapsed(elapsedSeconds)} elapsed
+              {stage ?? stageFor(elapsedSeconds)} · {formatElapsed(elapsedSeconds)} elapsed
             </span>
             <span className="xs">
-              A full read watches the clip once, then re-watches every shot close
-              up. On a long clip that is a few minutes — you can leave this page
-              and come back, it keeps running.
+              This runs on the server, not in this tab. You can close the page, and
+              the read will be waiting for you when you come back.
             </span>
           </div>
         ) : null}
@@ -332,4 +342,54 @@ function formatElapsed(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return m > 0 ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
+}
+
+/** How often the page asks whether the background run has finished. */
+const POLL_MS = 3000;
+/**
+ * When to stop asking.
+ *
+ * Not a claim that the run has failed -- the run is server-side and carries on
+ * regardless. It is a claim about this TAB: after twenty minutes, sitting here
+ * is not how the person should find out, and the honest thing is to say so and
+ * let them come back. That is only a reasonable thing to say because the work
+ * genuinely survives the tab now.
+ */
+const POLL_GIVE_UP_MS = 20 * 60_000;
+
+/**
+ * Wait for a background coaching run, reporting the server's own stage text.
+ *
+ * Throws on a run the server recorded as failed -- which is the whole reason
+ * analyses.progress carries an `error`. Without it, a run that died thirty
+ * seconds in is indistinguishable from one still working, and the page would
+ * poll for twenty minutes over nothing.
+ */
+async function waitForRead(analysisId: string, onStage: (line: string) => void): Promise<void> {
+  const started = Date.now();
+  for (;;) {
+    await new Promise((r) => setTimeout(r, POLL_MS));
+    let json: {
+      hasCoachingRead?: boolean;
+      progress?: { message?: string; error?: string; coachingDone?: boolean } | null;
+    };
+    try {
+      const res = await fetch(`/api/analyses/${analysisId}/view?progress=1`, { cache: "no-store" });
+      if (!res.ok) continue; // a blip in polling is not a failed run
+      json = await res.json();
+    } catch {
+      continue;
+    }
+
+    if (json.progress?.error) throw new Error(json.progress.error);
+    if (json.hasCoachingRead || json.progress?.coachingDone) return;
+    if (json.progress?.message) onStage(json.progress.message);
+
+    if (Date.now() - started > POLL_GIVE_UP_MS) {
+      throw new Error(
+        "This is taking longer than expected. The read is still running on the server — "
+        + "close this and check back in a few minutes; it will be here."
+      );
+    }
+  }
 }

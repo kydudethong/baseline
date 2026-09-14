@@ -198,6 +198,21 @@ export type AnalysisProgress = {
   /** Stages already finished, so a UI can tick them off. */
   completedStages: AnalysisStage[];
   updatedAt: string;
+  /**
+   * Set when a BACKGROUND run failed.
+   *
+   * The coaching run no longer happens inside the HTTP request that started
+   * it, so there is no response left to put an error in -- by the time it
+   * fails the browser has long since been told "started". Without somewhere to
+   * record it, a failed background run is indistinguishable from a slow one,
+   * which is the exact confusion the heartbeat was built to end.
+   *
+   * Not analyses.error_message, which belongs to the CV run and would make a
+   * completed analysis look failed.
+   */
+  error?: string;
+  /** True once a coaching read exists for this analysis. */
+  coachingDone?: boolean;
 };
 export type AnalysisInsert = {
   id?: string;

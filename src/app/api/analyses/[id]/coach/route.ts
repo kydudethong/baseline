@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { getAnalysisForUser } from "@/lib/db/analyses";
-import { CoachingPipelineError, runCoachingPipeline } from "@/lib/coaching/run-coaching";
+import { kickOffCoachingPipeline } from "@/lib/coaching/run-coaching";
 import { describeError } from "@/lib/analysis/describe-error";
 
 // Coaching runs through Gemini now (lib/coaching/analyst.ts) — no
 // fs/child_process dependency, but kept on the Node runtime for parity with
 // the rest of this app's server routes and consistent env var handling.
 export const runtime = "nodejs";
-export const maxDuration = 120;
+// No maxDuration: nothing long happens inside this request any more.
 
 interface CoachRequestBody {
   /**
@@ -92,27 +92,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // 0005_coaching_layer.sql's RLS policies) — the user's own session can
   // only ever read them back.
   const serviceClient = createServiceRoleClient();
-  try {
-    await runCoachingPipeline(serviceClient, user.id, id);
-  } catch (err) {
-    if (err instanceof CoachingPipelineError) {
-      return NextResponse.json({ error: err.message }, { status: 409 });
-    }
-    // Supabase errors are plain objects, not Error instances -- the whole
-    // reason describeError exists. Every DB failure in run-coaching.ts throws
-    // one, so this branch used to discard the message, the Postgres code and
-    // the hint and report a bare "Coaching analysis failed."
-    const message = describeError(err);
-    console.error(`[coach] analysis ${id} failed: ${message}`, err);
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
 
-  const { data: read, error: readError } = await serviceClient
-    .from("coaching_reads")
-    .select("*")
-    .eq("analysis_id", id)
-    .maybeSingle();
-  if (readError) return NextResponse.json({ error: describeError(readError) }, { status: 500 });
-
-  return NextResponse.json({ coachingRead: read });
+  // STARTED, NOT FINISHED — and that is the point of this route now.
+  //
+  // It used to await the entire pipeline: an upload, several segments of video
+  // at 10fps, and a practice plan. Minutes, inside one HTTP request. Closing
+  // the laptop killed the run, and any proxy in between could time out a
+  // request that was working perfectly — which is exactly what "fetch failed"
+  // looked like from the browser.
+  //
+  // The run now continues on the Node event loop after this response has gone
+  // back, which is the whole reason this app is a long-lived container rather
+  // than serverless, and it reports through analyses.progress. The page polls
+  // that. A 202 is the honest status code for it.
+  kickOffCoachingPipeline(serviceClient, user.id, id);
+  return NextResponse.json({ started: true }, { status: 202 });
 }

@@ -50,10 +50,20 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     // with an 8-minute timeout, or for ten hours.
     const liveness = livenessOf(analysis.status, analysis.heartbeat_at ?? null);
 
+    // Whether a coaching read exists, so a client waiting on a BACKGROUND
+    // coaching run has something definite to wait for. The analysis status
+    // cannot answer this: it is "completed" the moment the CV run finishes,
+    // long before any coaching happens, and it never changes again.
+    const { count: readCount } = await supabase
+      .from("coaching_reads")
+      .select("analysis_id", { count: "exact", head: true })
+      .eq("analysis_id", id);
+
     return NextResponse.json({
       status: analysis.status,
       errorMessage: analysis.error_message,
       progress: analysis.progress ?? null,
+      hasCoachingRead: (readCount ?? 0) > 0,
       updatedAt: analysis.updated_at,
       startedAt: analysis.started_at ?? null,
       eta,

@@ -49,15 +49,67 @@ type Client = SupabaseClient<Database>;
 
 export class CoachingPipelineError extends Error {}
 
+/**
+ * Start a coaching run and return immediately.
+ *
+ * WHY THIS IS NOW THE ONLY WAY IT RUNS. The coach route used to await the
+ * whole pipeline inside the HTTP request that started it: upload, several
+ * segments of video, a practice plan. That held a browser connection open for
+ * minutes, so closing the laptop killed the run, and any proxy between the two
+ * could time out a request that was working perfectly.
+ *
+ * The CV pipeline solved this long ago -- it answers straight away and keeps
+ * going on the Node event loop, which is the whole reason this app is a
+ * long-lived container rather than serverless (see the Dockerfile). Coaching
+ * now does the same, and reports through analyses.progress like everything
+ * else.
+ */
 export function kickOffCoachingPipeline(supabase: Client, userId: string, analysisId: string): void {
-  runCoachingPipeline(supabase, userId, analysisId).catch((err) => {
-    // runCoachingPipeline doesn't have an analysis-level "failed" status to
-    // record into (that belongs to the CV pipeline) — this catch only
-    // stops an unhandled rejection from crashing the dev server. Callers
-    // that need to know whether it succeeded should await
-    // runCoachingPipeline directly instead (see the coach API route).
-    console.error(`[coaching] analysis ${analysisId} failed:`, err);
-  });
+  void coachingProgress(supabase, analysisId, "Starting the coaching read…");
+  runCoachingPipeline(supabase, userId, analysisId)
+    .then(() => coachingProgress(supabase, analysisId, "Coaching read finished.", { done: true }))
+    .catch(async (err) => {
+      // The one place a background failure can still be seen. Without this the
+      // page polls forever on a run that died thirty seconds in.
+      await coachingProgress(supabase, analysisId, "Coaching read failed.", {
+        error: describeError(err),
+      }).catch(() => {});
+    });
+}
+
+/**
+ * Write one line of coaching progress onto the analysis row.
+ *
+ * Best-effort throughout: this is how a waiting page learns what is happening,
+ * and a failure to write it must never take down the run it is describing.
+ * `heartbeat_at` goes with every write for the same reason the CV pipeline
+ * stamps it -- a stage label is the last value WRITTEN, so it cannot tell a
+ * working run from a dead one, and only a recent heartbeat can.
+ */
+export async function coachingProgress(
+  supabase: Client,
+  analysisId: string,
+  message: string,
+  opts: { done?: boolean; error?: string } = {}
+): Promise<void> {
+  try {
+    await supabase
+      .from("analyses")
+      .update({
+        progress: {
+          stage: "coaching",
+          message,
+          completedStages: [],
+          updatedAt: new Date().toISOString(),
+          ...(opts.done ? { coachingDone: true } : {}),
+          ...(opts.error ? { error: opts.error } : {}),
+        },
+        heartbeat_at: new Date().toISOString(),
+      })
+      .eq("id", analysisId);
+  } catch {
+    // Reporting progress is not the job; doing the work is.
+  }
 }
 
 export async function runCoachingPipeline(supabase: Client, userId: string, analysisId: string): Promise<void> {
@@ -214,6 +266,9 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
         : "[coaching] watching the whole clip — the tracks gave no clear split between play and dead time"
     );
 
+    await coachingProgress(supabase, analysisId, gate.gated
+      ? `Watching the ${gate.windows.length} stretches where you were playing…`
+      : "Watching the clip…");
     analyst = await runAnalyst({
       videoBytes: overlay,
       videoName: `${analysisId}.mp4`,
@@ -305,6 +360,8 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     console.warn(`[coaching] storing technique failed: ${describeError(err)}`);
   }
 
+  await coachingProgress(supabase, analysisId, "Measuring where you stood…");
+
   // Time to the kitchen after a return -- the half of the positioning metrics
   // the vision run could not compute, because the trigger is a shot type and
   // shot types are the model's judgement now.
@@ -316,6 +373,8 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     analysis.video?.height ?? 1080,
     (l) => console.error(`[coaching] ${l}`)
   );
+
+  await coachingProgress(supabase, analysisId, "Writing your practice session…");
 
   // A session the player can actually run, from what the analysis found.
   //
