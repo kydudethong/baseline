@@ -242,6 +242,13 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
             file,
             durationSeconds,
             shots: shotsWithTime.map((sh) => ({ t: sh.t, player: sh.player })),
+            // The tagged player(s). A real player can span several track
+            // labels (no re-identification), which is why this is a list and
+            // why analyses.self_player_label is stored comma-separated.
+            subjectLabels: (analysis.self_player_label ?? "")
+              .split(",")
+              .map((l) => l.trim())
+              .filter(Boolean),
             onLog: (l) => console.error(`[coaching] ${l}`),
           });
           if (technique.length > 0) {

@@ -41,7 +41,7 @@ export const TECHNIQUE_FPS = 15;
  * to hundreds of shots without adding hundreds of shots' worth of insight. A
  * player acts on a handful of corrections, not on eighty.
  */
-export const DEFAULT_MAX_SHOTS = 40;
+export const DEFAULT_MAX_SHOTS = 18;
 
 /**
  * How many per-shot reads are in flight at once.
@@ -113,16 +113,21 @@ export async function readShotTechnique(opts: {
   file: UploadedFile;
   shots: Array<{ t: number; player?: string | null }>;
   durationSeconds: number;
+  /**
+   * Which player labels are "you". Only this player's technique is coached --
+   * the overlay legend says so in as many words -- so reading the other three
+   * players' shots was work done to be thrown away.
+   */
+  subjectLabels?: string[];
   maxShots?: number;
   onLog?: (line: string) => void;
 }): Promise<{ technique: ShotTechnique[]; failed: number }> {
   const max = opts.maxShots ?? DEFAULT_MAX_SHOTS;
-  // Sorted by time so a truncated run covers the clip evenly rather than
-  // stopping partway through in whatever order the model happened to answer.
-  const shots = [...opts.shots]
-    .filter((s) => Number.isFinite(s.t) && s.t >= 0 && s.t <= opts.durationSeconds)
-    .sort((a, b) => a.t - b.t)
-    .slice(0, max);
+  const shots = selectTechniqueShots(opts.shots, opts.durationSeconds, opts.subjectLabels ?? [], max);
+  opts.onLog?.(
+    `technique: reading ${shots.length} of ${opts.shots.length} shot(s)`
+    + (opts.subjectLabels?.length ? ` (subject: ${opts.subjectLabels.join(", ")})` : "")
+  );
 
   let failed = 0;
   let done = 0;
@@ -200,4 +205,60 @@ export async function readShotTechnique(opts: {
     + `${opts.shots.length > max ? ` (capped at ${max} of ${opts.shots.length})` : ""}`
   );
   return { technique, failed };
+}
+
+/**
+ * Which shots get a close look, and this is where most of the cost lives.
+ *
+ * TWO THINGS WERE WRONG. It took every shot the analyst returned -- in a
+ * doubles clip that is four players' shots, and technique is only ever read
+ * for one of them ("Only this player's technique should be coached; the others
+ * are context", says the overlay legend the model is given). So roughly three
+ * quarters of these calls were reading an opponent's swing, at 15fps and high
+ * resolution, to store as this player's technique. That is not a speed
+ * trade-off; storing a stranger's mechanics under your name is simply wrong.
+ *
+ * And the cap was `.slice(0, max)` -- the FIRST n shots, so on a long clip
+ * every technique note came from the opening minutes and nothing from the rest.
+ * An even spread across the clip is both faster and more representative.
+ *
+ * The subject filter falls back to all shots when nothing matches, rather than
+ * returning none. Label formats have drifted before ("Player 3" vs "player_3"),
+ * and the failure mode of a strict match is a silent empty technique pass,
+ * which looks exactly like the model having nothing to say.
+ */
+export function selectTechniqueShots<T extends { t: number; player?: string | null }>(
+  shots: readonly T[],
+  durationSeconds: number,
+  subjectLabels: readonly string[],
+  max: number
+): T[] {
+  const inClip = shots
+    .filter((s) => Number.isFinite(s.t) && s.t >= 0 && s.t <= durationSeconds)
+    .sort((a, b) => a.t - b.t);
+
+  const wanted = new Set(subjectLabels.map(normaliseLabel).filter(Boolean));
+  const mine = wanted.size > 0
+    ? inClip.filter((s) => s.player && wanted.has(normaliseLabel(s.player)))
+    : [];
+  const pool = mine.length > 0 ? mine : inClip;
+
+  if (pool.length <= max || max <= 0) return pool;
+  return evenSpread(pool, max);
+}
+
+/** "Player 3", "player_3" and "PLAYER3" are the same player. */
+function normaliseLabel(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** `count` items spread evenly across the list, first and last included. */
+function evenSpread<T>(items: readonly T[], count: number): T[] {
+  if (count === 1) return [items[0]];
+  const out: T[] = [];
+  for (let i = 0; i < count; i++) {
+    out.push(items[Math.round((i * (items.length - 1)) / (count - 1))]);
+  }
+  // Rounding can land twice on the same index when count is close to length.
+  return [...new Set(out)];
 }
