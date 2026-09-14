@@ -39,6 +39,7 @@ import { buildAnalystInput } from "./analyst-facts";
 import { runAnalyst } from "./analyst";
 import { readShotTechnique } from "./technique";
 import { buildPracticePlan } from "./practice-plan";
+import { matchPlaystyles } from "./pro-playstyles";
 import { uploadVideo, deleteFile } from "./gemini";
 import { downloadToFile } from "@/lib/storage/r2";
 import { readOverlayBytes, OverlayMissingError } from "./overlay-source";
@@ -347,10 +348,25 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
         summary: out.coaching.summary,
         quality: {
           usable: analyst.problems.length === 0,
-          // The grounding problems ARE footage-quality issues as far as the
-          // reader is concerned: a rally outside the clip or a shot at a time
-          // nothing was measured means this read is partly about nothing.
-          issues: [...analystInput.knownLimitations, ...analyst.problems],
+          // ONLY the grounding problems. knownLimitations used to be
+          // concatenated in here, and that was a category error with a visible
+          // cost: they are prompt text written FOR THE MODEL ("the key is
+          // absent, not null", "shot_sequence[].mechanics"), and a single
+          // audit hit flipped `usable` to false and dumped four paragraphs of
+          // pipeline documentation into a red box headed "Limited footage
+          // quality" — which blamed the user's video for an internal note and
+          // buried the one line that actually mattered.
+          //
+          // A grounding problem is a different kind of thing entirely: a rally
+          // outside the clip, or a claim about something this pipeline cannot
+          // see, means part of this read is about nothing. That is worth
+          // interrupting someone for. A description of how the pipeline works
+          // is not.
+          issues: analyst.problems,
+          // Kept, because they are genuinely useful when debugging a read that
+          // looks wrong — just not in the user's face. facts_json below holds
+          // the full input; this is the short version.
+          notes: analystInput.knownLimitations,
         },
         coaching_json: JSON.stringify({
           strengths: out.coaching.strengths,
@@ -359,6 +375,21 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
           playstyle: out.playstyle,
           drills: out.drills,
           data_gaps: out.data_gaps,
+          // Which pros this player's game most resembles, by the SHAPE of the
+          // skill ratings rather than their level -- see pro-playstyles.ts.
+          //
+          // Computed here rather than asked of the model on purpose. A model
+          // asked "who do they play like" will answer with whoever it has read
+          // most about, every time, and the answer would not move when the
+          // ratings did. This is a deterministic function of numbers already on
+          // the page, so it is checkable: if it says you play like Parenteau,
+          // the skill radar above shows why.
+          //
+          // Stored in this existing blob rather than a new table, so the
+          // feature needs no migration.
+          playstyle_match: matchPlaystyles(
+            Object.fromEntries(out.skills.map((s) => [s.skill_key, s.rating]))
+          ),
         }),
         facts_json: JSON.stringify(analystInput),
       },

@@ -91,8 +91,15 @@ test("good coverage adds no such warning", () => {
 });
 
 test("no body measurements anywhere is stated outright", () => {
+  // The claim narrowed when the second pass landed: with no measured mechanics
+  // a technique note has to come from WATCHING the shot at 15fps rather than
+  // from a number, which is a real caveat but not the blanket "nothing can be
+  // said about technique" this used to assert.
   const got = input({ shots: [shot({ mechanics: null })] });
-  assert.ok(got.knownLimitations.some((l) => /nothing can be said about technique/.test(l)));
+  assert.ok(got.knownLimitations.some((l) => /No body measurements were taken/.test(l)));
+  assert.ok(
+    got.knownLimitations.some((l) => /cannot cite swing size, contact height or knee bend as figures/.test(l))
+  );
 });
 
 test("no subject is stated outright", () => {

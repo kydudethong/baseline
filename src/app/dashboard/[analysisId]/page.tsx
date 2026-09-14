@@ -22,6 +22,8 @@ import type { CourtCalibrationRow } from "@/lib/db/types";
 import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
 import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
 import { PracticeSessionPanel } from "@/components/dashboard/PracticeSessionPanel";
+import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel";
+import type { PlaystyleMatch } from "@/lib/coaching/pro-playstyles";
 import { ShotsPanel } from "@/components/dashboard/ShotsPanel";
 import { AnalysisWorkspace } from "@/components/analysis/AnalysisWorkspace";
 import { EmptyState } from "@/components/analysis/EmptyState";
@@ -279,6 +281,12 @@ async function AnalysisBreakdown({
           body="Tag which player is you above and Baseline will write it — strengths, the one fix that matters most, and a drill to start with."
         />
       )}
+
+      {/* Directly after the skill radar, and that placement is the argument:
+          the match IS the radar, read as a shape. Somebody who has just looked
+          at their own profile can see why a particular pro came back, which is
+          what stops "you play like X" from being a horoscope. */}
+      <PlaystyleMatchPanel matches={playstyleMatches(coachingData.read?.coaching_json ?? null)} />
 
       {coachingData.skills.length > 0 ? (
         <section className="stack g4">
@@ -545,4 +553,22 @@ function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.round(seconds % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * The stored playstyle matches, or none.
+ *
+ * Read defensively because coaching_json is a text blob written by a previous
+ * version of the pipeline as often as the current one: every read produced
+ * before this feature existed has no `playstyle_match` key at all, and that is
+ * a normal state rather than a corrupt row.
+ */
+function playstyleMatches(coachingJson: string | null): PlaystyleMatch[] {
+  if (!coachingJson) return [];
+  try {
+    const parsed = JSON.parse(coachingJson) as { playstyle_match?: PlaystyleMatch[] };
+    return Array.isArray(parsed.playstyle_match) ? parsed.playstyle_match : [];
+  } catch {
+    return [];
+  }
 }

@@ -75,16 +75,27 @@ export function CoachingReadPanel({
         {read.summary ? <p className="body measure">{read.summary}</p> : null}
       </div>
 
-      {quality && !quality.usable ? (
-        <div className="error">
-          <strong>Limited footage quality.</strong>
-          {quality.issues.length > 0 ? (
-            <ul style={{ marginTop: 6, paddingLeft: 18, listStyle: "disc" }}>
-              {quality.issues.map((issue, i) => (
-                <li key={i}>{issue}</li>
-              ))}
-            </ul>
-          ) : null}
+      {/* "Limited footage quality" was the wrong heading and the wrong colour.
+          What this box reports are GROUNDING failures found by auditAnalysis --
+          the model citing a rally outside the clip, or describing a paddle face
+          at a sampling rate where no paddle is visible. Those are faults in the
+          read, not in the user's video, and telling someone their filming is
+          bad when the model hallucinated is both wrong and unfixable advice.
+
+          Amber rather than red: the read is still worth showing, and the parts
+          that failed the audit are a minority of it. A red box above good
+          coaching makes people discard the good coaching. */}
+      {quality && !quality.usable && quality.issues.length > 0 ? (
+        <div className="note" style={{ borderLeft: "4px solid var(--warn)" }}>
+          <strong style={{ color: "var(--ink)" }}>Treat part of this read with caution.</strong>{" "}
+          Baseline checks its own coaching against what it actually measured, and{" "}
+          {quality.issues.length === 1 ? "one thing" : `${quality.issues.length} things`} did not line up:
+          <ul style={{ marginTop: 6, paddingLeft: 18, listStyle: "disc" }}>
+            {quality.issues.map((issue, i) => (
+              <li key={i}>{issue}</li>
+            ))}
+          </ul>
+          Everything else on this page passed the same check.
         </div>
       ) : null}
 

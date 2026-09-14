@@ -324,9 +324,19 @@ export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[]
     }
   }
 
+  // Phrased for a reader, not a log line. "claims something nothing here can
+  // see: \"paddle face\"" is precise and meaningless to the person it is shown
+  // to; it reads like an internal assertion leaking into the product, which is
+  // what it was. The fact worth conveying is WHY the claim cannot be checked.
   const blob = JSON.stringify(out).toLowerCase();
   for (const phrase of FORBIDDEN) {
-    if (blob.includes(phrase)) problems.push(`claims something nothing here can see: "${phrase}"`);
+    if (blob.includes(phrase)) {
+      problems.push(
+        `The read mentions "${phrase}". This pass watches the clip at one frame per second, and a ` +
+          "pickleball stroke lasts about a third of a second — so the paddle itself is never visible in a " +
+          "sampled frame. Take that part as a guess rather than something observed."
+      );
+    }
   }
   return problems;
 }

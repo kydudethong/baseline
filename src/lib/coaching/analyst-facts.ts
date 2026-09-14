@@ -113,7 +113,14 @@ export function buildAnalystInput(opts: {
   }
   if (!contacts.some((c) => c.body)) {
     limitations.push(
-      "No body measurements were taken on any contact, so nothing can be said about technique."
+      // NOT "nothing can be said about technique" any more. The second pass
+      // re-watches each shot at 15fps and high resolution and reads technique
+      // straight off the footage -- that is the whole reason it exists. What is
+      // missing here is the numeric check on it, which is a different and much
+      // smaller claim.
+      "No body measurements were taken on any contact, so any technique note must come from watching the " +
+        "footage rather than from a measured number, and cannot cite swing size, contact height or knee " +
+        "bend as figures."
     );
   }
   // One call for the whole clip, deliberately -- chunking is not worth its

@@ -408,25 +408,38 @@ function longestDinkRun(shots: Shot[]): { count: number; longest: number } {
 export function buildCoachingFacts(input: BuildCoachingFactsInput): CoachingFacts {
   const allShots = (input.shots ?? []).map(shotFromRow);
   const hasShots = allShots.length > 0;
+  // WHAT THESE ARE, AND WHO THEY ARE FOR. This list is written for the MODEL:
+  // it is pasted into the analyst prompt so the read is caveated by what the
+  // pipeline can and cannot see. It is not a report on the user's footage, and
+  // it must never be shown to them as one -- see run-coaching.ts, which now
+  // keeps these apart from the grounding problems.
+  //
+  // They were also, until this commit, describing a pipeline that no longer
+  // exists. Ball tracking, the five rally segmenters and shot classification
+  // were all removed; rallies and shot types are read from the video by the
+  // model itself. So the model was being told "rally boundaries come from
+  // movement gaps" about boundaries IT had just drawn, and "the ball was not
+  // tracked" as though that were a fault in the clip rather than the design.
+  // A caveat that misdescribes the system is worse than no caveat: it invites
+  // the model to hedge a number that is fine and trust one that is not.
   const knownLimitations: string[] = [
     ...(hasShots
       ? [
-          "Shot types come from ball tracking + court geometry (see shot_sequence per rally). Each shot carries " +
-            "a confidence; treat anything under 0.5 as a guess and prefer patterns supported by several shots.",
+          "Shot types in shot_sequence were read from the video by you, at 1 frame per second. Nothing " +
+            "measures them independently, so treat them as your own reading and prefer patterns that hold " +
+            "across several shots to any single label.",
         ]
-      : [
-          "Shot type (drive/dink/drop/volley/serve) is not classified for this clip — the ball was not tracked, and " +
-            "no other signal (body pose, tracked position) distinguishes them reliably.",
-        ]),
-    "Rally boundaries are approximated from player movement (a gap of 1.5s or more with nobody moving " +
-      "ends a rally); they are not read from game state or score.",
-    "Paddle position is a PROXY — wrist height relative to shoulder from body pose — no paddle is ever " +
-      "detected or tracked directly.",
+      : []),
+    "Rally boundaries are read from the video, not from game state, score or ball flight. Nothing else in " +
+      "this pipeline segments rallies, so there is no second source to check them against.",
+    "No paddle is detected or tracked anywhere in this pipeline. At 1 frame per second a pickleball stroke " +
+      "(about a third of a second) falls between sampled frames, so the paddle's face, path, contact point " +
+      "and any spin are NOT observable here. Do not describe them.",
     "Per-shot mechanics (shot_sequence[].mechanics) are measured from BODY pose sampled densely around " +
       "each contact, in the player's own shoulder widths and torsos rather than pixels, so far-court and " +
       "near-court shots are comparable. They describe what the body did — swing size, speed, contact " +
-      "height, knee bend — and say nothing about the paddle's face, path or spin. The key is absent, not " +
-      "null, whenever it could not be measured.",
+      "height, knee bend — and say nothing about the paddle. The key is absent, not null, whenever it " +
+      "could not be measured.",
   ];
 
   const selfLabels = new Set(input.selfPlayerLabels);
@@ -476,7 +489,11 @@ export function buildCoachingFacts(input: BuildCoachingFactsInput): CoachingFact
   const durationSeconds = estimateDurationSeconds(rawTrackData, input.events);
   const clustered = clusterRalliesFromHits(contacts, durationSeconds, HIT_CLUSTER_PARAMS);
   if (clustered.length === 0) {
-    knownLimitations.push("No ball-track contact events were recorded for this analysis — no rallies could be segmented.");
+    knownLimitations.push(
+      "No measured contact timestamps exist for this analysis, so the per-shot body mechanics below are " +
+        "empty. The rallies and shots you read from the video stand on their own; there is simply no " +
+        "independent measurement to attach to them."
+    );
   }
 
   // Pose keypoints, grouped by self player (any merged label) + rally window.
