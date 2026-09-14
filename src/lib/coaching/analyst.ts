@@ -61,6 +61,9 @@ export interface AnalystOutput {
   shots: Array<{
     t: number; rally_idx: number; player: string;
     type: typeof SHOT_TYPES[number]; confidence: number;
+    /** Roughly where the ball landed. Null when it was not seen to land. */
+    landing_depth?: string | null;
+    landing_side?: string | null;
   }>;
   playstyle: { summary: string; tendencies: string[]; under_pressure: string };
   /** rating is 1-5, matching coaching_skill_ratings.raw — NOT 1-10. */
@@ -113,6 +116,19 @@ export function analystSchema(): Record<string, unknown> {
           properties: {
             t: num, rally_idx: { type: "integer" }, player: str,
             type: { type: "string", enum: [...SHOT_TYPES] }, confidence: num,
+            // Zones, not coordinates. A model asked for a landing POINT will
+            // produce a decimal that looks like a measurement and is not one;
+            // a model asked which third of the court it landed in is being
+            // asked something it can actually see, and "kitchen / mid / deep"
+            // is the resolution coaching is written at anyway.
+            landing_depth: {
+              type: "string", nullable: true,
+              description: "kitchen | mid | deep | out | net — where the ball landed, or null if not seen to land",
+            },
+            landing_side: {
+              type: "string", nullable: true,
+              description: "left | middle | right from the hitter's view, or null",
+            },
           },
           required: ["t", "rally_idx", "player", "type", "confidence"],
         },
@@ -203,9 +219,10 @@ what it MEASURED. The gold box labelled YOU is the player you are coaching.
 
 WHAT THE MEASUREMENTS ARE
 
-${contacts} contacts, ${withBody} of them with body measurements. A contact is a moment the
-ball visibly changed direction against a player — a timed observation, not a
-guess. Positions are in court FEET: x runs 0-20 across, y runs away from the
+${contacts === 0
+  ? "NO contacts were measured for this clip, and that is the normal case: nothing in this pipeline\ntracks the ball. Every contact in your answer comes from you watching the footage. Do not treat\nthe empty list as evidence that nothing was hit."
+  : `${contacts} contacts, ${withBody} of them with body measurements. A contact is a moment the\nball visibly changed direction against a player — a timed observation, not a guess.`}
+Positions are in court FEET: x runs 0-20 across, y runs away from the
 camera with 0 at the near baseline, 22 at the net, 44 at the far baseline. The
 kitchen lines are at y=15 and y=29. Body measurements are in the player's own
 shoulder widths, so a shot at the far baseline compares directly with one near
@@ -220,9 +237,16 @@ YOUR JOB
 1. RALLIES — points actually being played, serve to the moment the ball stops
    being played. Walking about and retrieving the ball between points is not a
    rally. Number them from 1.
-2. SHOTS — a type for every contact, and which rally it belongs to. Use the
-   contact timestamps given; do not invent times. "unknown" is a correct
-   answer where you cannot tell, and a wrong label is not.
+2. SHOTS — every paddle contact in the clip: WHEN it happened, WHO hit it,
+   what kind of shot it was, and roughly where it landed. You find these by
+   watching. Nothing else in this pipeline detects the ball, so a contact you
+   do not report is a contact that does not exist as far as this product is
+   concerned — the rally lengths, the shot counts and the contact totals shown
+   to the player are all counted from this list.
+   Report EVERY contact by both players' sides, not only the subject's: a
+   rally of nine shots where you list four reads to the player as a four-shot
+   rally. "unknown" is a correct answer for a type you cannot tell, and a
+   wrong label is not.
 3. PLAYSTYLE of the subject — how they actually play, where they win and lose
    points, what they reach for under pressure. Describe, do not flatter.
 4. SKILL RATINGS 1-5, only for skills this clip supports. 1 is a clear

@@ -40,6 +40,7 @@ import { runAnalyst } from "./analyst";
 import { readShotTechnique } from "./technique";
 import { buildPracticePlan } from "./practice-plan";
 import { matchPlaystyles } from "./pro-playstyles";
+import { shotRowsFromAnalyst } from "./shot-rows";
 import { uploadVideo, deleteFile } from "./gemini";
 import { downloadToFile } from "@/lib/storage/r2";
 import { readOverlayBytes, OverlayMissingError } from "./overlay-source";
@@ -335,15 +336,55 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     idx: r.idx,
     start_s: r.start_s,
     end_s: r.end_s,
-    // How many measured contacts fall inside it. Counted here rather than
-    // taken from the model: a count is arithmetic over timestamps we already
-    // have, and there is no reason to let it be wrong.
-    shots: analystInput.contacts.filter((c) => c.t >= r.start_s && c.t <= r.end_s).length,
+    // Paddle contacts in this rally.
+    //
+    // THIS IS WHY THE PAGE SAID 0. It counted analystInput.contacts, which
+    // came from the ball tracker's detected hits -- and ball tracking was
+    // removed. The array has been empty on every run since, so every rally
+    // stored shots: 0, the scoreboard summed zero and reported "0 paddle
+    // contacts" over footage plainly full of them. A count derived from a
+    // source that no longer exists does not report zero because there were
+    // none; it reports zero because nobody is counting.
+    //
+    // The model watches the video and returns a shot per contact with the
+    // rally it belongs to, so that is the count. Preferring rally_idx over a
+    // timestamp window matters at rally boundaries: a contact that ends one
+    // rally can sit within a rounding error of the next one's start, and the
+    // model's own attribution is better than our arithmetic on its
+    // timestamps. The window is the fallback for shots whose rally_idx is
+    // missing or out of range.
+    shots: countContacts(out.shots ?? [], r),
   }));
   const { error: rallyError } = await supabase
     .from("coaching_rallies")
     .upsert(rallyRows, { onConflict: "analysis_id,idx" });
   if (rallyError) throw rallyError;
+
+  // The shots themselves, into the table that already exists for them.
+  //
+  // analysis_shots was written by the CV shot classifier, which went when ball
+  // tracking did -- so it has been empty on every run since, and every reader
+  // of it has been reporting zero as though it were a measurement. The model's
+  // shots fit it exactly (same fourteen shot types, same landing vocabulary),
+  // so they go here rather than into a parallel table.
+  //
+  // Replace, not append: a re-run must not leave the previous read's shots
+  // beside the new ones. Failure here is logged, not thrown -- the coaching
+  // read, ratings and drills are already written by this point, and losing
+  // them to a shot table would be a bad trade.
+  try {
+    const shotRows = shotRowsFromAnalyst(analysisId, out.shots ?? []);
+    await supabase.from("analysis_shots").delete().eq("analysis_id", analysisId);
+    if (shotRows.length > 0) {
+      const { error: shotError } = await supabase.from("analysis_shots").insert(shotRows);
+      if (shotError) throw shotError;
+      console.error(`[coaching] stored ${shotRows.length} paddle contact(s) across ${rallyRows.length} rall(ies)`);
+    } else {
+      console.error("[coaching] the model reported no paddle contacts for this clip");
+    }
+  } catch (err) {
+    console.warn(`[coaching] storing shots failed: ${describeError(err)}`);
+  }
 
   const { data: readRow, error: readError } = await supabase
     .from("coaching_reads")
@@ -465,4 +506,14 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       .upsert(skillRows, { onConflict: "analysis_id,skill_key" });
     if (skillError) throw skillError;
   }
+}
+
+/** Contacts belonging to one rally, by the model's own attribution first. */
+function countContacts(
+  shots: ReadonlyArray<{ t: number; rally_idx?: number }>,
+  rally: { idx: number; start_s: number; end_s: number }
+): number {
+  const byIndex = shots.filter((s) => s.rally_idx === rally.idx).length;
+  if (byIndex > 0) return byIndex;
+  return shots.filter((s) => Number.isFinite(s.t) && s.t >= rally.start_s && s.t <= rally.end_s).length;
 }

@@ -234,11 +234,15 @@ async function AnalysisBreakdown({
             <div className="lbl">Rallies</div>
           </div>
           <div className="cell">
-            <div className="num">{totalContacts(view.rallies) || "—"}</div>
+            <div className={`num${totalContacts(view.rallies) ? "" : " empty"}`}>
+              {totalContacts(view.rallies) || "—"}
+            </div>
             <div className="lbl">Paddle contacts</div>
           </div>
           <div className="cell">
-            <div className="num">{median(view.rallies.map((r) => r.contactCount)) || "—"}</div>
+            <div className={`num${median(view.rallies.map((r) => r.contactCount)) ? "" : " empty"}`}>
+              {median(view.rallies.map((r) => r.contactCount)) || "—"}
+            </div>
             <div className="lbl">Contacts / rally</div>
           </div>
           <div className="cell">
