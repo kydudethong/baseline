@@ -16,6 +16,7 @@
  *            confidence, citing backswing / bounce / contact / follow-through.
  */
 import { mapWithConcurrency } from "./concurrency";
+import { planSegments, maxSegmentSeconds, isSampled } from "./technique-segments";
 import { generateJSON, type UploadedFile, type VideoConfig } from "./gemini";
 
 /**
@@ -34,26 +35,27 @@ export const CLIP_TRAIL_S = 0.6;
 export const TECHNIQUE_FPS = 15;
 
 /**
- * How many shots get the close look.
+ * How many of the subject's shots are pointed out to the model.
  *
- * A cap, because this is per-shot spend: ~4k tokens each, so a 40-shot game is
- * ~160k tokens and about twelve cents, while a long doubles session could run
- * to hundreds of shots without adding hundreds of shots' worth of insight. A
- * player acts on a handful of corrections, not on eighty.
+ * This is no longer a cap on CALLS -- the segments are, and the model sees
+ * every frame of a segment whether or not a shot in it is on this list. It is
+ * a cap on how many timestamps we hand over as "look here", which keeps the
+ * prompt short and the answer focused on a handful of corrections rather than
+ * eighty. Shots beyond it still get watched; they just are not signposted.
  */
 export const DEFAULT_MAX_SHOTS = 18;
 
 /**
- * How many per-shot reads are in flight at once.
+ * How many segment reads are in flight at once.
  *
- * Six rather than "as many as there are shots". The ceiling here is the key's
- * requests-per-minute, not our patience: each of these is a real generateContent
- * call, and a burst of forty is a 429 for the whole batch. Six turns a 40-shot
- * clip from forty round trips into about seven, which is most of the available
- * win, and leaves the retry backoff in gemini.ts handling genuine server
- * busyness rather than congestion we caused.
+ * Three, down from six, because a segment is not a shot. Each of these carries
+ * up to 600k tokens of video rather than ~4k, so the limit that bites first is
+ * tokens per minute, not requests per minute -- three in flight is already
+ * nearly two million tokens of video in the air. There are also at most eight
+ * segments, so a wider pool buys very little: eight over three lanes is three
+ * rounds, and over six it is two.
  */
-export const TECHNIQUE_CONCURRENCY = 6;
+export const TECHNIQUE_CONCURRENCY = 3;
 
 export interface ShotTechnique {
   tSeconds: number;
@@ -67,47 +69,84 @@ export interface ShotTechnique {
   clipEndSeconds: number;
 }
 
+/**
+ * ONE ENTRY PER SHOT, in one answer.
+ *
+ * The per-shot version asked for a single object because each call saw a
+ * single swing. A segment call sees several minutes of continuous play, so it
+ * returns a list -- and gains the thing the per-shot version structurally
+ * could not have: `pattern`, which is a statement across shots. "Your first
+ * two drops cleared the net by a foot and the third clipped it" is only
+ * sayable by something that watched all three.
+ */
 const SCHEMA = {
   type: "object",
   properties: {
-    striker_court: { type: "string", description: "near (closest to camera) / far / unclear" },
-    stroke_visible: {
-      type: "boolean",
-      description: "True only if you can actually see the swing happen across several frames.",
+    shots: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          t: { type: "number", description: "Seconds into the SOURCE video, not into this segment." },
+          striker_court: { type: "string", description: "near (closest to camera) / far / unclear" },
+          stroke_visible: {
+            type: "boolean",
+            description: "True only if you can actually see the swing happen across several frames.",
+          },
+          paddle_face: { type: "string", nullable: true, description: "open / closed / neutral / cannot tell" },
+          contact_height: { type: "string", nullable: true, description: "Relative to the striker's own body." },
+          correction: { type: "string", nullable: true, description: "The single most useful change, in a coach's words." },
+          confidence: { type: "string", nullable: true, description: "high / medium / low, and why." },
+        },
+        required: ["t", "striker_court", "stroke_visible"],
+      },
     },
-    paddle_face: { type: "string", description: "open / closed / neutral / cannot tell" },
-    contact_height: { type: "string", description: "Relative to the striker's own body." },
-    correction: { type: "string", description: "The single most useful change, in a coach's words." },
-    confidence: { type: "string", description: "high / medium / low, and why." },
+    pattern: {
+      type: "string",
+      nullable: true,
+      description:
+        "One thing that held ACROSS the shots in this stretch, which no single shot would show. "
+        + "Null if nothing did — an invented pattern is worse than none.",
+    },
   },
-  required: ["striker_court", "stroke_visible", "paddle_face", "contact_height",
-             "correction", "confidence"],
+  required: ["shots"],
 };
 
-function promptFor(tSeconds: number, playerLabel: string | null): string {
-  return (
-    "You are watching a short, high-frame-rate window of a pickleball point containing one stroke"
-    + (playerLabel ? `, played by ${playerLabel}` : "")
-    + ` around ${tSeconds.toFixed(1)}s in the source video.\n\n`
-    + "Describe ONLY what is visible in the frames you were given.\n"
-    + "- If no stroke happens in this window — the players are between points, retrieving a ball, "
-    + "or the point has already ended — set stroke_visible to false and say so. That is a correct "
-    + "and useful answer, not a failure.\n"
-    + "- If the striker is in the far court they will be small in frame. Judge what you can and say "
-    + "in `confidence` that distance limited it. Do not refuse, and do not overstate.\n"
-    + "- `correction` must be something the player could actually do differently next time, phrased "
-    + "the way a coach standing courtside would say it. Not a description of what happened."
-  );
+function promptFor(
+  segment: { startSeconds: number; endSeconds: number },
+  shotTimes: number[],
+  playerLabel: string | null
+): string {
+  return [
+    `You are watching ${(segment.endSeconds - segment.startSeconds).toFixed(0)} seconds of a pickleball `
+    + `match at a high frame rate, covering ${segment.startSeconds.toFixed(1)}s to `
+    + `${segment.endSeconds.toFixed(1)}s of the source video.`,
+    "",
+    playerLabel
+      ? `Coach ONLY ${playerLabel}. Other players appear and are context; do not write technique for them.`
+      : "No single player was tagged, so describe whoever is striking.",
+    "",
+    shotTimes.length > 0
+      ? "Shots by that player were observed at roughly these times (seconds into the SOURCE video):\n"
+        + shotTimes.map((t) => `- ${t.toFixed(1)}s`).join("\n")
+        + "\n\nReport one entry per shot you can actually see. These timestamps came from a pass that "
+        + "watched at one frame per second, so they can be off by a few tenths — use them to find the "
+        + "stroke, then report `t` as the moment of contact you actually observe. A time in this list "
+        + "where you see no stroke should be returned with stroke_visible false rather than omitted."
+      : "No shot times were supplied. Report every stroke by that player you can see in this stretch.",
+    "",
+    "RULES",
+    "- Describe only what is visible in these frames. At this frame rate you CAN see the paddle, the",
+    "  backswing, the contact and the follow-through — so paddle face and contact height are fair game",
+    "  here, unlike the 1fps pass.",
+    "- A player in the far court is small in frame. Judge what you can and say in `confidence` that",
+    "  distance limited it. Do not refuse, and do not overstate.",
+    "- `correction` must be something the player could do differently next time, phrased the way a",
+    "  coach standing courtside would say it. Not a description of what happened.",
+    "- `t` is seconds into the SOURCE video. Do not restart at zero for this segment.",
+  ].join("\n");
 }
 
-/**
- * Read technique for each shot, one short clip at a time.
- *
- * A FAILED SHOT IS SKIPPED, NOT FATAL. These are independent looks at
- * independent moments, and losing one to a timeout or a malformed response is
- * worth far less than losing the other thirty-nine. The caller gets what
- * succeeded plus a count of what did not.
- */
 export async function readShotTechnique(opts: {
   model: string;
   file: UploadedFile;
@@ -121,90 +160,104 @@ export async function readShotTechnique(opts: {
   subjectLabels?: string[];
   maxShots?: number;
   onLog?: (line: string) => void;
-}): Promise<{ technique: ShotTechnique[]; failed: number }> {
+}): Promise<{ technique: ShotTechnique[]; patterns: string[]; failed: number }> {
   const max = opts.maxShots ?? DEFAULT_MAX_SHOTS;
-  const shots = selectTechniqueShots(opts.shots, opts.durationSeconds, opts.subjectLabels ?? [], max);
+  const mine = selectTechniqueShots(opts.shots, opts.durationSeconds, opts.subjectLabels ?? [], max);
+  const segments = planSegments(opts.durationSeconds, TECHNIQUE_FPS);
+  if (segments.length === 0) return { technique: [], patterns: [], failed: 0 };
+
   opts.onLog?.(
-    `technique: reading ${shots.length} of ${opts.shots.length} shot(s)`
-    + (opts.subjectLabels?.length ? ` (subject: ${opts.subjectLabels.join(", ")})` : "")
+    `technique: ${segments.length} segment(s) of up to ${maxSegmentSeconds(TECHNIQUE_FPS)}s at `
+    + `${TECHNIQUE_FPS}fps, ${mine.length} shot(s) to look for`
+    + (isSampled(opts.durationSeconds, TECHNIQUE_FPS)
+      ? " — clip too long to watch end to end at this frame rate, so segments are spread across it"
+      : "")
   );
 
   let failed = 0;
   let done = 0;
+  const patterns: string[] = [];
 
-  // IN PARALLEL, bounded. These calls are wholly independent of each other --
-  // same uploaded file, different 1.8-second window -- so running them one at
-  // a time spent minutes of wall clock waiting on round trips that nothing was
-  // waiting for. At 40 shots this was the single largest component of "getting
-  // my coaching read", by a wide margin.
-  //
-  // TECHNIQUE_CONCURRENCY is small on purpose: opening 40 requests at once is
-  // the fastest way to turn a working key into a rate-limited one, and the
-  // backoff in gemini.ts would then be fighting a burst this loop created.
-  const settled = await mapWithConcurrency(shots, TECHNIQUE_CONCURRENCY, async (shot) => {
-    const clipStartSeconds = Math.max(0, shot.t - CLIP_LEAD_S);
-    const clipEndSeconds = Math.min(opts.durationSeconds, shot.t + CLIP_TRAIL_S);
-    if (clipEndSeconds <= clipStartSeconds) return null;
-
+  const settled = await mapWithConcurrency(segments, TECHNIQUE_CONCURRENCY, async (segment) => {
     const video: VideoConfig = {
       fps: TECHNIQUE_FPS,
-      startOffsetSeconds: Math.round(clipStartSeconds * 100) / 100,
-      endOffsetSeconds: Math.round(clipEndSeconds * 100) / 100,
+      startOffsetSeconds: segment.startSeconds,
+      endOffsetSeconds: segment.endSeconds,
       mediaResolution: "high",
     };
+    const inSegment = mine
+      .filter((sh) => sh.t >= segment.startSeconds && sh.t <= segment.endSeconds)
+      .map((sh) => sh.t);
+    const label = opts.subjectLabels?.[0] ?? mine[0]?.player ?? null;
 
     try {
       const out = await generateJSON<{
-        striker_court?: string; stroke_visible?: boolean; paddle_face?: string;
-        contact_height?: string; correction?: string; confidence?: string;
+        shots?: Array<{
+          t?: number; striker_court?: string; stroke_visible?: boolean; paddle_face?: string | null;
+          contact_height?: string | null; correction?: string | null; confidence?: string | null;
+        }>;
+        pattern?: string | null;
       }>({
         model: opts.model,
         file: opts.file,
-        prompt: promptFor(shot.t, shot.player ?? null),
+        prompt: promptFor(segment, inSegment, label),
         schema: SCHEMA,
         video,
-        maxOutputTokens: 2000,
+        // One entry per shot in several minutes of play, so the ceiling is far
+        // higher than the per-shot version's 2k.
+        maxOutputTokens: 8000,
       });
-      // Progress, because this is the long pole and a silent five minutes is
-      // indistinguishable from a hang -- which is exactly how the last one got
-      // diagnosed as a crash when it was only slow.
+
       done++;
-      if (done % 5 === 0 || done === shots.length) {
-        opts.onLog?.(`technique: ${done}/${shots.length} shots read`);
-      }
-      return {
-        tSeconds: shot.t,
-        strikerCourt: out.striker_court ?? null,
-        strokeVisible: out.stroke_visible === true,
-        paddleFace: out.paddle_face ?? null,
-        contactHeight: out.contact_height ?? null,
-        correction: out.correction ?? null,
-        confidence: out.confidence ?? null,
-        clipStartSeconds,
-        clipEndSeconds,
-      } satisfies ShotTechnique;
+      opts.onLog?.(`technique: ${done}/${segments.length} segment(s) read`);
+      if (out.pattern) patterns.push(out.pattern);
+
+      return (out.shots ?? [])
+        // A timestamp outside the segment is the model losing its place, which
+        // it does -- and a technique note filed against a moment that was not
+        // watched is exactly the kind of ungrounded claim the audit exists to
+        // catch. Dropped rather than clamped: a wrong time is not repairable
+        // by moving it to the nearest edge.
+        .filter((sh) => typeof sh.t === "number" && Number.isFinite(sh.t)
+          && sh.t >= segment.startSeconds - 0.5 && sh.t <= segment.endSeconds + 0.5)
+        .map((sh) => ({
+          tSeconds: Math.round(sh.t! * 100) / 100,
+          strikerCourt: sh.striker_court ?? null,
+          strokeVisible: sh.stroke_visible === true,
+          paddleFace: sh.paddle_face ?? null,
+          contactHeight: sh.contact_height ?? null,
+          correction: sh.correction ?? null,
+          confidence: sh.confidence ?? null,
+          // The clip a UI would play to show this note. Derived from the
+          // reported contact rather than the segment: nobody wants to watch
+          // two and a half minutes to see one swing.
+          clipStartSeconds: Math.max(segment.startSeconds, sh.t! - CLIP_LEAD_S),
+          clipEndSeconds: Math.min(segment.endSeconds, sh.t! + CLIP_TRAIL_S),
+        } satisfies ShotTechnique));
     } catch (err) {
-      // Swallowed per shot, deliberately: one shot the model refused must not
-      // lose the other thirty-nine. mapWithConcurrency rejects on a throwing
-      // mapper, which is right for it and wrong here.
+      // Swallowed per segment: one segment the model refused must not lose the
+      // others. mapWithConcurrency rejects on a throwing mapper, which is right
+      // for it and wrong here.
       failed++;
       done++;
-      opts.onLog?.(`technique at ${shot.t.toFixed(1)}s failed: ${(err as Error).message.split("\n")[0]}`);
-      return null;
+      opts.onLog?.(
+        `technique segment ${segment.startSeconds.toFixed(0)}-${segment.endSeconds.toFixed(0)}s failed: `
+        + `${(err as Error).message.split("\n")[0]}`
+      );
+      return [];
     }
   });
-  // Input order is shot order (the sort above), so this is already sorted by
-  // time -- the reason mapWithConcurrency preserves order rather than
-  // collecting results as they land.
-  const technique: ShotTechnique[] = settled.filter((t): t is ShotTechnique => t !== null);
 
+  // Segment order is time order, so this is already sorted -- but a model can
+  // return its own shots out of order within a segment, so sort anyway.
+  const technique = settled.flat().sort((a, b) => a.tSeconds - b.tSeconds);
   const seen = technique.filter((t) => t.strokeVisible).length;
   opts.onLog?.(
-    `technique: ${technique.length} shot(s) looked at, ${seen} with a visible stroke`
-    + `${failed ? `, ${failed} failed` : ""}`
-    + `${opts.shots.length > max ? ` (capped at ${max} of ${opts.shots.length})` : ""}`
+    `technique: ${technique.length} shot(s) described, ${seen} with a visible stroke`
+    + `${patterns.length ? `, ${patterns.length} cross-shot pattern(s)` : ""}`
+    + `${failed ? `, ${failed} segment(s) failed` : ""}`
   );
-  return { technique, failed };
+  return { technique, patterns, failed };
 }
 
 /**

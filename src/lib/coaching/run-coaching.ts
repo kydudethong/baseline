@@ -238,7 +238,7 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
         const bytes = await fsp.readFile(local);
         const file = await uploadVideo(bytes, `${analysisId}-source.mp4`);
         try {
-          const { technique } = await readShotTechnique({
+          const { technique, patterns } = await readShotTechnique({
             model,
             file,
             durationSeconds,
@@ -252,6 +252,14 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
               .filter(Boolean),
             onLog: (l) => console.error(`[coaching] ${l}`),
           });
+          // Patterns are the thing the per-shot pass could not produce: a
+          // statement across several shots, which only something watching them
+          // together can make. Logged for now rather than given a column --
+          // the first question is whether they are any good on real footage,
+          // and reading them off a run answers that without committing a
+          // schema to them.
+          for (const p of patterns) console.error(`[coaching] technique pattern: ${p}`);
+
           if (technique.length > 0) {
             // Replace rather than accumulate: a re-run of the same analysis
             // must not leave the previous run's reads beside the new ones,
