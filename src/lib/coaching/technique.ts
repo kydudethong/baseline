@@ -15,6 +15,7 @@
  *            predominantly with the arm from an upright posture", high
  *            confidence, citing backswing / bounce / contact / follow-through.
  */
+import { mapWithConcurrency } from "./concurrency";
 import { generateJSON, type UploadedFile, type VideoConfig } from "./gemini";
 
 /**
@@ -41,6 +42,18 @@ export const TECHNIQUE_FPS = 15;
  * player acts on a handful of corrections, not on eighty.
  */
 export const DEFAULT_MAX_SHOTS = 40;
+
+/**
+ * How many per-shot reads are in flight at once.
+ *
+ * Six rather than "as many as there are shots". The ceiling here is the key's
+ * requests-per-minute, not our patience: each of these is a real generateContent
+ * call, and a burst of forty is a 429 for the whole batch. Six turns a 40-shot
+ * clip from forty round trips into about seven, which is most of the available
+ * win, and leaves the retry backoff in gemini.ts handling genuine server
+ * busyness rather than congestion we caused.
+ */
+export const TECHNIQUE_CONCURRENCY = 6;
 
 export interface ShotTechnique {
   tSeconds: number;
@@ -111,13 +124,22 @@ export async function readShotTechnique(opts: {
     .sort((a, b) => a.t - b.t)
     .slice(0, max);
 
-  const technique: ShotTechnique[] = [];
   let failed = 0;
+  let done = 0;
 
-  for (const shot of shots) {
+  // IN PARALLEL, bounded. These calls are wholly independent of each other --
+  // same uploaded file, different 1.8-second window -- so running them one at
+  // a time spent minutes of wall clock waiting on round trips that nothing was
+  // waiting for. At 40 shots this was the single largest component of "getting
+  // my coaching read", by a wide margin.
+  //
+  // TECHNIQUE_CONCURRENCY is small on purpose: opening 40 requests at once is
+  // the fastest way to turn a working key into a rate-limited one, and the
+  // backoff in gemini.ts would then be fighting a burst this loop created.
+  const settled = await mapWithConcurrency(shots, TECHNIQUE_CONCURRENCY, async (shot) => {
     const clipStartSeconds = Math.max(0, shot.t - CLIP_LEAD_S);
     const clipEndSeconds = Math.min(opts.durationSeconds, shot.t + CLIP_TRAIL_S);
-    if (clipEndSeconds <= clipStartSeconds) continue;
+    if (clipEndSeconds <= clipStartSeconds) return null;
 
     const video: VideoConfig = {
       fps: TECHNIQUE_FPS,
@@ -138,7 +160,14 @@ export async function readShotTechnique(opts: {
         video,
         maxOutputTokens: 2000,
       });
-      technique.push({
+      // Progress, because this is the long pole and a silent five minutes is
+      // indistinguishable from a hang -- which is exactly how the last one got
+      // diagnosed as a crash when it was only slow.
+      done++;
+      if (done % 5 === 0 || done === shots.length) {
+        opts.onLog?.(`technique: ${done}/${shots.length} shots read`);
+      }
+      return {
         tSeconds: shot.t,
         strikerCourt: out.striker_court ?? null,
         strokeVisible: out.stroke_visible === true,
@@ -148,12 +177,21 @@ export async function readShotTechnique(opts: {
         confidence: out.confidence ?? null,
         clipStartSeconds,
         clipEndSeconds,
-      });
+      } satisfies ShotTechnique;
     } catch (err) {
+      // Swallowed per shot, deliberately: one shot the model refused must not
+      // lose the other thirty-nine. mapWithConcurrency rejects on a throwing
+      // mapper, which is right for it and wrong here.
       failed++;
+      done++;
       opts.onLog?.(`technique at ${shot.t.toFixed(1)}s failed: ${(err as Error).message.split("\n")[0]}`);
+      return null;
     }
-  }
+  });
+  // Input order is shot order (the sort above), so this is already sorted by
+  // time -- the reason mapWithConcurrency preserves order rather than
+  // collecting results as they land.
+  const technique: ShotTechnique[] = settled.filter((t): t is ShotTechnique => t !== null);
 
   const seen = technique.filter((t) => t.strokeVisible).length;
   opts.onLog?.(

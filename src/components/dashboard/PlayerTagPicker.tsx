@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { colorForPlayer, playerDisplayName } from "@/lib/vision/player-colors";
 import { useDialog } from "@/components/ui/Dialog";
@@ -64,6 +64,22 @@ export function PlayerTagPicker({
   const [notes, setNotes] = useState(initialNotes ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+
+  // The clock only runs while a read is in flight, and resets each time one
+  // starts. Driven by an interval rather than by the fetch, because the point
+  // is to prove to a waiting person that the page is still alive -- a number
+  // that only updates when the request finishes would prove nothing.
+  // The start time is recorded by the click that begins the run, not by this
+  // effect: resetting state from inside an effect is the shape that produces a
+  // second render pass for no reason, and the click already knows when it
+  // happened. The effect only ticks.
+  useEffect(() => {
+    if (startedAt === null) return;
+    const id = setInterval(() => setElapsedSeconds(Math.round((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [startedAt]);
 
   const colorIndex = new Map(players.map((p, i) => [p, i]));
 
@@ -83,6 +99,8 @@ export function PlayerTagPicker({
     }
     setBusy(true);
     setError(null);
+    setElapsedSeconds(0);
+    setStartedAt(Date.now());
     try {
       const res = await fetch(`/api/analyses/${analysisId}/coach`, {
         method: "POST",
@@ -102,6 +120,9 @@ export function PlayerTagPicker({
       setError(err instanceof Error ? err.message : "Could not generate a coaching read.");
     } finally {
       setBusy(false);
+      // Stops the interval. Left running, it would keep counting behind a
+      // finished read for as long as the page stayed open.
+      setStartedAt(null);
     }
   }
 
@@ -211,9 +232,26 @@ export function PlayerTagPicker({
             <div className="progress indet">
               <div className="bar" />
             </div>
+            {/* An ELAPSED CLOCK and the real stages, not a guess at a total.
+                "usually under a minute" was measured against a version of this
+                that made one call; it now uploads the overlay, watches the
+                whole clip, re-watches every shot close up, and writes a
+                session plan. Several minutes is normal and a wrong estimate is
+                worse than none -- a person who is told "under a minute" starts
+                wondering whether it crashed at ninety seconds, which is the
+                exact confusion this line was meant to prevent.
+
+                So: no total, a clock they can watch move, and the current
+                stage by name. A clock that is still ticking is the cheapest
+                possible proof that nothing has hung. */}
             <span className="status-line">
               <span className="dot" />
-              Reading your rallies and positioning — usually under a minute.
+              {stageFor(elapsedSeconds)} · {formatElapsed(elapsedSeconds)} elapsed
+            </span>
+            <span className="xs">
+              A full read watches the clip once, then re-watches every shot close
+              up. On a long clip that is a few minutes — you can leave this page
+              and come back, it keeps running.
             </span>
           </div>
         ) : null}
@@ -270,4 +308,28 @@ function ReferenceFrame({
       <span className="ts">{frame.timestampSeconds.toFixed(1)}s</span>
     </div>
   );
+}
+
+/**
+ * The stage a read is most likely in, from elapsed time alone.
+ *
+ * An honest approximation, and labelled as the sequence rather than a claim
+ * about this particular run: the server does not stream progress back to this
+ * component, so these boundaries come from the shape of the pipeline (upload,
+ * then one pass over the whole clip, then one short pass per shot, then the
+ * plan) rather than from a signal. Naming the stages is still worth more than
+ * a spinner, because it tells a waiting person what is being done and that the
+ * longest part is near the end rather than at the start.
+ */
+function stageFor(seconds: number): string {
+  if (seconds < 25) return "Uploading the clip";
+  if (seconds < 90) return "Watching the whole clip";
+  if (seconds < 420) return "Re-watching each shot close up";
+  return "Writing your read and practice plan";
+}
+
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
 }
