@@ -14,7 +14,41 @@
  * of them is guessable from the prose alone.
  */
 export function describeError(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message;
+  if (err instanceof Error && err.message) {
+    // UNWRAP THE CAUSE CHAIN, and specifically for undici.
+    //
+    // Every network failure in this app arrives as a TypeError whose message
+    // is the bare string "fetch failed" -- the same five characters whether
+    // DNS did not resolve, the connection was refused, the socket was reset
+    // mid-upload, or TLS failed. The thing that distinguishes them is
+    // `err.cause`, which carries the syscall-level code, and this function
+    // used to throw it away. The result was an error box reading "fetch
+    // failed" and no way to tell a transient cold-start DNS blip from a
+    // genuinely unreachable API, which is the difference between "press it
+    // again" and "something is actually wrong".
+    //
+    // Node 16+ sets `cause` on wrapped errors generally, so this is not an
+    // undici special case -- it just matters most there.
+    const chain: string[] = [err.message];
+    let cause: unknown = (err as { cause?: unknown }).cause;
+    // Bounded: a cause chain is normally one or two deep, and a cycle would
+    // otherwise hang the error handler -- which is a spectacularly bad place
+    // for an infinite loop.
+    for (let depth = 0; cause && depth < 4; depth++) {
+      const c = cause as { message?: unknown; code?: unknown; errno?: unknown; cause?: unknown };
+      const bits: string[] = [];
+      if (typeof c.code === "string" && c.code) bits.push(c.code);
+      if (typeof c.message === "string" && c.message && c.message !== chain[chain.length - 1]) {
+        bits.push(c.message);
+      }
+      if (bits.length === 0) break;
+      const next = bits.join(": ");
+      if (chain.includes(next)) break;
+      chain.push(next);
+      cause = c.cause;
+    }
+    return chain.join(" — caused by ");
+  }
   if (typeof err === "string" && err.trim()) return err.trim();
 
   if (err && typeof err === "object") {

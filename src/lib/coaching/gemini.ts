@@ -14,6 +14,7 @@
  * sanitiseSchema() enforces both, so a schema written in the Claude dialect
  * cannot silently reach the wire.
  */
+import { describeError } from "../analysis/describe-error";
 
 const BASE = "https://generativelanguage.googleapis.com";
 const UPLOAD_BASE = `${BASE}/upload/v1beta/files`;
@@ -218,10 +219,36 @@ async function callGemini(
 ): Promise<string> {
   let delay = 5000;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const res = await fetch(
-      `${BASE}/v1beta/models/${model}:generateContent?key=${apiKey()}`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
-    );
+    // A NETWORK failure and an HTTP failure are both transient here, and only
+    // one of them was being retried.
+    //
+    // fetch() rejects rather than resolving when the connection itself never
+    // happens -- DNS not resolving, connection refused, socket reset mid-flight.
+    // That rejection escaped this loop entirely and failed the whole coaching
+    // run on the first blip, which matters more than usual on this deployment:
+    // min_machines_running is 0, so the machine that serves a coaching request
+    // has often just cold-started, and the first outbound DNS from a
+    // just-woken Fly machine is exactly the kind of thing that fails once and
+    // then works. A 503 got four attempts and a backoff; a one-off DNS failure
+    // got none.
+    let res: Response;
+    try {
+      res = await fetch(
+        `${BASE}/v1beta/models/${model}:generateContent?key=${apiKey()}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+      );
+    } catch (err) {
+      if (attempt === MAX_ATTEMPTS) {
+        throw new GeminiError(`Could not reach Gemini after ${MAX_ATTEMPTS} attempts: ${describeError(err)}`);
+      }
+      onLog?.(
+        `could not reach Gemini (${describeError(err)}, attempt ${attempt}/${MAX_ATTEMPTS}) — `
+        + `retrying in ${delay / 1000}s`
+      );
+      await new Promise((r) => setTimeout(r, delay));
+      delay *= 3;
+      continue;
+    }
     if (res.ok) {
       const json = (await res.json()) as {
         candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
