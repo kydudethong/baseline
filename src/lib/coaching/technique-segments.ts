@@ -93,3 +93,45 @@ export function isSampled(durationSeconds: number, fps: number): boolean {
 function round(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+/**
+ * Segments that cover only the given windows, each still inside the token
+ * budget.
+ *
+ * This is where the cost saving lands: instead of tiling the whole clip, the
+ * expensive pass tiles only the stretches where somebody was moving. A window
+ * longer than one segment is split; several short windows close together stay
+ * separate rather than being bridged, because bridging them would pay for
+ * exactly the dead time this is avoiding.
+ *
+ * The MAX_SEGMENTS cap still applies, and when it bites the segments are taken
+ * evenly from across the list rather than from the front -- the same reasoning
+ * as planSegments: a read of the first twenty minutes is not a read of the
+ * match.
+ */
+export function planSegmentsForWindows(
+  windows: ReadonlyArray<{ startSeconds: number; endSeconds: number }>,
+  fps: number
+): Segment[] {
+  const width = maxSegmentSeconds(fps);
+  const all: Segment[] = [];
+  for (const w of windows) {
+    const span = w.endSeconds - w.startSeconds;
+    if (!(span > 0)) continue;
+    const pieces = Math.ceil(span / width);
+    for (let i = 0; i < pieces; i++) {
+      const start = w.startSeconds + i * width;
+      all.push({
+        startSeconds: round(start),
+        endSeconds: round(Math.min(w.endSeconds, start + width)),
+      });
+    }
+  }
+  if (all.length <= MAX_SEGMENTS) return all;
+
+  const out: Segment[] = [];
+  for (let i = 0; i < MAX_SEGMENTS; i++) {
+    out.push(all[Math.round((i * (all.length - 1)) / (MAX_SEGMENTS - 1))]);
+  }
+  return [...new Map(out.map((s) => [`${s.startSeconds}`, s])).values()];
+}

@@ -23,7 +23,7 @@
  */
 
 import { generateJSON, uploadVideo, analystModel, deleteFile } from "./gemini";
-import { planSegments, maxSegmentSeconds, isSampled } from "./technique-segments";
+import { planSegments, planSegmentsForWindows, maxSegmentSeconds, isSampled } from "./technique-segments";
 import { mapWithConcurrency } from "./concurrency";
 import { mergeAnalystOutputs } from "./analyst-merge";
 import { SKILLS, COACHING_DIMENSIONS, type CoachingDimension } from "./types";
@@ -49,6 +49,37 @@ export const ANALYST_FPS = 10;
  * already more than a million tokens of video in the air.
  */
 export const ANALYST_CONCURRENCY = 2;
+
+/**
+ * How closely the model looks at each frame — and the biggest single cost dial
+ * in this product.
+ *
+ * Gemini charges per frame by resolution tier, not by pixel count: roughly 258
+ * tokens at high and 66 at low. So this one setting moves the bill by about
+ * 4x, and nothing else here comes close.
+ *
+ * High is the default because this pass now carries technique, and a far-court
+ * swing at low resolution is a smudge -- the measured difference between a
+ * useful technique note and "distance limited it" is mostly this. But that is
+ * a judgement about a trade, not a fact, and it belongs where it can be
+ * changed and measured rather than buried in a call site. Set
+ * ANALYST_MEDIA_RESOLUTION=low to cut the cost per analysis by roughly four
+ * and find out what it actually costs you in quality.
+ */
+export function analystMediaResolution(): "low" | "medium" | "high" {
+  const v = (process.env.ANALYST_MEDIA_RESOLUTION ?? "high").toLowerCase();
+  return v === "low" || v === "medium" ? v : "high";
+}
+
+/** Frames per second, overridable for the same reason. */
+export function analystFps(): number {
+  const v = Number(process.env.ANALYST_FPS);
+  // Below about 3fps a stroke stops being visible at all (it lasts roughly a
+  // third of a second), which would silently turn technique back into guesses
+  // while still charging for the pass. Above 15 buys nothing a paddle swing
+  // needs and shrinks the segment length fast.
+  return Number.isFinite(v) && v >= 3 && v <= 15 ? v : ANALYST_FPS;
+}
 
 const SHOT_TYPES = [
   "serve", "return", "third_shot_drop", "third_shot_drive", "dink", "drop",
@@ -499,6 +530,11 @@ export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[]
 export async function runAnalyst(opts: {
   videoBytes: Uint8Array;
   videoName: string;
+  /**
+   * Stretches worth watching, from the player tracks. Omit to watch the whole
+   * clip -- which is correct and just more expensive.
+   */
+  activeWindows?: Array<{ startSeconds: number; endSeconds: number }>;
   input: AnalystInput;
   legend: string;
   onLog?: (line: string) => void;
@@ -506,7 +542,15 @@ export async function runAnalyst(opts: {
   const model = analystModel();
   const file = await uploadVideo(opts.videoBytes, opts.videoName, "video/mp4", opts.onLog);
   try {
-    const segments = planSegments(opts.input.clipSeconds, ANALYST_FPS);
+    // Only the stretches where somebody was moving, when the caller could work
+    // that out from the player tracks it already has. Falls back to the whole
+    // clip, which is what every caller got before and what a clip with no
+    // usable tracks still gets.
+    const fps = analystFps();
+    const resolution = analystMediaResolution();
+    const segments = opts.activeWindows && opts.activeWindows.length > 0
+      ? planSegmentsForWindows(opts.activeWindows, fps)
+      : planSegments(opts.input.clipSeconds, fps);
     // A clip shorter than one segment is ONE call over the whole thing, which
     // is the shape this is meant to have. Segments are what a long clip gets
     // instead of a failure: at 10fps and high media resolution a second of
@@ -515,10 +559,10 @@ export async function runAnalyst(opts: {
     const plan = segments.length > 0 ? segments : [{ startSeconds: 0, endSeconds: opts.input.clipSeconds }];
     opts.onLog?.(
       plan.length === 1
-        ? `analyst: one pass over the whole clip at ${ANALYST_FPS}fps`
-        : `analyst: ${plan.length} segments at ${ANALYST_FPS}fps `
-          + `(a 1M context holds about ${Math.round(maxSegmentSeconds(ANALYST_FPS) / 60 * 10) / 10} min at this rate)`
-          + (isSampled(opts.input.clipSeconds, ANALYST_FPS)
+        ? `analyst: one pass over the whole clip at ${fps}fps, ${resolution} resolution`
+        : `analyst: ${plan.length} segments at ${fps}fps, ${resolution} resolution `
+          + `(a 1M context holds about ${Math.round(maxSegmentSeconds(fps) / 60 * 10) / 10} min at this rate)`
+          + (isSampled(opts.input.clipSeconds, fps)
             ? " — too long to watch end to end, so segments are spread across it"
             : "")
     );
@@ -530,13 +574,10 @@ export async function runAnalyst(opts: {
         prompt: analystPrompt(opts.input, opts.legend, plan.length > 1 ? segment : null),
         schema: analystSchema(),
         video: {
-          fps: ANALYST_FPS,
+          fps,
           startOffsetSeconds: segment.startSeconds,
           endOffsetSeconds: segment.endSeconds,
-          // High, because this single pass now carries technique. At default
-          // resolution a far-court swing is a smudge, and the whole reason
-          // technique moved into this call is that 10fps can actually see it.
-          mediaResolution: "high",
+          mediaResolution: resolution,
         },
         maxOutputTokens: 16000,
         onLog: opts.onLog,

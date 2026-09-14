@@ -38,6 +38,7 @@ import { buildPracticePlan } from "./practice-plan";
 import { matchPlaystyles } from "./pro-playstyles";
 import { shotRowsFromAnalyst } from "./shot-rows";
 import { fillApproachTimes } from "./approach-times";
+import { activeWindows } from "./active-windows";
 import { readOverlayBytes, OverlayMissingError } from "./overlay-source";
 import { OVERLAY_LEGEND } from "./overlay-legend";
 import { getAllDrills } from "./drills";
@@ -189,11 +190,36 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     const overlay = await readOverlayBytes(
       analysisId, analysis.debug_video_bucket ?? null, analysis.debug_video_path ?? null
     );
+    // Where the play actually is, from the tracks already loaded above. Free:
+    // no extra call, no extra token, and it is the single largest lever on
+    // what an analysis costs -- roughly half a recreational game is people
+    // walking to fetch a ball, and the model was being charged full price at
+    // 10fps and high resolution to watch all of it.
+    const gate = activeWindows(
+      (tracksRes.data ?? []).map((t) =>
+        ((t.points as Array<{ timestampSeconds: number; boxImageNorm?: { x: number; y: number } }> | null) ?? [])
+          .filter((pt) => pt.boxImageNorm)
+          .map((pt) => ({
+            timestampSeconds: pt.timestampSeconds,
+            x: pt.boxImageNorm!.x,
+            y: pt.boxImageNorm!.y,
+          }))
+      ),
+      Number(analysis.video?.duration_seconds ?? 0)
+    );
+    console.error(
+      gate.gated
+        ? `[coaching] watching ${Math.round(gate.coverage * 100)}% of the clip — `
+          + `${gate.windows.length} stretch(es) where players were actually moving`
+        : "[coaching] watching the whole clip — the tracks gave no clear split between play and dead time"
+    );
+
     analyst = await runAnalyst({
       videoBytes: overlay,
       videoName: `${analysisId}.mp4`,
       input: analystInput,
       legend: OVERLAY_LEGEND,
+      activeWindows: gate.gated ? gate.windows : undefined,
       onLog: (line) => console.error(`[coaching] ${line}`),
     });
   } catch (err) {
