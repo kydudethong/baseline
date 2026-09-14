@@ -424,12 +424,27 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    */
   // Colours live here, geometry lives in court-model.ts. Both editors project
   // the same segments; only the palette differs.
+  /**
+   * Line weights for the marked court.
+   *
+   * Thicker than they were, and deliberately not uniform. These are drawn over
+   * real footage of a real court, so a thin stroke competes with the painted
+   * line underneath it -- on a blue court the two are close enough in
+   * luminance that a 1.4px line reads as a smudge rather than a boundary, and
+   * the whole point of this view is checking that the marked court sits on the
+   * real one.
+   *
+   * The hierarchy is kept: the boundary and the net are what somebody is
+   * checking, the kitchen and centre lines are confirmation that the rest
+   * followed correctly. Drawing all five at one weight would make the picture
+   * busier without making the important lines any easier to find.
+   */
   const ROLE_STYLE: Record<CourtLineRole, [string, number]> = {
-    boundary: ["#3aa0ff", 2],
-    kitchen: ["#3aa0ff", 1.4],
-    centre: ["#3aa0ff", 1.4],
-    net: ["#ff43c8", 2],
-    "net-post": ["#ff43c8", 2],
+    boundary: ["#3aa0ff", 3.5],
+    kitchen: ["#3aa0ff", 2.4],
+    centre: ["#3aa0ff", 2.4],
+    net: ["#ff43c8", 3.5],
+    "net-post": ["#ff43c8", 3],
   };
 
   const courtLines = useCallback((): Array<[[number, number], [number, number], string, number]> => {
@@ -473,7 +488,9 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     if (showLines) {
       for (const [p, q, colour, w] of courtLines()) {
         ctx.strokeStyle = colour;
-        ctx.lineWidth = w * s;
+        // A floor of 2px: `s` is below 1 on footage narrower than 1280, and a
+        // sub-pixel stroke on a canvas antialiases into near-invisibility.
+        ctx.lineWidth = Math.max(2, w * s);
         ctx.beginPath();
         ctx.moveTo(p[0], p[1]);
         ctx.lineTo(q[0], q[1]);
@@ -481,7 +498,10 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       }
     } else if (corners.length > 1) {
       ctx.strokeStyle = "#3aa0ff";
-      ctx.lineWidth = 2 * s;
+      // The in-progress outline, before all four corners are down. Matches the
+      // finished boundary weight so the line does not appear to thicken the
+      // instant the fourth corner lands.
+      ctx.lineWidth = 3.5 * s;
       ctx.beginPath();
       ctx.moveTo(corners[0].x, corners[0].y);
       for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i].x, corners[i].y);

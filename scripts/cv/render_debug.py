@@ -39,7 +39,7 @@ C_LIVE = (92, 224, 140)
 C_DEAD = (110, 110, 110)
 
 
-def draw_poly(img, pts, colour, thickness=2):
+def draw_poly(img, pts, colour, thickness=3):
     p = np.asarray(pts, dtype=np.int32).reshape(-1, 1, 2)
     cv2.polylines(img, [p], True, colour, thickness, cv2.LINE_AA)
 
@@ -131,7 +131,14 @@ def main() -> int:
         i += 1
 
         if corners:
-            draw_poly(img, corners, C_COURT, int(2 * scale))
+            # THICKER THAN IT LOOKS LIKE IT NEEDS TO BE. This line is drawn on
+            # a 720p frame and then H.264-compressed, and a 2px stroke is
+            # exactly the width that compression smears into the court surface
+            # underneath it -- worst of all on a blue court, where the line and
+            # the paint are close in luminance. It also has to stay readable
+            # when the model is shown the frame at reduced resolution. 4px
+            # survives both; the cost is a few pixels of the court it covers.
+            draw_poly(img, corners, C_COURT, max(3, int(4 * scale)))
         if ball_gate:
             # Where a ball of THIS court can be, including its airspace.
             draw_poly(img, ball_gate, (90, 90, 110), max(1, int(scale)))
@@ -149,16 +156,21 @@ def main() -> int:
             cv2.fillPoly(overlay, [face.reshape(-1, 1, 2)], C_NET)
             cv2.addWeighted(overlay, 0.18, img, 0.82, 0, img)
             cv2.polylines(img, [np.array([tl, tc, tr], np.int32).reshape(-1, 1, 2)],
-                          False, C_NET, int(2 * scale), cv2.LINE_AA)
-            cv2.line(img, tuple(np.int32(bl)), tuple(np.int32(br)), C_NET, int(2 * scale), cv2.LINE_AA)
+                          False, C_NET, max(3, int(3 * scale)), cv2.LINE_AA)
+            cv2.line(img, tuple(np.int32(bl)), tuple(np.int32(br)), C_NET,
+                     max(3, int(3 * scale)), cv2.LINE_AA)
+            # The verticals stay a touch thinner than the tape and the base:
+            # they are the SHAPE of the band rather than a line on the court,
+            # and drawing all three at one weight made the net read as a solid
+            # box sitting on the surface.
             for a_, b_ in ((bl, tl), (br, tr)):
                 cv2.line(img, tuple(np.int32(a_)), tuple(np.int32(b_)), C_NET,
-                         int(2 * scale), cv2.LINE_AA)
+                         max(2, int(2 * scale)), cv2.LINE_AA)
             cv2.putText(img, "NET", (int(tl[0]) + 6, int(tl[1]) - 8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5 * scale, C_NET, 1, cv2.LINE_AA)
         elif net:
             cv2.line(img, tuple(np.int32(net[0])), tuple(np.int32(net[1])),
-                     C_NET, int(3 * scale), cv2.LINE_AA)
+                     C_NET, max(4, int(4 * scale)), cv2.LINE_AA)
             cv2.putText(img, "NET", (int(net[0][0]) + 6, int(net[0][1]) - 8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5 * scale, C_NET, 1, cv2.LINE_AA)
 
