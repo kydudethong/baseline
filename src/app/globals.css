@@ -910,3 +910,77 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .posgrid .sub{font-size:11px;color:var(--ink-3);margin-top:2px}
 /* Other players are context, not the subject. */
 .muted-card{opacity:.72}
+
+/* ---- Calendar layout + "up next" ---------------------------------------
+   The grid answers "am I keeping up". Only this panel answers "what do I do
+   today", which is the question somebody actually opens this page with on the
+   way to a court. Sticky, so it stays put while they scan the month. */
+.cal-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:var(--a5);align-items:start}
+@media (max-width:900px){ .cal-layout{grid-template-columns:1fr} }
+
+.upnext{position:sticky;top:78px;display:flex;flex-direction:column;gap:10px;background:var(--card);border:1px solid var(--line);border-top:3px solid var(--blue);border-radius:var(--r3);padding:var(--a4);box-shadow:var(--lift)}
+.upnext.done{border-top-color:var(--good)}
+.upnext-head{display:flex;align-items:center;gap:var(--a2);justify-content:space-between}
+.upnext-title{font-family:var(--display);font-size:19px;font-weight:600;letter-spacing:-.015em;margin:0}
+.upnext-focus{font-size:13px;line-height:1.5;color:var(--ink-2);margin:0}
+.upnext-mins{font-family:var(--data);font-size:11px;color:var(--ink-3);margin:0}
+.upnext-drills{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:9px;counter-reset:d}
+.upnext-drills li{counter-increment:d;position:relative;padding-left:24px;display:flex;flex-direction:column;gap:2px}
+.upnext-drills li::before{content:counter(d);position:absolute;left:0;top:1px;width:17px;height:17px;border-radius:50%;background:var(--sunk);color:var(--ink-3);font-family:var(--data);font-size:10px;font-weight:600;display:grid;place-items:center}
+.upnext-drills li.done::before{content:"✓";background:var(--good-wash);color:var(--good)}
+.upnext-drills .nm{font-size:13px;font-weight:600;color:var(--ink);line-height:1.35}
+.upnext-drills li.done .nm{text-decoration:line-through;color:var(--ink-3)}
+.upnext-drills .mins{font-family:var(--data);font-size:10px;color:var(--ink-3)}
+.upnext-drills .succ{font-size:11px;color:var(--good);line-height:1.4}
+.upnext-foot{display:flex;justify-content:space-between;align-items:center;gap:var(--a2);margin-top:4px;padding-top:10px;border-top:1px solid var(--line);font-size:11px;color:var(--ink-3)}
+.upnext-foot .streak{color:var(--good);font-weight:600}
+
+/* ---- Analysis header ---------------------------------------------------
+   A frame from the footage beside the title. Six uploads called ky-720p,
+   ky-720p-2, ky-720p-3 are indistinguishable by name and instantly
+   distinguishable by picture. */
+.analysis-head{display:flex;gap:var(--a4);align-items:center}
+.analysis-thumb{flex:none;width:132px;aspect-ratio:16/9;border-radius:var(--r2);overflow:hidden;background:var(--night);border:1px solid var(--line);box-shadow:var(--lift)}
+.analysis-thumb video{width:100%;height:100%;object-fit:cover;display:block}
+.analysis-meta{display:flex;flex-wrap:wrap;gap:0 var(--a3);font-size:12px;color:var(--ink-3)}
+.analysis-meta span{display:inline-flex;align-items:center}
+.analysis-meta span + span::before{content:"";width:3px;height:3px;border-radius:50%;background:var(--line-strong);margin-right:var(--a3)}
+@media (max-width:560px){ .analysis-thumb{width:92px} }
+
+/* ---- Corner guide ------------------------------------------------------ */
+.corner-guide{margin:0;display:flex;flex-direction:column;gap:var(--a3);background:var(--sunk);border:1px solid var(--line);border-radius:var(--r2);padding:var(--a4)}
+.corner-guide svg{width:100%;height:auto;max-width:360px;align-self:center}
+.corner-guide figcaption{font-size:12px;line-height:1.55;color:var(--ink-2)}
+.corner-guide figcaption strong{color:var(--ink)}
+.cg-num{font-family:var(--data);font-size:11px;font-weight:700;fill:#fff}
+.cg-lbl{font-family:var(--data);font-size:9px;letter-spacing:.06em;text-transform:uppercase;fill:var(--ink-3)}
+.cg-note{font-family:var(--data);font-size:9px;letter-spacing:.08em;text-transform:uppercase;fill:var(--ink-3)}
+.corner-guide.compact{padding:var(--a3)}
+.corner-guide.compact figcaption{font-size:11px}
+
+/* ---- Drill library -----------------------------------------------------
+   Browsing is a scanning task, and scanning needs a clear first thing. Every
+   card used to render the skill, difficulty, player count, equipment and name
+   at roughly one weight, so forty of them read as a wall with nowhere for the
+   eye to land. The name leads now; everything else is demoted under it. */
+.drill-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:var(--a4)}
+.drill-card{position:relative;display:flex;flex-direction:column;gap:10px;background:var(--card);border:1px solid var(--line);border-left:3px solid var(--line-strong);border-radius:var(--r3);padding:var(--a4);box-shadow:var(--lift);transition:box-shadow .14s ease,transform .14s ease}
+.drill-card:hover{box-shadow:var(--lift-tile);transform:translateY(-1px)}
+.drill-card.d-good{border-left-color:var(--good)}
+.drill-card.d-warn{border-left-color:var(--warn)}
+.drill-card.d-neutral{border-left-color:var(--blue)}
+.drill-card-head{display:flex;align-items:flex-start;gap:var(--a3);justify-content:space-between}
+.drill-name{font-family:var(--display);font-size:18px;font-weight:600;letter-spacing:-.015em;margin:0;line-height:1.25}
+.drill-purpose{font-size:13px;line-height:1.55;color:var(--ink-2);margin:0}
+.drill-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.drill-tag{display:inline-flex;align-items:center;gap:5px;font-family:var(--data);font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);background:var(--sunk);border-radius:var(--rf);padding:4px 9px}
+.drill-more{margin-top:2px;border-top:1px solid var(--line);padding-top:10px}
+.drill-more summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--blue-deep);list-style:none}
+.drill-more summary::-webkit-details-marker{display:none}
+.drill-more summary::after{content:" →";opacity:.6}
+.drill-more[open] summary::after{content:" ↑";opacity:.6}
+.drill-steps{margin:0;padding-left:1.15em;display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:1.5;color:var(--ink-2)}
+.drill-steps li::marker{color:var(--blue-deep);font-family:var(--data);font-size:11px}
+.drill-watch{background:var(--warn-wash);border-radius:var(--r2);padding:10px 12px}
+.drill-watch .eyebrow{color:var(--warn)}
+.drill-watch ul{margin:6px 0 0;padding-left:1.1em;display:flex;flex-direction:column;gap:5px;font-size:12px;line-height:1.5;color:var(--ink-2)}

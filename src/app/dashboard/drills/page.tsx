@@ -32,8 +32,9 @@ export default async function DrillsPage() {
         <span className="eyebrow">Drills</span>
         <h1 className="h1">The full drill library</h1>
         <p className="sm measure">
-          {drills.length} drills you can run without a coach standing next to you. A weakness on your Practice page
-          links here for the ones matched to it — this is the whole library, browsable on its own.
+          {drills.length} drills you can run without a coach standing next to you. Your practice
+          calendar picks from these automatically — this is the whole library, if you would rather
+          browse.
         </p>
       </div>
 
@@ -43,7 +44,7 @@ export default async function DrillsPage() {
             <h2 className="h2">{group}</h2>
             <span className="xs">{groupDrills.length}</span>
           </div>
-          <div className="grid2">
+          <div className="drill-grid">
             {groupDrills.map((drill) => (
               <DrillCard key={drill.slug} drill={drill} />
             ))}
@@ -54,53 +55,90 @@ export default async function DrillsPage() {
   );
 }
 
+/**
+ * One drill, as a card you would actually stop and read.
+ *
+ * WHAT CHANGED AND WHY. Every card was the same weight — the skill, the
+ * difficulty, the player count, the equipment and the name all rendered at
+ * roughly the same visual priority, so a page of forty of them read as a wall
+ * and the eye had nowhere to land. Browsing a library is a scanning task, and
+ * scanning needs a clear first thing.
+ *
+ * So: the NAME leads, at size, with everything else demoted beneath it and the
+ * purpose given room to be read. Difficulty carries a colour, because it is
+ * the one attribute that decides whether a drill is for you today. The
+ * requirements — how many people, what gear — are the practical gate on
+ * whether you can do it at all, so they sit as small pills rather than a run
+ * of grey text.
+ *
+ * The skill sits in a coloured strip down the left edge rather than as another
+ * line of text: it groups the cards visually within a section without spending
+ * a row on a fact the section heading already gave.
+ */
 function DrillCard({ drill }: { drill: CoachingDrillRow }) {
   const steps = Array.isArray(drill.steps) ? (drill.steps as string[]) : [];
   const mistakes = Array.isArray(drill.mistakes) ? (drill.mistakes as string[]) : [];
+  const tone = difficultyTone(drill.difficulty);
 
   return (
-    <div className="card stack g3">
-      <div className="stack g1">
-        <div className="row g2" style={{ justifyContent: "space-between" }}>
-          <span className="eyebrow row g1" style={{ color: "var(--ink-2)" }}>
-            <Paddle size={13} />
-            {skillName(drill.skill_key)}
-          </span>
-          <span className="chip">{drill.difficulty}</span>
-        </div>
-        <p className="h3">{drill.name}</p>
-        <p className="sm">{drill.purpose}</p>
-      </div>
+    <article className={`drill-card d-${tone}`}>
+      <header className="drill-card-head">
+        <h3 className="drill-name">{drill.name}</h3>
+        <span className={`pill p-${tone}`}>{drill.difficulty}</span>
+      </header>
 
-      <div className="row g4 xs">
-        <span>
-          {drill.players} player{drill.players === 1 ? "" : "s"}
+      <p className="drill-purpose">{drill.purpose}</p>
+
+      <div className="drill-meta">
+        <span className="drill-tag">
+          <Paddle size={11} />
+          {skillName(drill.skill_key)}
         </span>
-        <span>{drill.equipment}</span>
+        <span className="drill-tag">
+          {drill.players === 1 ? "On your own" : `${drill.players} players`}
+        </span>
+        {drill.equipment ? <span className="drill-tag">{drill.equipment}</span> : null}
       </div>
 
-      <details>
-        <summary className="crumb" style={{ cursor: "pointer" }}>
-          Steps &amp; common mistakes
-        </summary>
-        <div className="stack g3" style={{ marginTop: "var(--a3)" }}>
-          <ol className="sm stack g1" style={{ paddingLeft: "1.1em" }}>
-            {steps.map((step, i) => (
-              <li key={i}>{step}</li>
-            ))}
-          </ol>
-          {mistakes.length > 0 ? (
-            <div className="note">
-              <span className="eyebrow">Watch for</span>
-              <ul className="sm stack g1" style={{ paddingLeft: "1.1em", marginTop: "6px" }}>
-                {mistakes.map((m, i) => (
-                  <li key={i}>{m}</li>
+      {steps.length > 0 || mistakes.length > 0 ? (
+        <details className="drill-more">
+          <summary>How to run it</summary>
+          <div className="stack g3" style={{ marginTop: "var(--a3)" }}>
+            {steps.length > 0 ? (
+              <ol className="drill-steps">
+                {steps.map((step, i) => (
+                  <li key={i}>{step}</li>
                 ))}
-              </ul>
-            </div>
-          ) : null}
-        </div>
-      </details>
-    </div>
+              </ol>
+            ) : null}
+            {mistakes.length > 0 ? (
+              <div className="drill-watch">
+                <span className="eyebrow">Watch for</span>
+                <ul>
+                  {mistakes.map((m, i) => (
+                    <li key={i}>{m}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
+    </article>
   );
+}
+
+/**
+ * Difficulty to a colour token.
+ *
+ * Green for beginner and amber for advanced rather than the other way round:
+ * the colour answers "can I do this today", where green means yes. Treating
+ * advanced as the good end would invert that for the reader who most needs the
+ * signal — somebody new, browsing forty drills.
+ */
+function difficultyTone(difficulty: string): "good" | "warn" | "neutral" {
+  const d = difficulty.toLowerCase();
+  if (d.includes("begin") || d.includes("easy")) return "good";
+  if (d.includes("adv") || d.includes("hard")) return "warn";
+  return "neutral";
 }

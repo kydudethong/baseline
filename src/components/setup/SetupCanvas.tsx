@@ -27,6 +27,7 @@
  *            two more games either side.
  */
 
+import { CornerGuide } from "./CornerGuide";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -142,7 +143,17 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const [stage, setStage] = useState<Stage>("court");
+  // PLAYERS FIRST, then the court.
+  //
+  // The old order asked for four court corners before anything else, which is
+  // the harder of the two tasks and the one with no obvious right answer the
+  // first time -- people hesitated over which corner counts as "near-left" and
+  // whether to click the outside or inside of the line. Tagging yourself is
+  // unambiguous by comparison: you click the person who is you. Doing the easy
+  // one first means the frame is already familiar by the time the corners are
+  // asked for, and somebody who bounces has at least told us the thing only
+  // they can know.
+  const [stage, setStage] = useState<Stage>("players");
   const [corners, setCorners] = useState<Corner[]>(() => {
     const c = initial?.court;
     return c ? [c.nearLeft, c.nearRight, c.farRight, c.farLeft].filter(Boolean) : [];
@@ -821,20 +832,8 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: "var(--a3)" }}>
             {([
               {
-                done: courtDone,
-                n: "1",
-                title: "The court",
-                body: courtDone
-                  ? "Marked. Drag any corner to nudge it — the kitchen, centre lines and net follow."
-                  : corners.length === 0
-                    ? "Click the four corners of the court, starting at the near-left."
-                    : `${4 - corners.length} corner${4 - corners.length === 1 ? "" : "s"} to go.`,
-                action: courtDone ? "Adjust corners" : "Mark the corners",
-                onAction: () => { setFixing(true); setStage("court"); },
-              },
-              {
                 done: selfChosen,
-                n: "2",
+                n: "1",
                 title: "Which player is you",
                 body: selfChosen
                   ? "Tagged. Everything in the coaching read is about this player."
@@ -843,6 +842,18 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                     : `Click yourself on the frame above — ${players.length} player${players.length === 1 ? "" : "s"} found. You turn yellow.`,
                 action: selfChosen ? "Change who is you" : null,
                 onAction: () => { setFixing(true); setStage("players"); },
+              },
+              {
+                done: courtDone,
+                n: "2",
+                title: "The court",
+                body: courtDone
+                  ? "Marked. Drag any corner to nudge it — the kitchen, centre lines and net follow."
+                  : corners.length === 0
+                    ? "Click the four corners of the court, starting at the near-left."
+                    : `${4 - corners.length} corner${4 - corners.length === 1 ? "" : "s"} to go.`,
+                action: courtDone ? "Adjust corners" : "Mark the corners",
+                onAction: () => { setFixing(true); setStage("court"); },
               },
             ]).map((step) => (
               <div
@@ -998,6 +1009,10 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                   {stage === "court" ? "Adjusting corners" : "Adjust corners"}
                 </button>
               </div>
+              {/* The example, shown only while the corners are actually being
+                  placed. Once they are down the reader has the answer and the
+                  diagram is just a thing taking up room. */}
+              {stage === "court" && corners.length < 4 ? <CornerGuide compact /> : null}
               <label className="sm" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
                 <input type="checkbox" checked={quadKind === "near-half"}
                   onChange={(e) => setQuadKind(e.target.checked ? "near-half" : "full")} />

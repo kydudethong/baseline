@@ -67,6 +67,9 @@ export default async function AnalysisDetailPage({
 
   const video = analysis.video;
   const setup = await getSetup(supabase, analysisId);
+  // A frame of the footage, for the header. Failing to sign is not an error —
+  // the header simply renders without a thumbnail.
+  const videoPoster = video ? await getSignedDownloadUrl(video.storage_path).catch(() => null) : null;
 
   const controls = (
     <ProcessingControls
@@ -80,21 +83,35 @@ export default async function AnalysisDetailPage({
     <>
       <Link href="/dashboard/library" className="crumb">← All analyses</Link>
 
-      <div className="stack g2">
-        <div className="row g3">
-          <h1 className="d2">{analysis.title}</h1>
-          <StatusBadge status={analysis.status} />
+      {/* WHICH VIDEO AM I LOOKING AT. The header was a filename and a row of
+          grey metadata, which is a poor answer when somebody has six uploads
+          called ky-720p, ky-720p-2 and so on. A frame from the footage answers
+          it instantly and no amount of text does — you recognise the court,
+          the lighting and who you were playing before you have finished
+          reading the title. */}
+      <header className="analysis-head">
+        {videoPoster ? (
+          <div className="analysis-thumb">
+            <video src={`${videoPoster}#t=1`} preload="metadata" muted playsInline aria-hidden="true" />
+          </div>
+        ) : null}
+        <div className="stack g2" style={{ minWidth: 0 }}>
+          <div className="row g3">
+            <h1 className="d2" style={{ margin: 0 }}>{analysis.title}</h1>
+            <StatusBadge status={analysis.status} />
+          </div>
+          <div className="analysis-meta">
+            <span>
+              {new Date(analysis.created_at).toLocaleDateString(undefined, {
+                weekday: "long", month: "long", day: "numeric",
+              })}
+            </span>
+            {video?.duration_seconds ? <span>{formatDuration(video.duration_seconds)}</span> : null}
+            {video?.width && video?.height ? <span>{video.height}p</span> : null}
+            {analysis.coaching_kind ? <span>{prettyKind(analysis.coaching_kind)}</span> : null}
+          </div>
         </div>
-        <p className="xs">
-          {[
-            new Date(analysis.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
-            video?.duration_seconds ? formatDuration(video.duration_seconds) : null,
-            video?.width && video?.height ? `${video.width}×${video.height}` : null,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </p>
-      </div>
+      </header>
 
       {analysis.status === "failed" ? (
         <div className="error">
@@ -585,4 +602,10 @@ function playstyleMatches(coachingJson: string | null): PlaystyleMatch[] {
   } catch {
     return [];
   }
+}
+
+/** "doubles_match" -> "Doubles match". */
+function prettyKind(kind: string): string {
+  const s = kind.replace(/[_-]+/g, " ").trim();
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
 }

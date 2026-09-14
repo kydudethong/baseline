@@ -7,6 +7,7 @@ import {
 import { monthKey } from "@/lib/practice/schedule";
 import { CalendarMonth } from "@/components/practice/CalendarMonth";
 import { PlanSetup } from "@/components/practice/PlanSetup";
+import { UpNext } from "@/components/practice/UpNext";
 import { EmptyState } from "@/components/analysis/EmptyState";
 
 export const metadata: Metadata = { title: "Practice calendar — Baseline" };
@@ -85,6 +86,8 @@ export default async function CalendarPage({
   ]);
   const completedCount = existing?.sessions.filter((s) => s.completed_at).length ?? 0;
 
+  const now = new Date();
+  const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const prev = shiftMonth(monthDate, -1);
   const next = shiftMonth(monthDate, 1);
 
@@ -115,7 +118,14 @@ export default async function CalendarPage({
             </div>
           ) : null}
 
-          <CalendarMonth month={month} sessions={existing.sessions} />
+          {/* Grid and "what do I do next" side by side. The grid answers "am I
+              keeping up"; only the panel answers "what do I do today", and
+              making somebody find today's square to learn that is three steps
+              too many for the question they opened this page with. */}
+          <div className="cal-layout">
+            <CalendarMonth month={month} sessions={existing.sessions} />
+            <UpNext sessions={existing.sessions} todayKey={todayKey} />
+          </div>
 
           <details className="card">
             <summary className="sm" style={{ cursor: "pointer" }}>Change the schedule or rebuild this month</summary>
