@@ -23,6 +23,27 @@
 /** Tokens per frame at high media resolution. Gemini's own published figure. */
 export const TOKENS_PER_FRAME_HIGH = 258;
 
+/** And at low, where a frame is read coarsely. The same figure, other tier. */
+export const TOKENS_PER_FRAME_LOW = 66;
+
+export type MediaResolution = "low" | "medium" | "high";
+
+/**
+ * What a frame costs at a given tier.
+ *
+ * Split out because the segment planner used to assume `high` unconditionally
+ * while the scan pass ran at `low` -- so it sized every segment as though each
+ * frame cost four times what it actually did, and split clips that would have
+ * fitted in one call. Wrong in the safe direction, but wrong, and the whole
+ * point of this module is to know how much video fits.
+ *
+ * `medium` is priced as `high`: Gemini bills it at the same tier, and guessing
+ * cheaper here buys an overflow that costs a whole call to discover.
+ */
+export function tokensPerFrame(resolution: MediaResolution = "high"): number {
+  return resolution === "low" ? TOKENS_PER_FRAME_LOW : TOKENS_PER_FRAME_HIGH;
+}
+
 /**
  * Video tokens allowed in one call.
  *
@@ -64,12 +85,26 @@ export interface Segment {
  * timestamp in this product is load-bearing, because the rallies, the burst
  * windows and every coaching citation are all joins on them.
  */
-export const MAX_SEGMENT_SECONDS = 120;
+export const DEFAULT_MAX_SEGMENT_SECONDS = 120;
+
+/**
+ * The cap actually in force.
+ *
+ * ANALYST_MAX_SEGMENT_SECONDS raises or lowers it. Set it high and the token
+ * budget becomes the only limit, which is what "one pass over the whole clip"
+ * means in practice -- and the timekeeping failure above comes back with it,
+ * so mergeAnalystOutputs drops anything that lands outside the clip and the
+ * run logs the fact that it is past the measured-safe length.
+ */
+export function maxSegmentSecondsCap(): number {
+  const v = Number(process.env.ANALYST_MAX_SEGMENT_SECONDS);
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_SEGMENT_SECONDS;
+}
 
 /** The longest segment that fits the budget at this frame rate, in seconds. */
-export function maxSegmentSeconds(fps: number): number {
-  const byTokens = Math.max(10, Math.floor(SEGMENT_TOKEN_BUDGET / (fps * TOKENS_PER_FRAME_HIGH)));
-  return Math.min(byTokens, MAX_SEGMENT_SECONDS);
+export function maxSegmentSeconds(fps: number, resolution: MediaResolution = "high"): number {
+  const byTokens = Math.max(10, Math.floor(SEGMENT_TOKEN_BUDGET / (fps * tokensPerFrame(resolution))));
+  return Math.min(byTokens, maxSegmentSecondsCap());
 }
 
 /**
@@ -79,9 +114,9 @@ export function maxSegmentSeconds(fps: number): number {
  * whole clip when it does not, so a long game is sampled from end to end
  * rather than analysed for its first twenty minutes and abandoned.
  */
-export function planSegments(durationSeconds: number, fps: number): Segment[] {
+export function planSegments(durationSeconds: number, fps: number, resolution: MediaResolution = "high"): Segment[] {
   if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return [];
-  const width = maxSegmentSeconds(fps);
+  const width = maxSegmentSeconds(fps, resolution);
   const needed = Math.ceil(durationSeconds / width);
 
   if (needed <= MAX_SEGMENTS) {
@@ -105,8 +140,8 @@ export function planSegments(durationSeconds: number, fps: number): Segment[] {
 }
 
 /** True when the plan skips footage rather than covering all of it. */
-export function isSampled(durationSeconds: number, fps: number): boolean {
-  return Math.ceil(durationSeconds / maxSegmentSeconds(fps)) > MAX_SEGMENTS;
+export function isSampled(durationSeconds: number, fps: number, resolution: MediaResolution = "high"): boolean {
+  return Math.ceil(durationSeconds / maxSegmentSeconds(fps, resolution)) > MAX_SEGMENTS;
 }
 
 function round(n: number): number {
@@ -130,9 +165,10 @@ function round(n: number): number {
  */
 export function planSegmentsForWindows(
   windows: ReadonlyArray<{ startSeconds: number; endSeconds: number }>,
-  fps: number
+  fps: number,
+  resolution: MediaResolution = "high"
 ): Segment[] {
-  const width = maxSegmentSeconds(fps);
+  const width = maxSegmentSeconds(fps, resolution);
   const all: Segment[] = [];
   for (const w of windows) {
     const span = w.endSeconds - w.startSeconds;

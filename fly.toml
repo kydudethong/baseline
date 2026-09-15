@@ -22,6 +22,29 @@ primary_region = "sjc"
   # and eight points in a one-second trail show direction and speed plainly.
   BALL_FPS_CAP = "8"
 
+  # How the coaching scan reads the overlay: ten frames a second, each frame
+  # read at full detail, and as much of the clip as will fit in ONE call.
+  #
+  # These three are the whole cost of an analysis and they are set here, in one
+  # place, because they are a CHOICE rather than a finding -- detail over
+  # cheapness, continuity over round trips. The code defaults match them; these
+  # lines exist so changing your mind is one file and one deploy.
+  ANALYST_FPS = "10"
+  ANALYST_MEDIA_RESOLUTION = "high"
+  # Raised from the 120s default so the CONTEXT WINDOW is the only thing that
+  # splits a clip. At 10fps and high resolution a second of video costs ~2,580
+  # tokens, so one call holds about 230 seconds — roughly 3 minutes 50. Clips
+  # under that are genuinely one pass; longer ones still split, and no setting
+  # here can change that, because it is the size of the window.
+  #
+  # The cost: past about two minutes in a single call the model has been
+  # measured losing track of the clock and reporting rallies past the end of
+  # the clip. Those are dropped when the segments are merged and the run logs
+  # that it happened, so the failure shows up as missing rallies rather than
+  # invented ones. Set this to "120" to trade the continuity back for
+  # timestamps that have never been caught drifting.
+  ANALYST_MAX_SEGMENT_SECONDS = "900"
+
 [http_service]
   internal_port = 3000
   force_https = true

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planSegments, maxSegmentSeconds, isSampled, MAX_SEGMENTS, MAX_SEGMENT_SECONDS, SEGMENT_TOKEN_BUDGET, TOKENS_PER_FRAME_HIGH } from "./technique-segments";
+import { planSegments, maxSegmentSeconds, isSampled, MAX_SEGMENTS, DEFAULT_MAX_SEGMENT_SECONDS, maxSegmentSecondsCap, tokensPerFrame, TOKENS_PER_FRAME_LOW, SEGMENT_TOKEN_BUDGET, TOKENS_PER_FRAME_HIGH } from "./technique-segments";
 
 const FPS = 15;
 
@@ -26,7 +26,7 @@ test("a clip past the time cap is split even though the tokens would fit", () =>
   const got = planSegments(138, FPS);
   assert.ok(got.length > 1, "a 138s clip should now be split");
   for (const seg of got) {
-    assert.ok(seg.endSeconds - seg.startSeconds <= MAX_SEGMENT_SECONDS + 0.01);
+    assert.ok(seg.endSeconds - seg.startSeconds <= DEFAULT_MAX_SEGMENT_SECONDS + 0.01);
   }
 });
 
@@ -82,4 +82,31 @@ test("a zero-length or nonsense duration plans nothing rather than dividing by z
 test("a higher frame rate buys shorter segments, and the budget still holds", () => {
   assert.ok(maxSegmentSeconds(30) < maxSegmentSeconds(15));
   assert.ok(maxSegmentSeconds(30) * 30 * TOKENS_PER_FRAME_HIGH <= SEGMENT_TOKEN_BUDGET);
+});
+
+test("a low-resolution frame is priced as low, so more of the clip fits one call", () => {
+  // The bug this guards: the planner assumed `high` for every pass, so a scan
+  // running at `low` was split into four times as many calls as it needed.
+  assert.equal(tokensPerFrame("low"), TOKENS_PER_FRAME_LOW);
+  const fps = 10;
+  assert.ok(
+    maxSegmentSeconds(fps, "low") >= maxSegmentSeconds(fps, "high"),
+    "cheaper frames must not buy a shorter segment"
+  );
+});
+
+test("the time cap is overridable, and the token budget still binds above it", () => {
+  const before = process.env.ANALYST_MAX_SEGMENT_SECONDS;
+  try {
+    process.env.ANALYST_MAX_SEGMENT_SECONDS = "900";
+    assert.equal(maxSegmentSecondsCap(), 900);
+    // Raising the time cap cannot conjure context that does not exist: at
+    // 10fps high a segment is still bounded by SEGMENT_TOKEN_BUDGET.
+    const seconds = maxSegmentSeconds(10, "high");
+    assert.ok(seconds < 900, "the token budget should still be the binding limit");
+    assert.ok(seconds * 10 * TOKENS_PER_FRAME_HIGH <= SEGMENT_TOKEN_BUDGET);
+  } finally {
+    if (before === undefined) delete process.env.ANALYST_MAX_SEGMENT_SECONDS;
+    else process.env.ANALYST_MAX_SEGMENT_SECONDS = before;
+  }
 });

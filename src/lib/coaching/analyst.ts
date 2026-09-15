@@ -23,7 +23,7 @@
  */
 
 import { generateJSON, uploadVideo, analystModel, deleteFile, type UploadedFile } from "./gemini";
-import { planSegments, planSegmentsForWindows, maxSegmentSeconds, isSampled } from "./technique-segments";
+import { planSegments, planSegmentsForWindows, maxSegmentSeconds, isSampled, DEFAULT_MAX_SEGMENT_SECONDS } from "./technique-segments";
 import { mapWithConcurrency } from "./concurrency";
 import { mergeAnalystOutputs } from "./analyst-merge";
 import { SKILLS, COACHING_DIMENSIONS, type CoachingDimension } from "./types";
@@ -39,12 +39,13 @@ import { SKILLS, COACHING_DIMENSIONS, type CoachingDimension } from "./types";
  * ten-frames-per-second rates across a whole match to read fifteen swings is
  * most of a $2.50 bill spent on footage where nothing is being judged.
  *
- * So five here, where the job is where/when/who, and ten at high resolution in
- * the burst pass, where the job is what the body did. Five is comfortably
- * enough to see a ball change direction against a paddle, which is what a
- * contact IS.
+ * TEN, September 2026, by choice. Five was the compromise; ten is the side of
+ * it where a swing is actually visible, so the scan sees the same mechanics
+ * the burst pass does instead of only where things were. It doubles the
+ * frames, and therefore the scan's share of the bill, and it halves how much
+ * video fits in one call. ANALYST_FPS=5 puts the compromise back.
  */
-export const ANALYST_FPS = 5;
+export const ANALYST_FPS = 10;
 
 /**
  * Segment calls in flight at once.
@@ -69,12 +70,16 @@ export const ANALYST_CONCURRENCY = 2;
  * subject's own shots. Paying high rates across a whole match to read fifteen
  * swings meant most of the bill went on footage nothing was being judged in.
  *
- * ANALYST_MEDIA_RESOLUTION=high restores the old behaviour if the scan turns
- * out to be missing contacts at this tier.
+ * SET TO HIGH by choice, September 2026, overriding the reasoning above.
+ * Low was the right default for a scan whose only job was where/when/who, and
+ * it is the right default again the moment cost matters more than detail. It
+ * is a four-times-the-bill setting and nothing else here moves the number as
+ * far, so it is one env var away in both directions:
+ * ANALYST_MEDIA_RESOLUTION=low restores the cheap scan.
  */
 export function analystMediaResolution(): "low" | "medium" | "high" {
-  const v = (process.env.ANALYST_MEDIA_RESOLUTION ?? "low").toLowerCase();
-  return v === "medium" || v === "high" ? v : "low";
+  const v = (process.env.ANALYST_MEDIA_RESOLUTION ?? "high").toLowerCase();
+  return v === "low" ? "low" : v === "medium" ? "medium" : "high";
 }
 
 /** Frames per second, overridable for the same reason. */
@@ -517,21 +522,47 @@ export async function runAnalyst(opts: {
     // usable tracks still gets.
     const fps = analystFps();
     const resolution = analystMediaResolution();
-    const segments = opts.activeWindows && opts.activeWindows.length > 0
-      ? planSegmentsForWindows(opts.activeWindows, fps)
-      : planSegments(opts.input.clipSeconds, fps);
+    // ONE PASS WHEN THE WHOLE CLIP FITS, gating or no gating.
+    //
+    // Motion gating exists to stop the model being charged to watch people
+    // walk between points, and on a long clip that is the largest lever there
+    // is. On a clip that already fits inside one call it buys nothing: the
+    // call is billed for the frames it is sent either way, and cutting the
+    // clip into three windows costs three round trips AND throws away the
+    // continuity that makes "your third drop got lower each time" sayable at
+    // all. So the windows are only honoured when the clip is too long to watch
+    // in one go.
+    const fitsInOnePass = opts.input.clipSeconds > 0
+      && opts.input.clipSeconds <= maxSegmentSeconds(fps, resolution);
+    const useWindows = !fitsInOnePass && opts.activeWindows && opts.activeWindows.length > 0;
+    const segments = useWindows
+      ? planSegmentsForWindows(opts.activeWindows!, fps, resolution)
+      : planSegments(opts.input.clipSeconds, fps, resolution);
     // A clip shorter than one segment is ONE call over the whole thing, which
     // is the shape this is meant to have. Segments are what a long clip gets
     // instead of a failure: at 10fps and high media resolution a second of
     // video is ~2,580 tokens, so a 1M context holds a little under four
     // minutes and a 20-minute match is physically not one request.
     const plan = segments.length > 0 ? segments : [{ startSeconds: 0, endSeconds: opts.input.clipSeconds }];
+    // The timekeeping warning, said out loud rather than enforced silently.
+    // Past roughly two minutes in one call the model has been measured losing
+    // the clock and reporting rallies past the end of the clip. Those are
+    // dropped at merge, so the failure is contained -- but a run stretched
+    // beyond that length should say so, because the symptom downstream is
+    // "some rallies went missing" and the cause is here.
+    const longest = Math.max(...plan.map((s) => s.endSeconds - s.startSeconds));
+    if (longest > DEFAULT_MAX_SEGMENT_SECONDS + 1) {
+      opts.onLog?.(
+        `analyst: segments run to ${Math.round(longest)}s, past the ${DEFAULT_MAX_SEGMENT_SECONDS}s the model has been `
+        + `measured keeping time over — rallies reported outside the clip will be dropped`
+      );
+    }
     opts.onLog?.(
       plan.length === 1
         ? `analyst: one pass over the whole clip at ${fps}fps, ${resolution} resolution`
         : `analyst: ${plan.length} segments at ${fps}fps, ${resolution} resolution `
-          + `(a 1M context holds about ${Math.round(maxSegmentSeconds(fps) / 60 * 10) / 10} min at this rate)`
-          + (isSampled(opts.input.clipSeconds, fps)
+          + `(a 1M context holds about ${Math.round(maxSegmentSeconds(fps, resolution) / 60 * 10) / 10} min at this rate)`
+          + (isSampled(opts.input.clipSeconds, fps, resolution)
             ? " — too long to watch end to end, so segments are spread across it"
             : "")
     );

@@ -150,6 +150,49 @@ def main() -> int:
     # Index by time for cheap lookup.
     ball_sorted = sorted(ball, key=lambda p: p["t"])
     ball_ts = [p["t"] for p in ball_sorted]
+
+    # POSES, INDEXED -- and the two bugs this replaces.
+    #
+    # First: the draw loop scanned every pose for every frame. On a 20-minute
+    # clip that is tens of thousands of poses times thousands of frames, inside
+    # the stage that already takes longest and has twice killed a run. A dict
+    # of one-second buckets makes each frame look at a few dozen instead.
+    #
+    # Second, and the one you can SEE: it drew EVERY pose within the tolerance
+    # window. Pose frames are sampled densely -- 24fps during a burst -- so a
+    # single rendered frame stacked six slightly-offset skeletons on top of
+    # each other, and six offset stick figures do not read as a person. They
+    # read as a scribble, which is why the honest report was "there are no
+    # skeletons": there were, and they did not look like skeletons.
+    #
+    # One pose per player per frame now, the nearest in time. A figure you can
+    # recognise, or nothing.
+    pose_buckets = {}
+    for ps in poses:
+        pose_buckets.setdefault(int(ps["t"]), []).append(ps)
+
+    # How far a pose may be from a frame and still be drawn on it.
+    #
+    # Derived from the data rather than fixed, because a fixed 0.12s was
+    # narrower than the gap between samples whenever the pose pass ran at
+    # 5fps -- so a skeleton appeared for a quarter of each 200ms and blinked
+    # out for the rest. Held for slightly longer than the sample interval, a
+    # skeleton is continuous while pose data exists and absent where it does
+    # not, which is the distinction worth being able to see.
+    pose_times = sorted(set(ps["t"] for ps in poses))
+    if len(pose_times) > 1:
+        gaps = sorted(pose_times[i + 1] - pose_times[i] for i in range(len(pose_times) - 1))
+        typical_gap = gaps[len(gaps) // 2]
+    else:
+        typical_gap = 0.0
+    pose_hold = max(0.12, min(0.5, typical_gap * 0.75))
+    frames_with_skeletons = 0
+    if poses:
+        print(f"[overlay] {len(poses)} pose frame(s) at {len(pose_times)} instant(s), "
+              f"drawn within {pose_hold:.2f}s of a frame", file=sys.stderr, flush=True)
+    else:
+        print("[overlay] NO POSE DATA in the overlay file — the video will have no skeletons",
+              file=sys.stderr, flush=True)
     scale = max(0.5, w / 1280.0)
     i = start_frame
     while True:
@@ -269,17 +312,38 @@ def main() -> int:
         # and only from keypoints the model actually saw -- joining low
         # confidence points draws limbs that were never there, which is worse
         # than an incomplete figure because it looks complete.
-        for ps in poses:
-            if abs(ps["t"] - t) > 0.12:
-                continue
+        # One per player, nearest in time. A dict keyed by playerId rather than
+        # a list, so two poses for the same person at two nearby instants can
+        # never both be drawn.
+        nearest = {}
+        for bucket in (int(t - 1), int(t), int(t + 1)):
+            for ps in pose_buckets.get(bucket, ()):
+                dt = abs(ps["t"] - t)
+                if dt > pose_hold:
+                    continue
+                pid = ps.get("playerId")
+                prev = nearest.get(pid)
+                if prev is None or dt < prev[0]:
+                    nearest[pid] = (dt, ps)
+        if nearest:
+            frames_with_skeletons += 1
+        for _dt, ps in nearest.values():
             for (x1, y1, x2, y2, group) in ps.get("bones", []):
                 col = limb_bgr.get(group, (200, 200, 200))
-                thick = int((3 if group.startswith("arm") else 2) * scale)
-                cv2.line(img, (int(x1 * w), int(y1 * h)), (int(x2 * w), int(y2 * h)),
-                         col, max(1, thick), cv2.LINE_AA)
+                a = (int(x1 * w), int(y1 * h))
+                b = (int(x2 * w), int(y2 * h))
+                # A dark stroke under the bright one. Same reasoning as the
+                # court lines: a thin coloured line on a sunlit court, at 720p,
+                # after H.264, is the exact thing compression smears into the
+                # surface underneath. An outline gives every limb an edge it
+                # keeps whatever it is drawn over.
+                thick = int((4 if group.startswith("arm") else 3) * scale)
+                cv2.line(img, a, b, (12, 12, 12), max(2, thick + 2), cv2.LINE_AA)
+                cv2.line(img, a, b, col, max(1, thick), cv2.LINE_AA)
             for (jx, jy) in ps.get("joints", []):
-                cv2.circle(img, (int(jx * w), int(jy * h)), max(2, int(2.5 * scale)),
-                           (255, 255, 255), -1, cv2.LINE_AA)
+                c = (int(jx * w), int(jy * h))
+                cv2.circle(img, c, max(3, int(3.5 * scale)), (12, 12, 12), -1, cv2.LINE_AA)
+                cv2.circle(img, c, max(2, int(2.5 * scale)), (255, 255, 255), -1, cv2.LINE_AA)
 
         # Paddle boxes, drawn wherever the model saw one within a frame or two.
         # Drawn rather than only counted on purpose: a paddle detector that is
@@ -425,6 +489,14 @@ def main() -> int:
     if ff.stdin:
         ff.stdin.close()
     ff.wait()
+    # SAID OUT LOUD, because "I don't see any skeletons" has been reported three
+    # times and has had three different causes, and from outside the rendered
+    # video there was no way to tell which. This line answers it before anyone
+    # has to open the file: how many of the frames written actually got one.
+    if written:
+        pct = 100.0 * frames_with_skeletons / written
+        print(f"[overlay] skeletons on {frames_with_skeletons}/{written} frames ({pct:.0f}%)",
+              file=sys.stderr, flush=True)
     print(f"wrote {args.out}", file=sys.stderr)
     return 0
 
