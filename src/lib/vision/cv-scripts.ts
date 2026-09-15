@@ -264,11 +264,30 @@ export async function estimatePoseViaPython(imagePaths: string[]): Promise<RawPo
   // the pipeline on a full-length clip and it printed nothing at all, so from
   // outside it was indistinguishable from a hang -- which is precisely the
   // ambiguity that has cost several evenings of guessing.
-  const stdout = await runPython("estimate_pose.py", [...imagePaths, "--model", POSE_MODEL_PATH], {
-    maxBuffer: 50 * 1024 * 1024,
-    streamStderr: true,
-    timeoutMs: frameScaledTimeoutMs(imagePaths.length),
-  });
+  // THROUGH A FILE, NOT A PIPE.
+  //
+  // execFile buffers a child's stdout in memory and kills it past maxBuffer. A
+  // 13.7-minute clip at 5fps is 4,121 frames, and at seven people in shot that
+  // is ~49MB of JSON against a 50MB cap -- under it by a rounding error, and
+  // over it the moment a spectator or an adjacent court is in frame. So the
+  // pose pass died on long clips for a reason that had nothing to do with
+  // pose, and the symptom was a run that stopped responding.
+  //
+  // A file has no ceiling, and nothing is held twice.
+  const outDir = await fsp.mkdtemp(path.join(os.tmpdir(), "pb-pose-"));
+  const outPath = path.join(outDir, "pose.jsonl");
+  let raw: string;
+  try {
+    await runPython("estimate_pose.py",
+      [...imagePaths, "--model", POSE_MODEL_PATH, "--out", outPath], {
+        streamStderr: true,
+        timeoutMs: frameScaledTimeoutMs(imagePaths.length),
+      });
+    raw = await fsp.readFile(outPath, "utf8");
+  } finally {
+    await fsp.rm(outDir, { recursive: true, force: true }).catch(() => {});
+  }
+  const stdout = raw;
   // ONLY THE JSON LINES.
   //
   // ultralytics writes some of its warnings to STDOUT rather than stderr --

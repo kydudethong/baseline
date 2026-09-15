@@ -58,6 +58,19 @@ def main():
     # does not silently depend on the source resolution: a 1080p frame and a
     # 720p frame should cost the same here.
     parser.add_argument("--imgsz", type=int, default=int(os.environ.get("POSE_IMGSZ", "640")))
+    # A FILE RATHER THAN A PIPE, and the reason is a hard ceiling.
+    #
+    # The caller collected this script's stdout into memory with a 50MB cap. A
+    # 13.7-minute clip at 5fps is 4,121 frames, and with seven people in shot
+    # that is ~49MB of JSON -- under the cap by a rounding error, and over it
+    # the moment there are spectators or an adjacent court in frame. Node kills
+    # the child when the cap is passed, so the whole pose pass died on long
+    # clips for a reason that had nothing to do with pose.
+    #
+    # Written to a file, there is no ceiling and nothing is held in memory
+    # twice. stdout stays the default so this stays usable by hand.
+    parser.add_argument("--out", default=None,
+                        help="Write JSONL here instead of stdout. No size limit, unlike a pipe.")
     args = parser.parse_args()
 
     if not args.model:
@@ -79,6 +92,7 @@ def main():
     # trying to silence each warning as it is discovered.
     real_stdout = sys.stdout
     sys.stdout = sys.stderr
+    out_fh = open(args.out, "w", encoding="utf-8") if args.out else real_stdout
 
     from ultralytics import YOLO  # imported lazily so --help doesn't need torch loaded
 
@@ -100,7 +114,7 @@ def main():
             # identical to the unbatched version and no caller has a new case.
             for image_path in chunk:
                 print(json.dumps({"imagePath": image_path, "error": str(exc), "people": []}),
-                      file=real_stdout, flush=True)
+                      file=out_fh, flush=True)
             done += len(chunk)
             continue
 
@@ -181,7 +195,7 @@ def main():
                 })
 
             print(json.dumps({"imagePath": image_path, "people": people}),
-                  file=real_stdout, flush=True)
+                  file=out_fh, flush=True)
 
         done += len(chunk)
         if done % 200 < args.batch or done == len(paths):
@@ -189,6 +203,9 @@ def main():
             print(f"[pose] {done}/{len(paths)} frames · {rate:.1f} fps · "
                   f"~{(len(paths) - done) / max(rate, 1e-6) / 60:.1f} min left",
                   file=sys.stderr, flush=True)
+
+    if out_fh is not real_stdout:
+        out_fh.close()
 
 
 if __name__ == "__main__":
