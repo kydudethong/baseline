@@ -75,9 +75,19 @@ export function frameScaledTimeoutMs(
   ceilingMs = 3 * 60 * 60 * 1000
 ): number {
   const override = Number(process.env.CV_STEP_TIMEOUT_MS ?? NaN);
-  if (Number.isFinite(override) && override > 0) return override;
+  if (Number.isFinite(override) && override > 0) return Math.round(override);
   const scaled = Math.max(0, frameCount) * secondsPerFrame * 1000;
-  return Math.min(ceilingMs, Math.max(floorMs, scaled));
+  // ROUNDED, and this line is the whole reason the overlay never rendered.
+  //
+  // Node's execFile rejects a non-integer `timeout` outright -- "The value of
+  // "timeout" is out of range. It must be an unsigned integer. Received
+  // 207600.00000000003". A fractional secondsPerFrame (0.05 for the overlay)
+  // times a frame count is binary floating point, so the product is a hair off
+  // a whole number roughly always. The timeout added to make the longest stage
+  // in the pipeline safe was instead the thing that stopped it running at all,
+  // and it threw before Python was ever spawned -- which is why it failed
+  // instantly and identically on every clip.
+  return Math.round(Math.min(ceilingMs, Math.max(floorMs, scaled)));
 }
 
 async function runPython(
@@ -98,7 +108,10 @@ async function runPython(
       // download, a deadlocked native extension, a script waiting on a socket
       // nobody will ever answer. SIGKILL rather than SIGTERM because a process
       // stuck inside a C extension may never handle a catchable signal.
-      timeout: timeoutMs,
+      //
+      // Rounded again here. Every caller should hand over an integer, and one
+      // that does not must not be able to kill a stage before it starts.
+      timeout: Math.round(timeoutMs),
       killSignal: "SIGKILL",
     });
     // Long-running scripts report progress on stderr; forward it live so a
@@ -255,10 +268,25 @@ export async function estimatePoseViaPython(imagePaths: string[]): Promise<RawPo
     streamStderr: true,
     timeoutMs: frameScaledTimeoutMs(imagePaths.length),
   });
-  return stdout
-    .split("\n")
-    .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as RawPoseResult);
+  // ONLY THE JSON LINES.
+  //
+  // ultralytics writes some of its warnings to STDOUT rather than stderr --
+  // "WARNING ⚠️ ..." -- and one of those landing in the middle of the JSONL
+  // stream made JSON.parse throw, which took down the entire pose pass for the
+  // clip. Every frame's result was already sitting in that same stdout,
+  // perfectly good, discarded because of a line about a default setting.
+  //
+  // estimate_pose.py now keeps its stdout clean, so this should never fire.
+  // It stays because the failure it prevents is total and the cost of
+  // surviving it is one startsWith.
+  const lines = stdout.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  const jsonLines = lines.filter((l) => l.startsWith("{"));
+  const skipped = lines.length - jsonLines.length;
+  if (skipped > 0) {
+    console.error(`[cv] pose: ignored ${skipped} non-JSON line(s) on stdout, first: ${
+      lines.find((l) => !l.startsWith("{"))?.slice(0, 120)}`);
+  }
+  return jsonLines.map((line) => JSON.parse(line) as RawPoseResult);
 }
 
 export interface RawBallDetections {

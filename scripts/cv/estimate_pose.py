@@ -64,6 +64,22 @@ def main():
         print(json.dumps({"error": "no --model weights path given"}), file=sys.stderr)
         sys.exit(1)
 
+    # STDOUT IS THE DATA CHANNEL, so nothing else may write to it.
+    #
+    # ultralytics sends some of its warnings to stdout rather than stderr
+    # ("WARNING (warning sign) ..."), and one of those landing between two JSON
+    # lines made the caller's JSON.parse throw and threw away the ENTIRE clip's
+    # pose data -- every frame of which was sitting in that same stream,
+    # perfectly good. The analysis then finished with no skeletons and no
+    # explanation.
+    #
+    # Rebinding sys.stdout to stderr before ultralytics is even imported means
+    # any library that prints casually is harmlessly diverted, while the JSON
+    # below goes to the real handle kept here. Cheaper and more complete than
+    # trying to silence each warning as it is discovered.
+    real_stdout = sys.stdout
+    sys.stdout = sys.stderr
+
     from ultralytics import YOLO  # imported lazily so --help doesn't need torch loaded
 
     model = YOLO(args.model)
@@ -83,7 +99,8 @@ def main():
             # it is reported as its own failure, so the shape of the output is
             # identical to the unbatched version and no caller has a new case.
             for image_path in chunk:
-                print(json.dumps({"imagePath": image_path, "error": str(exc), "people": []}))
+                print(json.dumps({"imagePath": image_path, "error": str(exc), "people": []}),
+                      file=real_stdout, flush=True)
             done += len(chunk)
             continue
 
@@ -129,8 +146,8 @@ def main():
                     "keypoints": keypoints,
                 })
 
-            print(json.dumps({"imagePath": image_path, "people": people}))
-            sys.stdout.flush()
+            print(json.dumps({"imagePath": image_path, "people": people}),
+                  file=real_stdout, flush=True)
 
         done += len(chunk)
         if done % 200 < args.batch or done == len(paths):
