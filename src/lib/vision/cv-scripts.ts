@@ -94,7 +94,11 @@ export function frameScaledTimeoutMs(
 async function runPython(
   scriptName: string,
   args: string[],
-  opts: { maxBuffer?: number; streamStderr?: boolean; stdin?: string; timeoutMs?: number } = {}
+  opts: {
+    maxBuffer?: number; streamStderr?: boolean; stdin?: string; timeoutMs?: number;
+    /** Extra environment for this call only, merged over the process's own. */
+    env?: Record<string, string>;
+  } = {}
 ): Promise<string> {
   const scriptPath = path.join(SCRIPTS_DIR, scriptName);
   const timeoutMs = opts.timeoutMs ?? cvTimeoutMs();
@@ -485,7 +489,15 @@ export async function renderOverlayViaPython(
   videoPath: string,
   dataPath: string,
   outPath: string,
-  opts: { startS?: number; endS?: number; sourceFrames: number } = { sourceFrames: 1 }
+  opts: {
+    startS?: number; endS?: number; sourceFrames: number;
+    /**
+     * The identity clip: boxes and their ids and nothing else, at this frame
+     * rate and height. Everything else on the overlay -- court, net, ball,
+     * skeletons -- is noise for the one question that clip is asked.
+     */
+    boxesOnly?: { fps: number; maxHeight: number };
+  } = { sourceFrames: 1 }
 ): Promise<void> {
   const args = [
     path.resolve(videoPath), "--data", dataPath, "--out", outPath,
@@ -500,13 +512,15 @@ export async function renderOverlayViaPython(
     // This shipped wrong once -- the read rate was raised and the write rate
     // was not -- which is exactly what happens when two files each hold their
     // own copy of one number.
-    "--out-fps", String(overlayFps()),
+    "--out-fps", String(opts.boxesOnly ? opts.boxesOnly.fps : overlayFps()),
   ];
+  if (opts.boxesOnly) args.push("--boxes-only");
   if (opts.startS !== undefined && opts.endS !== undefined) {
     args.push("--start", opts.startS.toFixed(3), "--end", opts.endS.toFixed(3));
   }
   await runPython("render_debug.py", args, {
     streamStderr: true,
+    env: opts.boxesOnly ? { OVERLAY_MAX_HEIGHT: String(opts.boxesOnly.maxHeight) } : undefined,
     timeoutMs: frameScaledTimeoutMs(Math.max(1, opts.sourceFrames), 0.05, 2 * 60_000, 40 * 60_000),
   });
 }

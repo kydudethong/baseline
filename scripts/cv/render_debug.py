@@ -76,6 +76,11 @@ def main() -> int:
                          "For handing the overlay to something that is being ASKED where the "
                          "rallies are -- otherwise the answer, and the evidence behind it, "
                          "are written across the frame")
+    ap.add_argument("--boxes-only", action="store_true",
+                    help="draw ONLY the player boxes and their ids -- no skeletons, no ball, "
+                         "no court, no net, no rally banner. For the identity pass, which is "
+                         "asking one question ('which of these ids are the same person?') and "
+                         "is answered worse, not better, by everything else on the frame.")
     args = ap.parse_args()
     if args.start is not None and args.end is not None and args.end <= args.start:
         print(f"--end ({args.end}) must be after --start ({args.start})", file=sys.stderr)
@@ -375,7 +380,7 @@ def main() -> int:
             print(f"[overlay] {written}/{total_out or '?'} frames · {rate:.0f} fps · "
                   f"~{remaining / 60:.1f} min left", file=sys.stderr, flush=True)
 
-        if corners:
+        if corners and not args.boxes_only:
             # THICKER THAN IT LOOKS LIKE IT NEEDS TO BE. This line is drawn on
             # a 720p frame and then H.264-compressed, and a 2px stroke is
             # exactly the width that compression smears into the court surface
@@ -384,11 +389,11 @@ def main() -> int:
             # when the model is shown the frame at reduced resolution. 4px
             # survives both; the cost is a few pixels of the court it covers.
             draw_poly(img, corners, C_COURT, max(1, int(2 * scale * court_weight)))
-        if ball_gate:
+        if ball_gate and not args.boxes_only:
             # Where a ball of THIS court can be, including its airspace.
             draw_poly(img, ball_gate, (90, 90, 110), max(1, int(scale)))
 
-        if band:
+        if band and not args.boxes_only:
             # The net as a surface: base on the ground, tape above it with the
             # real sag, and the face between them shaded. A ball inside this
             # band cannot be assigned to a side -- from behind a baseline the
@@ -417,7 +422,7 @@ def main() -> int:
                          max(1, int(1 * scale * court_weight)), cv2.LINE_AA)
             cv2.putText(img, "NET", (int(tl[0]) + 6, int(tl[1]) - 8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5 * scale, C_NET, 1, cv2.LINE_AA)
-        elif net:
+        elif net and not args.boxes_only:
             cv2.line(img, tuple(np.int32(net[0])), tuple(np.int32(net[1])),
                      C_NET, max(1, int(2 * scale * court_weight)), cv2.LINE_AA)
             cv2.putText(img, "NET", (int(net[0][0]) + 6, int(net[0][1]) - 8),
@@ -425,7 +430,7 @@ def main() -> int:
 
         # Ball trail: the last ~1s, brightening toward now. Hollow circles are
         # interpolated points, so a filled run is real observation.
-        lo = np.searchsorted(ball_ts, t - 1.0)
+        lo = len(ball_ts) if args.boxes_only else np.searchsorted(ball_ts, t - 1.0)
         hi = np.searchsorted(ball_ts, t)
         prev = None
         for p in ball_sorted[lo:hi]:
@@ -460,8 +465,24 @@ def main() -> int:
             # because a reader -- and the coaching model watching this video --
             # should never have to decode "player_3".
             label = tr.get("label") or ("YOU" if tr.get("isSelf") else tr.get("playerId", ""))
-            cv2.putText(img, label, (x1, max(14, y1 - 6)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45 * scale, colour, 1, cv2.LINE_AA)
+            if args.boxes_only:
+                # BIG, AND ON A SOLID CHIP. The identity pass exists to be read
+                # by a model that resizes every frame to roughly a 768px tile
+                # before looking at it, and 0.45-scale text on a busy court
+                # does not survive that. This label IS the question being asked
+                # -- "which of these ids are the same person" is unanswerable
+                # if the ids are illegible -- so it gets the weight that
+                # deserves, and the clutter it would cause on the real overlay
+                # is not a concern here because there is no clutter to add to.
+                fs = 0.85 * scale
+                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, fs, 2)
+                ly = max(th + 8, y1 - 6)
+                cv2.rectangle(img, (x1, ly - th - 6), (x1 + tw + 10, ly + 4), colour, -1)
+                cv2.putText(img, label, (x1 + 5, ly), cv2.FONT_HERSHEY_SIMPLEX,
+                            fs, (12, 12, 12), 2, cv2.LINE_AA)
+            else:
+                cv2.putText(img, label, (x1, max(14, y1 - 6)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45 * scale, colour, 1, cv2.LINE_AA)
 
         # Skeletons. Drawn after the boxes so a limb is never hidden by one,
         # and only from keypoints the model actually saw -- joining low
@@ -474,7 +495,8 @@ def main() -> int:
         # Keyed by playerId so two samples of the same person at the same
         # instant can never both be drawn at full brightness.
         by_player = {}
-        for bucket in (int(t - trail_span - 1), int(t - 1), int(t), int(t + 1)):
+        buckets = () if args.boxes_only else (int(t - trail_span - 1), int(t - 1), int(t), int(t + 1))
+        for bucket in buckets:
             for ps in pose_buckets.get(bucket, ()):
                 age = t - ps["t"]
                 # Forward within the hold window (the nearest sample may be
@@ -537,7 +559,7 @@ def main() -> int:
         # read as gaps.
         paddle_hold = 0.10
         drawn_paddles = 0
-        for pd in paddles:
+        for pd in ([] if args.boxes_only else paddles):
             if abs(t - pd["t"]) <= paddle_hold:
                 px, py = int(pd["x"] * w), int(pd["y"] * h)
                 pw, ph = pd.get("w"), pd.get("h")
@@ -625,7 +647,7 @@ def main() -> int:
         # EVIDENCE the segmenter builds rallies from, so a full-width
         # "BALL CROSSED NET -> far" is most of the answer to "where are the
         # rallies" even without the banner spelling it out.
-        for c in ([] if args.hide_rallies else crossings):
+        for c in ([] if (args.hide_rallies or args.boxes_only) else crossings):
             if 0 <= t - c["t"] <= 0.33:
                 txt = "BALL CROSSED NET -> far" if c["into"] > 0 else "BALL CROSSED NET -> near"
                 cv2.rectangle(img, (0, 0), (w, int(46 * scale)), C_NET, -1)
@@ -635,7 +657,7 @@ def main() -> int:
 
         y0 = h - int(38 * scale)
         cv2.rectangle(img, (0, y0), (w, h), (24, 24, 28), -1)
-        if args.hide_rallies:
+        if args.hide_rallies or args.boxes_only:
             # The clock stays -- a model reasoning about WHEN something happened
             # needs to know where it is -- but nothing about rallies. Not even
             # "no rally", which is itself a claim about the thing being asked.

@@ -201,6 +201,7 @@ export type AnalysisStage =
   | "court"
   | "players"
   | "pose"
+  | "identity"
   | "ball"
   | "contacts"
   | "rallies"
@@ -211,7 +212,7 @@ export type AnalysisStage =
   | "overlay";
 
 export const ANALYSIS_STAGES: AnalysisStage[] = [
-  "preparing", "court", "players", "pose", "ball", "contacts",
+  "preparing", "court", "players", "pose", "identity", "ball", "contacts",
   "rallies", "shots", "mechanics", "saving", "coaching", "overlay",
 ];
 
@@ -220,6 +221,7 @@ export const ANALYSIS_STAGE_LABELS: Record<AnalysisStage, string> = {
   court: "Finding the court",
   players: "Finding the players",
   pose: "Reading body position",
+  identity: "Telling the players apart",
   ball: "Tracking the ball",
   contacts: "Finding paddle contacts",
   rallies: "Working out the rallies",

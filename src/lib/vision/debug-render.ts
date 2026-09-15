@@ -17,6 +17,7 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import { debugVideoDir, debugVideoKey, overlayDataKey, shotClipKey } from "./debug-video-store";
 
 import { renderOverlayViaPython } from "./cv-scripts";
@@ -240,3 +241,48 @@ export async function renderShotClip(opts: {
     return null;
   }
 }
+
+/**
+ * The identity clip: every tracked box and its id, and nothing else.
+ *
+ * A SEPARATE, CHEAPER RENDER rather than a reuse of the overlay, for two
+ * reasons. The overlay is not ready yet -- identity has to be settled BEFORE
+ * it, or the boxes it draws carry ids that are about to be merged, and an
+ * overlay whose labels disagree with the data is the one thing this pipeline
+ * must never ship. And everything the overlay draws is noise for this
+ * question: the court, the net, the ball trail and the skeletons all compete
+ * with the only thing being asked about, which is who is who.
+ *
+ * Two frames a second at 540p. A stroke is invisible at that rate and does not
+ * need to be visible: the question is whether the person who walked off at
+ * 2:14 is the person who walked back on at 2:16.
+ *
+ * Never throws. No identity clip means no merging, which is the behaviour
+ * every run had until now.
+ */
+export async function renderIdentityClip(input: DebugRenderInput): Promise<Uint8Array | null> {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "pb-identity-"));
+  const dataPath = path.join(dir, "overlay.json");
+  const outPath = path.join(dir, "identity.mp4");
+  try {
+    await fsp.writeFile(dataPath, JSON.stringify(buildOverlayData(input)), "utf8");
+    await renderOverlayViaPython(input.videoPath, dataPath, outPath, {
+      sourceFrames: Math.max(1, Math.round(input.durationSeconds * 30)),
+      boxesOnly: { fps: IDENTITY_FPS, maxHeight: IDENTITY_HEIGHT },
+    });
+    return new Uint8Array(await fsp.readFile(outPath));
+  } catch (err) {
+    input.onLog?.(`identity clip not rendered: ${(err as Error).message.split("\n")[0]}`);
+    return null;
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** Frames a second in the identity clip. Matches what the model is asked to sample. */
+export const IDENTITY_FPS = 2;
+/**
+ * 540p, not 720. The labels are drawn large on solid chips precisely so this
+ * can be small: what has to survive is the id, not the court.
+ */
+export const IDENTITY_HEIGHT = 540;

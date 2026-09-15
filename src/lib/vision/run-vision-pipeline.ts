@@ -444,6 +444,64 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   tracks.length = 0;
   tracks.push(...finalTracks);
 
+  // WHO IS WHO, before anybody is asked to point at themselves.
+  //
+  // The tracker has no re-identification, so a fourteen-minute doubles game
+  // comes back as sixteen tracks for four people and the tag screen asks which
+  // of sixteen chips you are. This settles it first: a cheap boxes-only clip,
+  // one model call, and the fragments of one person become one person.
+  //
+  // HERE, and not later, for a reason. Identity has to be settled BEFORE the
+  // overlay is rendered, or the overlay draws ids that are about to be merged
+  // and its labels disagree with the data underneath them -- which is the one
+  // failure this pipeline must never ship, because every number on the page is
+  // read off that video.
+  //
+  // Never fails a run. No identity pass means the behaviour every run had
+  // until now.
+  if (tracks.length > 1 && input.debugId) {
+    try {
+      const { renderIdentityClip } = await import("./debug-render");
+      const { identifyPlayers } = await import("@/lib/coaching/identify-players");
+      const { mergeTrackGroups } = await import("./merge-tracks");
+      stage("identity", "working out which tracks are the same person…");
+      const clip = await renderIdentityClip({
+        videoPath: input.videoPath,
+        analysisId: input.debugId,
+        durationSeconds: input.videoDurationSeconds,
+        frameWidthPx: input.frameWidthPx,
+        frameHeightPx: input.frameHeightPx,
+        calibration: courtCalibration,
+        netLinePx: null, netBandPx: null, ballGatePx: null,
+        ballPoints: [], crossings: [], rallies: [],
+        tracks, poses: [], selfPlayerId: null,
+        onLog: (l) => log(`  ${l}`),
+      });
+      if (clip) {
+        const groups = await identifyPlayers({
+          clipBytes: clip,
+          clipName: `${input.debugId}-identity.mp4`,
+          trackIds: tracks.map((t) => t.playerId),
+          expectedPlayers: input.setup?.matchMode === "singles" ? 2 : 4,
+          clipSeconds: input.videoDurationSeconds,
+          onLog: (l) => log(`  ${l}`),
+        });
+        if (groups.length > 0) {
+          const result = mergeTrackGroups(tracks, groups.map((g) => g.trackIds));
+          for (const r of result.rejected) {
+            log(`identity: refused ${r.kept} + ${r.dropped} — ${r.reason}`);
+          }
+          const before = tracks.length;
+          tracks.length = 0;
+          tracks.push(...result.tracks);
+          log(`identity: ${before} track(s) -> ${tracks.length} player(s)`);
+        }
+      }
+    } catch (err) {
+      log(`identity: skipped — ${describeError(err)}`);
+    }
+  }
+
   log(`tracking: ${tracks.length} player track(s)`);
   if (tracks.length === 0) {
     knownLimitations.push("No player tracks survived (need >=2 sampled detections to count as a track).");
