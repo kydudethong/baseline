@@ -91,6 +91,18 @@ export default async function AnalysisDetailPage({
           it instantly and no amount of text does — you recognise the court,
           the lighting and who you were playing before you have finished
           reading the title. */}
+      {/* WHICH VIDEO AM I LOOKING AT.
+          Two answers, and which one is right depends on whether there is a
+          player on the page. Before a run there is none, so the question is
+          answered here, by a frame from the footage and the details beside it
+          -- no amount of text tells six uploads called ky-720p apart, and one
+          still frame does it instantly.
+
+          After a run the player IS the answer, and it carries the title inside
+          its own frame (see AnalysisWorkspace). Repeating it above would push
+          the film a third of a phone screen down the page to say a second time
+          what the picture already says. */}
+      {analysis.status !== "completed" || !analysis.result ? (
       <header className="analysis-head">
         {videoPoster ? (
           <div className="analysis-thumb">
@@ -114,6 +126,7 @@ export default async function AnalysisDetailPage({
           </div>
         </div>
       </header>
+      ) : null}
 
       {analysis.status === "failed" ? (
         <div className="error">
@@ -139,7 +152,30 @@ export default async function AnalysisDetailPage({
           {/* The breakdown needs a result; the controls do not. A completed
               run with no result row is rare but it is exactly when someone
               needs the re-run button, so the two conditions stay separate. */}
-          {analysis.result ? <AnalysisBreakdown supabase={supabase} analysis={analysis} /> : null}
+          {analysis.result ? (
+            <AnalysisBreakdown
+              supabase={supabase}
+              analysis={analysis}
+              heading={
+                <>
+                  <div className="row g2" style={{ alignItems: "center" }}>
+                    <h1 className="player-title">{analysis.title}</h1>
+                    <StatusBadge status={analysis.status} />
+                  </div>
+                  <div className="player-meta">
+                    <span>
+                      {new Date(analysis.created_at).toLocaleDateString(undefined, {
+                        month: "long", day: "numeric",
+                      })}
+                    </span>
+                    {video?.duration_seconds ? <span>{formatDuration(video.duration_seconds)}</span> : null}
+                    {video?.width && video?.height ? <span>{video.height}p</span> : null}
+                    {analysis.coaching_kind ? <span>{prettyKind(analysis.coaching_kind)}</span> : null}
+                  </div>
+                </>
+              }
+            />
+          ) : null}
           {controls}
         </>
       ) : null}
@@ -150,9 +186,12 @@ export default async function AnalysisDetailPage({
 async function AnalysisBreakdown({
   supabase,
   analysis,
+  heading,
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   analysis: AnalysisWithVideo;
+  /** Title and details, handed to the player to draw inside its own frame. */
+  heading?: React.ReactNode;
 }) {
   const [phase2, profile, coachingData, blueprints, view, drills, practice, feedback] = await Promise.all([
     getPhase2Data(supabase, analysis.id),
@@ -284,6 +323,7 @@ async function AnalysisBreakdown({
           videoUrl={videoUrl}
           drillNames={drillNames}
           heroObservationId={hero?.id ?? null}
+          heading={heading}
         />
       ) : (
         <ErrorState

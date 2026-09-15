@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Player from "@/components/breakdown/Player";
+import type { ReactNode } from "react";
 import type { AnalysisView, ViewRally, ViewShot } from "@/lib/db/analysis-view";
 import type { CoachingObservationRow } from "@/lib/db/types";
 import { RallyTimeline } from "./RallyTimeline";
@@ -42,7 +43,7 @@ import { shotName } from "./ShotBadge";
  * different column.
  */
 export function AnalysisWorkspace({
-  view, videoUrl, drillNames, heroObservationId = null,
+  view, videoUrl, drillNames, heroObservationId = null, heading,
 }: {
   view: AnalysisView;
   videoUrl: string;
@@ -54,6 +55,8 @@ export function AnalysisWorkspace({
    * one-line pointer takes its place when it belongs to the selected rally.
    */
   heroObservationId?: string | null;
+  /** Title and details, drawn inside the player rather than stacked above it. */
+  heading?: ReactNode;
 }) {
   const [rallyIdx, setRallyIdx] = useState<number | null>(view.rallies[0]?.idx ?? null);
   const [shot, setShot] = useState<ViewShot | null>(null);
@@ -131,18 +134,26 @@ export function AnalysisWorkspace({
           shots got measured, how often the ball was actually visible — so
           they belong where they are read first, not in a footnote at the
           bottom of the technical tab. */}
+      {/* THE VIDEO FIRST, and full width.
+          It used to sit below the tiles, inside the left half of the split --
+          so opening an analysed game showed a filename, a badge, a row of
+          metadata and four numbers before the film, which is the one thing
+          everybody came for. It leads now, and the title rides inside the
+          frame where a video's title belongs. */}
+      <div className="ws-video ws-video-lead">
+        <Player
+          videoUrl={videoUrl}
+          rallies={rallyMarks}
+          durationS={view.video?.durationSeconds ?? 0}
+          seekRequest={seek}
+          heading={heading}
+        />
+      </div>
+
       <StatTiles view={view} />
 
       <div className="ws">
         <div className="ws-main">
-          <div className="ws-video">
-            <Player
-              videoUrl={videoUrl}
-              rallies={rallyMarks}
-              durationS={view.video?.durationSeconds ?? 0}
-              seekRequest={seek}
-            />
-          </div>
 
           {view.rallies.length > 0 ? (
             <section>

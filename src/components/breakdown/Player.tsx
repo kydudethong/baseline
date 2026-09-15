@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Ball, PlayIcon } from "@/components/motifs/Motifs";
 
 export interface RallyMark {
@@ -46,7 +47,18 @@ export default function Player({
   durationS,
   seekRequest,
   onTime,
+  heading,
 }: {
+  /**
+   * The title and details of what is playing, drawn INSIDE the frame.
+   *
+   * Above the video it was a filename, a badge and a row of grey metadata
+   * taking a third of a phone screen before the thing people opened the page
+   * for. In the frame it costs nothing: video players have carried their title
+   * in the top-left corner since television, so it reads as a label rather
+   * than as a header, and it fades with the controls when a rally is playing.
+   */
+  heading?: ReactNode;
   videoUrl: string;
   posterUrl?: string | null;
   rallies: RallyMark[];
@@ -130,7 +142,10 @@ export default function Player({
   }, [seek]);
 
   return (
-    <div className="player">
+    // `is-playing` drives the title fade: a title over live footage is in the
+    // way, and over a paused frame it is the answer to "which game is this".
+    <div className={`player${heading ? " player-titled" : ""}${playing ? " is-playing" : ""}`}>
+      {heading ? <div className="player-head">{heading}</div> : null}
       <video
         ref={videoRef}
         src={videoUrl}

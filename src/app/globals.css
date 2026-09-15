@@ -1183,3 +1183,57 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
      than sit one pixel from the card edge. */
   .drill-meta{gap:5px}
 }
+
+/* ---------------------------------------------------------------------------
+   THE TITLE, INSIDE THE PLAYER.
+   
+   It used to stack above: a filename, a status badge and a row of grey
+   metadata, which on a phone is a third of the screen spent before the film
+   that everybody opened the page for. Video players have carried their title
+   in the top-left corner since television, so in the frame it reads as a label
+   rather than as a page header, and it costs no vertical space at all.
+   
+   It fades out while the video plays. A title over live footage is in the way;
+   a title over a paused frame is the answer to "which game is this".
+   --------------------------------------------------------------------------- */
+.player{position:relative}
+.player-head{
+  position:absolute;top:0;left:0;right:0;z-index:2;
+  display:flex;flex-direction:column;gap:2px;
+  padding:var(--a4) var(--a4) var(--a6);
+  /* A gradient, not a bar: white text needs a dark ground to sit on, and a
+     hard edge across a picture reads as a broken layout. */
+  background:linear-gradient(180deg,rgba(6,10,18,.82) 0%,rgba(6,10,18,.55) 45%,transparent 100%);
+  color:#fff;pointer-events:none;
+  transition:opacity .25s ease;
+}
+/* Anything interactive in there -- the status badge is not, but a future
+   control might be -- has to opt back in. */
+.player-head > *{pointer-events:auto}
+.player.is-playing .player-head{opacity:0}
+.player-title{
+  margin:0;font-family:var(--display);font-weight:700;letter-spacing:-.02em;
+  font-size:clamp(17px,2.2vw,22px);line-height:1.2;
+  /* A long filename must not push the badge off the frame. */
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;
+  text-shadow:0 1px 10px rgba(0,0,0,.45);
+}
+.player-meta{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;opacity:.85}
+.player-meta span{display:inline-flex;align-items:center;gap:6px}
+.player-meta span + span::before{content:"";width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.6}
+
+/* The lead player is full width above the split, so it gets the room. */
+.ws-video-lead .player video{max-height:70vh}
+
+@media (max-width:640px){
+  /* MORE AIR AT THE SIDES. The page gutter is the same everywhere, which is
+     right for text and wrong for the one element that is meant to be looked
+     at: a video edge-to-edge against the bezel reads as a page that did not
+     finish loading. Pulling it in gives it a frame. */
+  .ws-video-lead{padding:0 var(--a2)}
+  .player-head{padding:var(--a3) var(--a3) var(--a5)}
+  .player-title{font-size:16px}
+  .player-meta{font-size:11px;gap:2px 9px}
+  /* Portrait phones have the height to spare and the width they do not. */
+  .ws-video-lead .player video{max-height:none}
+}
