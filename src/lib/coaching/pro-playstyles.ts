@@ -29,6 +29,23 @@
  */
 import { SKILL_KEYS } from "./types";
 
+/**
+ * Where to go and watch this player actually play.
+ *
+ * A SEARCH, not a video id, and that is a deliberate trade. A specific clip is
+ * better to watch and worse to maintain: the tour pulls videos, channels
+ * reorganise, and a dead embed under "you play like Ben Johns" is worse than
+ * no embed at all -- it makes the claim look unmaintained. A search for the
+ * player's name never breaks and always lands on current footage.
+ *
+ * If curated clips are added later, this is the function that changes.
+ */
+export function watchUrl(pro: { name: string }): string {
+  return `https://www.youtube.com/results?search_query=${
+    encodeURIComponent(`${pro.name} pickleball highlights`)
+  }`;
+}
+
 export interface ProPlaystyle {
   slug: string;
   name: string;

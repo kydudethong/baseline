@@ -1,3 +1,4 @@
+import { watchUrl } from "@/lib/coaching/pro-playstyles";
 import type { PlaystyleMatch } from "@/lib/coaching/pro-playstyles";
 import { skillName } from "@/lib/coaching/types";
 
@@ -76,6 +77,20 @@ export function PlaystyleMatchPanel({
           <strong style={{ color: "var(--ink)" }}>Steal this:</strong> {top.watchFor}
         </p>
 
+        {/* The claim is "you play like this person", and the only way to judge
+            it is to watch them. Sending the reader to footage is the difference
+            between a verdict and something they can check. */}
+        <div>
+          <a
+            className="btn btn-soft btn-sm"
+            href={watchUrl(top)}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            ▶ Watch {top.name} play
+          </a>
+        </div>
+
         {top.divergences.length > 0 ? (
           <p className="note" style={{ margin: 0 }}>
             Where you differ most:{" "}
@@ -106,7 +121,8 @@ export function PlaystyleMatchPanel({
           {rest.map((m, i) => (
             <span key={m.slug}>
               {i > 0 ? ", " : ""}
-              <strong style={{ color: "var(--ink)" }}>{m.name}</strong> ({percent(m.similarity)})
+              <strong style={{ color: "var(--ink)" }}>{m.name}</strong> ({percent(m.similarity)}){" "}
+              <a href={watchUrl(m)} target="_blank" rel="noreferrer noopener" title={`Watch ${m.name} play`}>▶</a>
             </span>
           ))}
           . This compares the SHAPE of your game — what you lean on relative to the rest of your own

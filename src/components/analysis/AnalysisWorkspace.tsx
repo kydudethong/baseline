@@ -12,7 +12,6 @@ import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { EmptyState } from "./EmptyState";
 import { StatTiles } from "./StatTiles";
 import { shotName } from "./ShotBadge";
-import { skillName } from "@/lib/coaching/types";
 
 /**
  * One workspace instead of six tabs.
@@ -105,7 +104,6 @@ export function AnalysisWorkspace({
     rally && heroObservationId
     && observations.some((o) => o.id === heroObservationId && o.rally_idx === rally.idx)
   );
-  const skills = view.coaching?.skills ?? [];
   // Every drill the coach actually pointed at, once each, with the point it
   // was prescribed for. Not the whole catalogue — that is its own page.
   const prescribed = observations.filter((o) => o.drill_slug);
@@ -281,29 +279,12 @@ export function AnalysisWorkspace({
         </section>
       </div>
 
-      {skills.length > 0 ? (
-        <section className="sec">
-          <div className="sec-head">
-            <h2 className="h2">Breakdown</h2>
-            <span className="xs">Rated 1&ndash;5 from this clip, with what each rating rests on</span>
-          </div>
-          <div className="breakdown">
-            {skills.map((sk) => (
-              <div
-                key={sk.id}
-                className={`bd-card${sk.raw >= 4 ? " strong" : sk.raw <= 2 ? " weak-rating" : ""}`}
-              >
-                <span className="bd-score">
-                  <span className="n">{sk.raw}</span>
-                  <span className="of">/5</span>
-                </span>
-                <span className="bd-name">{skillName(sk.skill_key)}</span>
-                {sk.basis ? <span className="bd-basis">{sk.basis}</span> : null}
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
+      {/* THE "BREAKDOWN" SECTION LIVED HERE, and it was the same thing twice.
+          It rendered coaching_skill_ratings as 1-5 cards with their basis --
+          which is exactly what "Skill ratings from this game" already shows,
+          on the same page. Two renderings of one table is two places for the
+          same number to be read differently, and it made the page longer
+          without making it say more. The ratings live in CoachingReadPanel. */}
     </div>
   );
 
