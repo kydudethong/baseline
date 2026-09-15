@@ -654,6 +654,27 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
       (id) => sideByPlayer.get(id) ?? null
     ));
 
+    // MEMORY AND DISK, right before the stage that keeps dying.
+    //
+    // Two runs died here with no evidence beyond "stopped responding", and
+    // "ran out of memory" versus "the machine was replaced" need completely
+    // opposite fixes. One line of numbers taken at the start of the stage
+    // settles which -- and the overlay is also the point where this box is
+    // holding the most at once: the source clip, the 720p proxy, several
+    // thousand extracted JPEGs, and now an encoder writing a whole new video.
+    try {
+      const mem = process.memoryUsage();
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const df = await promisify(execFile)("df", ["-Pm", "/"]).catch(() => null);
+      const line = df?.stdout.trim().split("\n")[1]?.split(/\s+/) ?? [];
+      log(`overlay: about to render — heap ${Math.round(mem.heapUsed / 1e6)}MB, `
+        + `rss ${Math.round(mem.rss / 1e6)}MB`
+        + (line[3] ? `, disk ${line[3]}MB free of ${line[1]}MB` : ""));
+    } catch {
+      // Diagnostics must never be the thing that fails a run.
+    }
+
     debugVideoUrl = await renderDebugVideo({
       roleNames,
       videoPath: input.videoPath,

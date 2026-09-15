@@ -401,3 +401,35 @@ export async function medianFrameViaPython(
     return null;
   }
 }
+
+/**
+ * Render the annotated overlay.
+ *
+ * ROUTED THROUGH runPython, which it was not.
+ *
+ * debug-render.ts spawned execFile directly, so the longest stage in the
+ * pipeline was also the only one with none of what runPython provides: no
+ * timeout (a wedged render ran forever), no abort signal (pressing "Stop
+ * analysis" did nothing to it), and no streamed stderr -- so a sixteen-minute
+ * render reported absolutely nothing until it finished, which is why two
+ * failed runs in a row said only "stopped responding" with no indication of
+ * how far it had got.
+ *
+ * The timeout scales with frames because this draws on the source at its own
+ * rate: a 20-minute match is ~35,000 frames against a short clip's 700.
+ */
+export async function renderOverlayViaPython(
+  videoPath: string,
+  dataPath: string,
+  outPath: string,
+  opts: { startS?: number; endS?: number; sourceFrames: number } = { sourceFrames: 1 }
+): Promise<void> {
+  const args = [path.resolve(videoPath), "--data", dataPath, "--out", outPath];
+  if (opts.startS !== undefined && opts.endS !== undefined) {
+    args.push("--start", opts.startS.toFixed(3), "--end", opts.endS.toFixed(3));
+  }
+  await runPython("render_debug.py", args, {
+    streamStderr: true,
+    timeoutMs: frameScaledTimeoutMs(Math.max(1, opts.sourceFrames), 0.05, 2 * 60_000, 40 * 60_000),
+  });
+}

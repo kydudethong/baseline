@@ -19,7 +19,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { debugVideoDir, debugVideoKey, overlayDataKey, shotClipKey } from "./debug-video-store";
 
-import { cvPython, frameScaledTimeoutMs } from "./cv-scripts";
+import { renderOverlayViaPython } from "./cv-scripts";
 import type { BallTrackPoint } from "./ball";
 import type { NetBand, NetCrossing } from "./rallies-net";
 import type { ClusteredRally } from "./rallies";
@@ -153,34 +153,16 @@ async function runRenderer(
   durationSeconds: number,
   window?: { startS: number; endS: number }
 ): Promise<void> {
-  const { execFile } = await import("node:child_process");
-  const { promisify } = await import("node:util");
-  const run = promisify(execFile);
-  const script = path.join(process.cwd(), "scripts", "cv", "render_debug.py");
-  const args = [script, path.resolve(videoPath), "--data", dataPath, "--out", outPath];
-  if (window) {
-    args.push("--start", window.startS.toFixed(3), "--end", window.endS.toFixed(3));
-  }
-
-  // A TIMEOUT, which this call did not have.
-  //
-  // Every other Python step goes through runPython and inherits one. This one
-  // spawns execFile directly, so it was the single place in the pipeline where
-  // a wedged process could run until something else killed it -- the exact
-  // shape of the ten-hour "Tracking the ball" hang, in the one step the fix
-  // for that never reached, because the guard was put on a FUNCTION rather
-  // than on the behaviour.
-  //
-  // Scaled by frames rather than fixed: this draws on every frame of the
-  // source at its native rate, so a 30-minute match is ~54,000 frames against
-  // a short clip's 700, and one number cannot be both generous enough for the
-  // first and useful on the second.
-  const frames = window
-    ? Math.max(1, Math.round((window.endS - window.startS) * 30))
-    : Math.max(1, Math.round(durationSeconds * 30));
-  await run(cvPython(), args, {
-    maxBuffer: 8 * 1024 * 1024,
-    timeout: frameScaledTimeoutMs(frames, 0.05, 2 * 60_000, 40 * 60_000),
+  // Through cv-scripts now rather than a bespoke execFile: that path had no
+  // timeout, no abort signal and no streamed progress, which made the longest
+  // stage in the pipeline the only one you could not watch, cancel or bound.
+  const seconds = window ? window.endS - window.startS : durationSeconds;
+  await renderOverlayViaPython(videoPath, dataPath, outPath, {
+    startS: window?.startS,
+    endS: window?.endS,
+    // Frames at an assumed 30fps source. Only used to size the timeout, so an
+    // approximation is fine and a wrong guess is generous rather than fatal.
+    sourceFrames: Math.max(1, Math.round(seconds * 30)),
   });
 }
 

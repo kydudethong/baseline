@@ -138,8 +138,14 @@ def main() -> int:
          "-preset", "veryfast", "-crf", str(args.crf), "-pix_fmt", "yuv420p", args.out],
         stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
-    print(f"[overlay] source {fps:.1f}fps -> writing {out_fps:.1f}fps "
-          f"(1 frame in {step})", file=sys.stderr, flush=True)
+    import time as _time
+    t_start = _time.time()
+    written = 0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    span = (end_frame if end_frame is not None else (total_frames or 0)) - start_frame
+    total_out = max(0, span // step) if span > 0 else 0
+    print(f"[overlay] source {fps:.1f}fps -> writing {out_fps:.1f}fps (1 frame in {step}), "
+          f"~{total_out or '?'} frames to draw", file=sys.stderr, flush=True)
 
     # Index by time for cheap lookup.
     ball_sorted = sorted(ball, key=lambda p: p["t"])
@@ -162,6 +168,18 @@ def main() -> int:
         # is the cheap half.
         if (frame_index - start_frame) % step != 0:
             continue
+
+        # PROGRESS, because this is the longest stage and it used to report
+        # nothing at all until it finished. Two runs died in here and the only
+        # evidence either left was "stopped responding" -- no indication of
+        # whether it was at minute one or minute fifteen, which is the
+        # difference between a crash and a machine that went away.
+        written += 1
+        if written % 300 == 0:
+            rate = written / max(1e-6, _time.time() - t_start)
+            remaining = (total_out - written) / max(rate, 1e-6) if total_out else 0
+            print(f"[overlay] {written}/{total_out or '?'} frames · {rate:.0f} fps · "
+                  f"~{remaining / 60:.1f} min left", file=sys.stderr, flush=True)
 
         if corners:
             # THICKER THAN IT LOOKS LIKE IT NEEDS TO BE. This line is drawn on
