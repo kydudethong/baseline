@@ -261,8 +261,12 @@ export async function readTechnique(opts: {
         schema: SCHEMA,
         video,
         // Generous on purpose: thinking tokens count against this budget, and at
-        // 4,000 three of six bursts came back as truncated JSON.
-        maxOutputTokens: 16000,
+        // 4,000 three of six bursts came back as truncated JSON. Same reasoning
+        // as the scan: thinking eats this budget before the
+        // answer starts. A burst is short, so the allowance is mostly headroom
+        // for reasoning rather than for output.
+        maxOutputTokens: 24_000,
+        label: `technique burst at ${w.startSeconds.toFixed(0)}s`,
       });
       if (out.pattern) patterns.push(out.pattern);
       return (out.shots ?? [])

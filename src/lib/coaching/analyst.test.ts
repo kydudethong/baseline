@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { auditAnalysis, analystSchema, analystPrompt, type AnalystInput, type AnalystOutput } from "./analyst";
+import { auditAnalysis, analystSchema, analystPrompt, type AnalystInput, type AnalystOutput, analystOutputBudget, THINKING_ALLOWANCE, MAX_OUTPUT_TOKENS } from "./analyst";
 import { sanitiseSchema } from "./gemini";
 
 function input(over: Partial<AnalystInput> = {}): AnalystInput {
@@ -131,4 +131,25 @@ test("the prompt asks for the scales the database actually stores", () => {
 test("observations must cite a measured contact time, and the prompt says so", () => {
   const p = analystPrompt(input(), "LEGEND");
   assert.match(p, /not a time you chose/);
+});
+
+test("the output budget covers thinking as well as the answer", () => {
+  // The measured failure: a fixed 16,000, of which 9,473 went on thinking
+  // before a character of the answer was written. Anything at or below the
+  // thinking cost cannot work, whatever the clip.
+  assert.ok(THINKING_ALLOWANCE > 9473, "the allowance must clear a measured 9,473-token thought");
+  for (const seconds of [10, 60, 120, 155, 600]) {
+    const budget = analystOutputBudget(seconds);
+    assert.ok(budget > THINKING_ALLOWANCE, `${seconds}s left no room for output`);
+    assert.ok(budget <= MAX_OUTPUT_TOKENS, `${seconds}s exceeded the model's ceiling`);
+  }
+});
+
+test("a longer segment gets more room than a shorter one", () => {
+  assert.ok(analystOutputBudget(150) > analystOutputBudget(30));
+});
+
+test("a nonsense duration falls back rather than asking for zero room", () => {
+  assert.ok(analystOutputBudget(0) > THINKING_ALLOWANCE);
+  assert.ok(analystOutputBudget(Number.NaN) > THINKING_ALLOWANCE);
 });

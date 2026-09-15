@@ -44,6 +44,33 @@ import { analystFps } from "./read-rate";
 export const ANALYST_CONCURRENCY = 2;
 
 /**
+ * Room for the answer, scaled to how much video the call is watching.
+ *
+ * A FIXED 16,000 FAILED, and the way it failed is the interesting part: the
+ * model reported MAX_TOKENS with 9,473 of the budget spent on THINKING before
+ * a single character of the answer was written. Thinking tokens count against
+ * maxOutputTokens, so the real budget for output was under 7,000 -- and a
+ * 13.7-minute clip's scan is a rally object and a shot object for every
+ * contact in the game, which is comfortably more than that.
+ *
+ * So: a fixed allowance for reasoning, plus room that grows with the segment.
+ * ~60 tokens per second of footage is generous against a measured rally
+ * (~40 tokens) and shot (~60 tokens) at the density a real game produces.
+ *
+ * This is nearly free. Output tokens are billed on what is GENERATED, not on
+ * the ceiling, so a budget that is too large costs nothing and a budget that
+ * is too small costs the entire call.
+ */
+export const THINKING_ALLOWANCE = 14_000;
+export const OUTPUT_TOKENS_PER_SECOND = 60;
+export const MAX_OUTPUT_TOKENS = 60_000;
+
+export function analystOutputBudget(segmentSeconds: number): number {
+  const seconds = Number.isFinite(segmentSeconds) && segmentSeconds > 0 ? segmentSeconds : 120;
+  return Math.min(MAX_OUTPUT_TOKENS, Math.round(THINKING_ALLOWANCE + seconds * OUTPUT_TOKENS_PER_SECOND));
+}
+
+/**
  * How closely the model looks at each frame of the SCAN.
  *
  * Gemini charges per frame by resolution tier, not by pixel count: roughly 258
@@ -556,7 +583,8 @@ export async function runAnalyst(opts: {
           endOffsetSeconds: segment.endSeconds,
           mediaResolution: resolution,
         },
-        maxOutputTokens: 16000,
+        maxOutputTokens: analystOutputBudget(segment.endSeconds - segment.startSeconds),
+        label: `scan segment ${i + 1}/${plan.length}`,
         onLog: opts.onLog,
       });
       opts.onLog?.(`analyst: segment ${i + 1}/${plan.length} read`);

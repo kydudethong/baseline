@@ -139,7 +139,9 @@ export async function buildPracticePlan(opts: {
       model: opts.model,
       prompt: prompt(opts.analyst, opts.drills),
       schema: SCHEMA,
-      maxOutputTokens: 4000,
+      // 4,000 could not have worked: a single measured run spent 9,473 tokens
+      // thinking before writing anything, and thinking counts against this.
+      maxOutputTokens: 20_000,
     });
 
     const valid = new Set(opts.drills.map((d) => d.slug));

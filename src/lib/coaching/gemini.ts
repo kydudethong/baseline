@@ -246,7 +246,9 @@ async function callGemini(
   model: string,
   body: Record<string, unknown>,
   onLog?: (line: string) => void,
-  onUsage?: (usage: UsageInfo) => void
+  onUsage?: (usage: UsageInfo) => void,
+  /** Which pass this is, so a failure names itself. */
+  label?: string
 ): Promise<string> {
   let delay = 5000;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -310,7 +312,9 @@ async function callGemini(
       // caller sees is half a JSON object starting with "{".
       if (finish === "MAX_TOKENS") {
         throw new GeminiError(
-          `${model} hit its output limit before finishing the answer`
+          // NAMED, because "raise maxOutputTokens for this call" is useless
+          // advice when the reader cannot tell which of five calls it was.
+          `${label ? `${label}: ` : ""}${model} hit its output limit before finishing the answer`
           + (json.usageMetadata?.thoughtsTokenCount
             ? ` — ${json.usageMetadata.thoughtsTokenCount} of the budget went on thinking`
             : "")
@@ -413,6 +417,8 @@ export async function generateJSON<T>(opts: {
   schema: Record<string, unknown>;
   maxOutputTokens?: number;
   video?: VideoConfig;
+  /** Names this call in any error it raises ("scan segment 2/4", "technique burst 3"). */
+  label?: string;
   onLog?: (line: string) => void;
   onUsage?: (usage: UsageInfo) => void;
 }): Promise<T> {
@@ -433,7 +439,7 @@ export async function generateJSON<T>(opts: {
 
   // The retry, quota and 404 handling all live in callGemini; duplicating it
   // here is how the two copies drift.
-  const text = await callGemini(opts.model, body, opts.onLog, opts.onUsage);
+  const text = await callGemini(opts.model, body, opts.onLog, opts.onUsage, opts.label);
   try {
     return JSON.parse(text) as T;
   } catch {
