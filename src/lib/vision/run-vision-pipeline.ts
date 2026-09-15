@@ -13,6 +13,7 @@ import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
 import { smoothPoseFrames } from "./pose-smooth";
 import { gateImplausibleLimbs } from "./pose-limbs";
 import { assignRoles, roleNameMap } from "./player-roles";
+import { LoadSampler, describeLoad } from "@/lib/analysis/cpu-load";
 import {
   majoritySide, partnerGap, partnerOf, zoneBreakdown,
   type PlayerPositions, type PlayerPositioning, type PartnerGapResult,
@@ -162,7 +163,14 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // a local one, so the breakdown is logged either way -- it just starts at
   // the CV work rather than at the download.
   const timer = input.timer ?? new StageTimer();
+  // Load is attributed to the stage that just ENDED, not the one starting:
+  // samples taken while detection ran belong to detection, and they are only
+  // complete at the moment the next stage begins.
+  const loadSampler = new LoadSampler();
+  loadSampler.start();
   const stage = (name: AnalysisStage, message: string) => {
+    const previous = describeLoad(loadSampler.take());
+    if (previous) log(`  ${previous}`);
     timer.mark(name);
     log(message);
     input.onProgress?.(name, message);
@@ -727,6 +735,13 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     shotsClassified: shots.filter((s) => s.type !== "unknown").length,
     knownLimitations,
   };
+
+  // The last stage's own numbers, which nothing else would ever report -- the
+  // sampler is read when the NEXT stage starts and there is no stage after
+  // the overlay.
+  const finalLoad = describeLoad(loadSampler.take());
+  if (finalLoad) log(`  ${finalLoad}`);
+  loadSampler.stop();
 
   return {
     providerName: provider.name,
