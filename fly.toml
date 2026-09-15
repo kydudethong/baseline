@@ -53,7 +53,12 @@ primary_region = "sjc"
   # and the trail is how a still frame shows a swing as an arc.
   OVERLAY_CRF = "20"
   OVERLAY_SHARPEN = "0.6"
-  OVERLAY_POSE_TRAIL = "3"
+  OVERLAY_POSE_TRAIL = "0"
+  # Court and skeleton line weights, as multipliers. Thin on purpose: every
+  # pixel of drawn line is a pixel not spent on the ball, and court markings
+  # do not move and do not need finding. Raise either for a human reader.
+  OVERLAY_COURT_WEIGHT = "1.0"
+  OVERLAY_SKELETON_WEIGHT = "1.0"
 
 [http_service]
   internal_port = 3000

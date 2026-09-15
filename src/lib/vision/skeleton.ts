@@ -94,9 +94,17 @@ export function visibleBones(
   // the same check one layer up, because the still-frame overlay and the video
   // overlay both read pose data that may have been stored before that fix.
   const inFrame = (v: number) => v >= -0.02 && v <= 1.02;
+  // (0, 0) is a SENTINEL, not a location: YOLO returns the origin for a
+  // keypoint it did not place, and the origin is perfectly in-frame, so the
+  // bounds test above sails straight past it. That is the one that showed --
+  // an undetected eye became a point in the top-left corner and the bone to
+  // the nose drew a line across the picture. A real joint at the exact corner
+  // pixel does not happen in footage of a court.
+  const atOrigin = (x: number, y: number) => Math.abs(x) < 1e-4 && Math.abs(y) < 1e-4;
   const ok = (k: KeypointLike | undefined): k is KeypointLike =>
     !!k && k.xNorm !== null && k.yNorm !== null
     && inFrame(k.xNorm) && inFrame(k.yNorm)
+    && !atOrigin(k.xNorm, k.yNorm)
     && (k.confidence ?? 0) >= minConfidence;
 
   const out: Array<{ from: [number, number]; to: [number, number]; group: LimbGroup }> = [];

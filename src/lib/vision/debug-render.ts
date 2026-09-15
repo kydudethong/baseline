@@ -115,6 +115,8 @@ export function buildOverlayData(input: DebugRenderInput): unknown {
           // Same frame check as visibleBones, for the same reason: a joint the
           // model placed outside the picture is a dot in the corner.
           .filter((k) => k.xNorm! >= -0.02 && k.xNorm! <= 1.02 && k.yNorm! >= -0.02 && k.yNorm! <= 1.02)
+          // And not the origin, which YOLO uses to mean "not placed".
+          .filter((k) => !(Math.abs(k.xNorm!) < 1e-4 && Math.abs(k.yNorm!) < 1e-4))
           .map((k) => [Math.round(k.xNorm! * 10000) / 10000, Math.round(k.yNorm! * 10000) / 10000]),
       })),
       paddles: (input.paddles ?? []).map((p) => ({

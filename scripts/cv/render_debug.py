@@ -229,11 +229,33 @@ def main() -> int:
     # the body just was.
     #
     # OVERLAY_POSE_TRAIL=0 turns it off and leaves the single figure.
-    pose_trail = max(0, int(os.environ.get("OVERLAY_POSE_TRAIL", "3")))
+    # OFF BY DEFAULT NOW, and the reason is who the audience is.
+    #
+    # The trail is genuinely better to LOOK at -- a swing is an arc and one
+    # frozen figure cannot show an arc. But the primary reader of this video is
+    # the coaching model, and three ghost skeletons behind every player is
+    # three times the drawn line competing with the thing hardest to see in the
+    # frame: the ball. OVERLAY_POSE_TRAIL=3 puts it back for a human.
+    pose_trail = max(0, int(os.environ.get("OVERLAY_POSE_TRAIL", "0")))
 
     # Unsharp mask strength. 0.6 is a visible lift on a small object without
     # the halo that starts to show around 1.0 on a high-contrast edge.
     sharpen_amount = max(0.0, float(os.environ.get("OVERLAY_SHARPEN", "0.6")))
+
+    # LINE WEIGHTS, and the argument that set them.
+    #
+    # The court lines were thickened deliberately once, because a 2px stroke on
+    # a blue court is exactly what H.264 smears into the surface underneath.
+    # That reasoning was about a PERSON reading the overlay. The model reading
+    # it has the opposite problem: every pixel of drawn line is a pixel not
+    # spent on the ball, which is a dozen pixels wide and the single hardest
+    # thing in the frame to see. Court markings do not move and do not need to
+    # be found; the ball does and does.
+    #
+    # So: thin enough to stay legible, thin enough to stop shouting. Both are
+    # multipliers, so either audience can be favoured without touching code.
+    court_weight = max(0.1, float(os.environ.get("OVERLAY_COURT_WEIGHT", "1.0")))
+    skel_weight = max(0.1, float(os.environ.get("OVERLAY_SKELETON_WEIGHT", "1.0")))
     trail_span = pose_hold + (typical_gap or 0.1) * pose_trail
     frames_with_skeletons = 0
     if poses:
@@ -304,7 +326,7 @@ def main() -> int:
             # the paint are close in luminance. It also has to stay readable
             # when the model is shown the frame at reduced resolution. 4px
             # survives both; the cost is a few pixels of the court it covers.
-            draw_poly(img, corners, C_COURT, max(3, int(4 * scale)))
+            draw_poly(img, corners, C_COURT, max(1, int(2 * scale * court_weight)))
         if ball_gate:
             # Where a ball of THIS court can be, including its airspace.
             draw_poly(img, ball_gate, (90, 90, 110), max(1, int(scale)))
@@ -326,21 +348,21 @@ def main() -> int:
             # what carried the meaning ("a ball in here cannot be assigned to a
             # side"), and the tape, base and verticals already draw that shape.
             cv2.polylines(img, [np.array([tl, tc, tr], np.int32).reshape(-1, 1, 2)],
-                          False, C_NET, max(3, int(3 * scale)), cv2.LINE_AA)
+                          False, C_NET, max(1, int(2 * scale * court_weight)), cv2.LINE_AA)
             cv2.line(img, tuple(np.int32(bl)), tuple(np.int32(br)), C_NET,
-                     max(3, int(3 * scale)), cv2.LINE_AA)
+                     max(1, int(2 * scale * court_weight)), cv2.LINE_AA)
             # The verticals stay a touch thinner than the tape and the base:
             # they are the SHAPE of the band rather than a line on the court,
             # and drawing all three at one weight made the net read as a solid
             # box sitting on the surface.
             for a_, b_ in ((bl, tl), (br, tr)):
                 cv2.line(img, tuple(np.int32(a_)), tuple(np.int32(b_)), C_NET,
-                         max(2, int(2 * scale)), cv2.LINE_AA)
+                         max(1, int(1 * scale * court_weight)), cv2.LINE_AA)
             cv2.putText(img, "NET", (int(tl[0]) + 6, int(tl[1]) - 8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5 * scale, C_NET, 1, cv2.LINE_AA)
         elif net:
             cv2.line(img, tuple(np.int32(net[0])), tuple(np.int32(net[1])),
-                     C_NET, max(4, int(4 * scale)), cv2.LINE_AA)
+                     C_NET, max(1, int(2 * scale * court_weight)), cv2.LINE_AA)
             cv2.putText(img, "NET", (int(net[0][0]) + 6, int(net[0][1]) - 8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5 * scale, C_NET, 1, cv2.LINE_AA)
 
@@ -423,7 +445,7 @@ def main() -> int:
                     col = limb_bgr.get(group, (200, 200, 200))
                     dim = tuple(int(c * fade) for c in col)
                     cv2.line(img, (int(x1 * w), int(y1 * h)), (int(x2 * w), int(y2 * h)),
-                             dim, max(1, int(2 * scale)), cv2.LINE_AA)
+                             dim, max(1, int(1.5 * scale * skel_weight)), cv2.LINE_AA)
             for (x1, y1, x2, y2, group) in current.get("bones", []):
                 col = limb_bgr.get(group, (200, 200, 200))
                 a = (int(x1 * w), int(y1 * h))
@@ -433,13 +455,17 @@ def main() -> int:
                 # after H.264, is the exact thing compression smears into the
                 # surface underneath. An outline gives every limb an edge it
                 # keeps whatever it is drawn over.
-                thick = int((4 if group.startswith("arm") else 3) * scale)
-                cv2.line(img, a, b, (12, 12, 12), max(2, thick + 2), cv2.LINE_AA)
-                cv2.line(img, a, b, col, max(1, thick), cv2.LINE_AA)
+                thick = max(1, int((2 if group.startswith("arm") else 1.5) * scale * skel_weight))
+                # A one-pixel dark edge rather than a two-pixel one. Enough to
+                # keep a thin line off a same-coloured shirt, not enough to
+                # double the skeleton's visual weight.
+                cv2.line(img, a, b, (12, 12, 12), thick + 1, cv2.LINE_AA)
+                cv2.line(img, a, b, col, thick, cv2.LINE_AA)
             for (jx, jy) in current.get("joints", []):
                 c = (int(jx * w), int(jy * h))
-                cv2.circle(img, c, max(3, int(3.5 * scale)), (12, 12, 12), -1, cv2.LINE_AA)
-                cv2.circle(img, c, max(2, int(2.5 * scale)), (255, 255, 255), -1, cv2.LINE_AA)
+                r = max(1, int(1.6 * scale * skel_weight))
+                cv2.circle(img, c, r + 1, (12, 12, 12), -1, cv2.LINE_AA)
+                cv2.circle(img, c, r, (255, 255, 255), -1, cv2.LINE_AA)
 
         # Paddle boxes, drawn wherever the model saw one within a frame or two.
         # Drawn rather than only counted on purpose: a paddle detector that is

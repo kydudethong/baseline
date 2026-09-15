@@ -163,6 +163,75 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     initial?.court?.quadKind ?? "full"
   );
   const [videoReady, setVideoReady] = useState(false);
+
+  // ZOOM AND PAN, for the two clicks this screen exists to collect.
+  //
+  // The far pair of players are a couple of hundred pixels tall in a 1080p
+  // frame, shown in a box a few hundred CSS pixels wide -- so "click the one
+  // that is you" can come down to a target the size of a fingernail, and the
+  // far court corners are worse because they sit on a line a pixel or two
+  // wide. Getting those right is the whole job of this screen, and everything
+  // downstream is built on them.
+  //
+  // Implemented as a CSS transform on the canvas rather than as a redraw at a
+  // different scale. toImage() already maps a cursor position through
+  // getBoundingClientRect(), which reports the TRANSFORMED box, so every hit
+  // test and drag keeps working with no arithmetic changed -- and the grab
+  // radius, derived from the same ratio, shrinks with the zoom exactly as it
+  // should.
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  // Panning has to be a MODE rather than a drag-on-empty-space, because a
+  // drag on empty space already means something here: it places a corner or a
+  // player. Guessing between them would make both feel unreliable.
+  const [panMode, setPanMode] = useState(false);
+  const panFrom = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  // Mirrored in state purely so the cursor can change: a ref cannot be read
+  // during render, and "grab" vs "grabbing" is the only feedback that the
+  // drag was picked up.
+  const [panning, setPanning] = useState(false);
+  const frameBoxRef = useRef<HTMLDivElement | null>(null);
+
+  const MAX_ZOOM = 6;
+
+  /** Keeps the frame from being dragged off its own window. */
+  const clampPan = useCallback((p: { x: number; y: number }, z: number) => {
+    const box = frameBoxRef.current;
+    if (!box) return p;
+    const w = box.clientWidth, h = box.clientHeight;
+    // At zoom z the canvas is z times the box, so the visible origin may move
+    // between 0 and -(z-1) * size. Anything else shows background.
+    const minX = Math.min(0, w - w * z);
+    const minY = Math.min(0, h - h * z);
+    return { x: Math.max(minX, Math.min(0, p.x)), y: Math.max(minY, Math.min(0, p.y)) };
+  }, []);
+
+  /** Zoom about a point in BOX coordinates, so the pixel under the cursor stays put. */
+  const zoomAbout = useCallback((nextZoom: number, boxX: number, boxY: number) => {
+    setZoom((z) => {
+      const nz = Math.max(1, Math.min(MAX_ZOOM, nextZoom));
+      setPan((p) => {
+        // The image point under the cursor before the zoom must be under it
+        // after: solve (boxX - p.x) / z === (boxX - p'.x) / nz.
+        const next = {
+          x: boxX - ((boxX - p.x) * nz) / z,
+          y: boxY - ((boxY - p.y) * nz) / z,
+        };
+        return nz === 1 ? { x: 0, y: 0 } : clampPan(next, nz);
+      });
+      return nz;
+    });
+  }, [clampPan]);
+
+  const onWheel = useCallback((ev: React.WheelEvent<HTMLDivElement>) => {
+    const box = frameBoxRef.current;
+    if (!box) return;
+    ev.preventDefault();
+    const r = box.getBoundingClientRect();
+    zoomAbout(zoom * (ev.deltaY < 0 ? 1.15 : 1 / 1.15), ev.clientX - r.left, ev.clientY - r.top);
+  }, [zoom, zoomAbout]);
+
+  const resetView = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }); setPanMode(false); }, []);
   // The correction panel. Closed by default: the common case is that the
   // detection is right and the whole job is one click, so the tools for when
   // it is wrong should be one click away rather than always on screen.
@@ -624,6 +693,14 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   };
 
   const onDown = (ev: React.MouseEvent<HTMLCanvasElement>) => {
+    // Pan mode, or a shift-drag, moves the view and places nothing. Shift is
+    // there because once you are zoomed in, reaching for a toolbar button
+    // between every adjustment is the slow part.
+    if (panMode || ev.shiftKey) {
+      panFrom.current = { x: ev.clientX, y: ev.clientY, panX: pan.x, panY: pan.y };
+      setPanning(true);
+      return;
+    }
     const p = toImage(ev);
     const canvas = canvasRef.current!;
     const scale = canvas.width / canvas.getBoundingClientRect().width;
@@ -647,10 +724,20 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   };
 
   const onMove = (ev: React.MouseEvent<HTMLCanvasElement>) => {
+    const from = panFrom.current;
+    if (from) {
+      setPan(clampPan(
+        { x: from.panX + (ev.clientX - from.x), y: from.panY + (ev.clientY - from.y) },
+        zoom
+      ));
+      return;
+    }
     if (dragging === null) return;
     const p = toImage(ev);
     setCorners(corners.map((c, i) => (i === dragging ? p : c)));
   };
+
+  const endPointer = () => { panFrom.current = null; setPanning(false); setDragging(null); };
 
   const seek = (t: number) => {
     const v = videoRef.current;
@@ -784,20 +871,75 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       />
 
       {/* --- the frame ------------------------------------------------- */}
-      <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", background: "#0b0f14", border: "1px solid var(--line)" }}>
+      <div
+        ref={frameBoxRef}
+        onWheel={onWheel}
+        style={{ position: "relative", borderRadius: 12, overflow: "hidden", background: "#0b0f14", border: "1px solid var(--line)" }}
+      >
         <canvas
           ref={canvasRef}
           onMouseDown={onDown}
           onMouseMove={onMove}
-          onMouseUp={() => setDragging(null)}
-          onMouseLeave={() => setDragging(null)}
+          onMouseUp={endPointer}
+          onMouseLeave={endPointer}
           style={{
             width: "100%", display: "block",
-            cursor: stage === "line-colour" ? "cell" : stage === "court" ? "crosshair" : "pointer",
+            // transform-origin at the corner so pan is in plain CSS pixels and
+            // the arithmetic in zoomAbout stays readable.
+            transformOrigin: "0 0",
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            cursor: panMode
+              ? (panning ? "grabbing" : "grab")
+              : stage === "line-colour" ? "cell" : stage === "court" ? "crosshair" : "pointer",
             opacity: videoReady ? 1 : 0,
             transition: "opacity .2s ease",
           }}
         />
+        {/* Zoom controls, over the frame rather than under it: at 4x the thing
+            you are aiming at is often near an edge, and a toolbar below the
+            box puts the cursor a long way from it. */}
+        {videoReady ? (
+          <div
+            className="row g1"
+            style={{
+              position: "absolute", top: 8, right: 8, gap: 4,
+              background: "rgba(10,15,22,.72)", backdropFilter: "blur(4px)",
+              borderRadius: 8, padding: 4, border: "1px solid rgba(255,255,255,.12)",
+            }}
+          >
+            <button
+              type="button" className="btn btn-ghost btn-sm" title="Zoom out"
+              style={{ color: "#dbe6f2", minWidth: 30 }}
+              onClick={() => {
+                const b = frameBoxRef.current;
+                zoomAbout(zoom / 1.4, (b?.clientWidth ?? 0) / 2, (b?.clientHeight ?? 0) / 2);
+              }}
+            >−</button>
+            <span className="num sm" style={{ color: "#dbe6f2", minWidth: 40, textAlign: "center", alignSelf: "center" }}>
+              {zoom.toFixed(1)}×
+            </span>
+            <button
+              type="button" className="btn btn-ghost btn-sm" title="Zoom in"
+              style={{ color: "#dbe6f2", minWidth: 30 }}
+              onClick={() => {
+                const b = frameBoxRef.current;
+                zoomAbout(zoom * 1.4, (b?.clientWidth ?? 0) / 2, (b?.clientHeight ?? 0) / 2);
+              }}
+            >+</button>
+            <button
+              type="button" className="btn btn-ghost btn-sm" title="Drag to move the frame (or hold Shift)"
+              aria-pressed={panMode}
+              style={{ color: panMode ? "#0b0f14" : "#dbe6f2", background: panMode ? "#dbe6f2" : undefined }}
+              onClick={() => setPanMode((v) => !v)}
+            >Pan</button>
+            <button
+              type="button" className="btn btn-ghost btn-sm" title="Fit the whole frame"
+              style={{ color: "#dbe6f2" }}
+              disabled={zoom === 1 && pan.x === 0 && pan.y === 0}
+              onClick={resetView}
+            >Fit</button>
+          </div>
+        ) : null}
         {!videoReady ? (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#8ba0b8", fontSize: 14 }}>
             Loading the video…

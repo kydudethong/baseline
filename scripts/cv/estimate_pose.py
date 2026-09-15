@@ -145,7 +145,22 @@ def main():
                         # the model did not see, so every consumer already
                         # handles it. A small margin allows the genuine case of
                         # a joint right at the edge.
-                        if nx is None or ny is None or not (-0.02 <= nx <= 1.02 and -0.02 <= ny <= 1.02):
+                        # (0, 0) IS A SENTINEL, NOT A LOCATION.
+                        #
+                        # This is the one the bounds check below misses, and it
+                        # is the one that shows: YOLO returns the origin for a
+                        # keypoint it did not place, and the origin is a
+                        # perfectly in-frame coordinate. So an undetected eye
+                        # became a real point in the top-left corner of the
+                        # picture, and the bone from it to the nose drew a line
+                        # across the whole frame. Nothing about "is it inside
+                        # the image" catches that, because it is.
+                        #
+                        # A real nose at the exact top-left pixel does not
+                        # happen in footage of a court.
+                        at_origin = px <= 0.5 and py <= 0.5
+                        if (nx is None or ny is None or at_origin
+                                or not (-0.02 <= nx <= 1.02 and -0.02 <= ny <= 1.02)):
                             nx, ny, kconf = None, None, 0.0
                         keypoints.append({
                             "name": name,
