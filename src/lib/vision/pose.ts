@@ -83,6 +83,7 @@ export async function estimatePosesForFrames(
   // different fix and the run said nothing about which it was.
   let framesMissing = 0;
   let framesErrored = 0;
+  let firstError = "";
   let peopleSeen = 0;
   let unmatchedNoPoint = 0;
   let unmatchedLowOverlap = 0;
@@ -91,7 +92,11 @@ export async function estimatePosesForFrames(
   for (const frame of frames) {
     const raw = results_by_path.get(frame.path);
     if (!raw) { framesMissing++; continue; }
-    if (raw.error) { framesErrored++; continue; }
+    if (raw.error) {
+      framesErrored++;
+      if (!firstError) firstError = String(raw.error);
+      continue;
+    }
 
     for (const person of raw.people) {
       peopleSeen++;
@@ -139,5 +144,26 @@ export async function estimatePosesForFrames(
     + (framesMissing ? `; ${framesMissing} frame(s) missing from the pose output` : "")
     + (framesErrored ? `; ${framesErrored} frame(s) the pose model failed on` : "")
   );
+
+  // EMPTY IS A FAILURE, NOT A RESULT -- and this is the line whose absence
+  // cost a week.
+  //
+  // estimate_pose.py reports a bad batch as DATA: one {"error": ...} per
+  // frame, exit code 0. So a missing weights file, a torch that will not load,
+  // an out-of-memory kill mid-batch -- every one of them arrived here as a
+  // perfectly successful run that happened to find nobody, and travelled all
+  // the way to a finished analysis showing "Pose rows: 0" with nothing
+  // anywhere saying why. The overlay had no skeletons on it and the honest
+  // conclusion from outside was that the DRAWING was broken.
+  //
+  // So: if the model errored on every frame it was given, that is thrown. The
+  // caller turns it into a limitation the run reports, carrying the Python
+  // error itself rather than a count.
+  if (frames.length > 0 && framesErrored === frames.length) {
+    throw new Error(
+      `the pose model failed on all ${frames.length} frame(s): ${firstError || "no error text returned"}`
+    );
+  }
+
   return output;
 }

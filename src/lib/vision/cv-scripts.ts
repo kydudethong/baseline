@@ -4,6 +4,7 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import { promisify } from "node:util";
 import path from "node:path";
+import fs from "node:fs";
 
 const execFileAsync = promisify(execFile);
 
@@ -231,6 +232,20 @@ export interface RawPoseResult {
 /** Runs pose estimation on one or more full frames in a single Python process (model loaded once). */
 export async function estimatePoseViaPython(imagePaths: string[]): Promise<RawPoseResult[]> {
   if (imagePaths.length === 0) return [];
+  // The weights, checked BEFORE the model is asked for them.
+  //
+  // ultralytics treats a path it cannot find as a model NAME and goes to
+  // GitHub for it. On a laptop that download succeeds and nobody notices the
+  // file was missing; in a container with no egress it fails, and it fails
+  // from inside the batch loop, which reports it as per-frame data rather than
+  // as a crash. The result is an analysis that finishes with no pose data and
+  // no explanation. A missing file should say so, here, in one line.
+  if (!fs.existsSync(POSE_MODEL_PATH)) {
+    throw new PythonCvError(
+      `the pose model is not at ${POSE_MODEL_PATH}. `
+      + "Nothing will download it at runtime -- add models/yolov8n-pose.pt to the image."
+    );
+  }
   // streamStderr, like the ball and player passes. This is the longest stage in
   // the pipeline on a full-length clip and it printed nothing at all, so from
   // outside it was indistinguishable from a hang -- which is precisely the

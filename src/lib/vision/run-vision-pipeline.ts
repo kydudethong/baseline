@@ -456,9 +456,21 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   stage("pose", "estimating pose…");
   try {
     const { estimatePosesForFrames } = await import("./pose");
-    poses = await estimatePosesForFrames(input.frames, tracks);
+    poses = await estimatePosesForFrames(input.frames, tracks, undefined, log);
   } catch (err) {
-    knownLimitations.push(`Pose estimation failed: ${(err as Error).message}`);
+    knownLimitations.push(`Pose estimation failed: ${describeError(err)}`);
+    log(`pose: FAILED — ${describeError(err)}`);
+  }
+  // Said whether it threw or not. An empty pose pass is the one failure in
+  // this pipeline that produces a complete, plausible-looking analysis: the
+  // boxes are right, the court is right, the overlay renders, and the only
+  // symptom is a stick figure that never appears. Naming it here means the
+  // run reports it instead of the reader having to notice an absence.
+  if (poses.length === 0 && input.frames.length > 0) {
+    knownLimitations.push(
+      "No pose data: the skeletons, and every measurement taken from them, are missing from this run."
+    );
+    log(`pose: 0 pose frames from ${input.frames.length} sampled frame(s) — no skeletons will be drawn`);
   }
 
   const movement = tracks.map((t) =>

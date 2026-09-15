@@ -12,7 +12,8 @@
     "verify-models": "bash scripts/verify-models.sh",
     "sleep": "bash scripts/sleep.sh",
     "wake": "bash scripts/wake.sh",
-    "share": "bash scripts/share.sh"
+    "share": "bash scripts/share.sh",
+    "verify-pose": "bash scripts/verify-pose.sh"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1126.0",
