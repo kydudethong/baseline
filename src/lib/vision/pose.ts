@@ -57,6 +57,42 @@ function nearestPoint(track: PlayerTrack, t: number, toleranceS: number) {
  * two outputs by geometry. A pose with no sufficiently-overlapping track
  * (IoU < 0.2) is dropped rather than guessing which player it belongs to.
  */
+/**
+ * The most pose frames one run will pay for.
+ *
+ * THIS CAP IS NEW BECAUSE THE STAGE IS NEW. Pose has been in the pipeline for
+ * weeks and has not actually RUN on the server for any of them: an ultralytics
+ * warning on stdout made the caller's JSON.parse throw, the whole pass returned
+ * nothing, and it did so instantly. Fixing that turned a stage that cost
+ * nothing into a stage that does the real work -- and the real work on a
+ * 13.7-minute clip is 4,121 frames of CPU inference on a box with no
+ * accelerator, which is somewhere between seven and thirty minutes.
+ *
+ * So: a bound, and an honest one. Past this many frames the clip is SAMPLED --
+ * an even spread end to end rather than the first N, so a long game gets
+ * skeletons throughout rather than for its first four minutes and nothing
+ * after. The overlay's skeletons get sparser on a long clip, and that is the
+ * trade: a sparse figure on a run that finishes beats a dense one on a run
+ * that dies at minute twelve.
+ *
+ * POSE_MAX_FRAMES tunes it. 0 means no cap, for a box that can afford it.
+ */
+export const POSE_MAX_FRAMES = 1800;
+
+export function poseMaxFrames(): number {
+  const v = Number(process.env.POSE_MAX_FRAMES);
+  return Number.isFinite(v) && v >= 0 ? v : POSE_MAX_FRAMES;
+}
+
+/** An even spread of n items across a list, first and last included. */
+function spread<T>(items: T[], n: number): T[] {
+  if (n <= 0 || items.length <= n) return items;
+  if (n === 1) return [items[0]];
+  const out: T[] = [];
+  for (let i = 0; i < n; i++) out.push(items[Math.round((i * (items.length - 1)) / (n - 1))]);
+  return [...new Set(out)];
+}
+
 export async function estimatePosesForFrames(
   frames: Array<{ path: string; timestampSeconds: number }>,
   tracks: PlayerTrack[],
@@ -71,6 +107,20 @@ export async function estimatePosesForFrames(
   onLog?: (line: string) => void
 ): Promise<PlayerPoseFrame[]> {
   if (frames.length === 0) return [];
+
+  const cap = poseMaxFrames();
+  const requested = frames.length;
+  const toRead = cap > 0 ? spread([...frames], cap) : frames;
+  if (toRead.length < requested) {
+    onLog?.(
+      `pose: ${requested} sampled frame(s) is past the ${cap}-frame budget, so ${toRead.length} are read, `
+      + `spread across the whole clip (about one every ${
+        ((frames[frames.length - 1].timestampSeconds - frames[0].timestampSeconds) / toRead.length).toFixed(2)
+      }s). Skeletons will be sparser than on a short clip.`
+    );
+  }
+  frames = toRead;
+
   const results = await estimatePoseViaPython(frames.map((f) => f.path));
 
   const results_by_path = new Map(results.map((r) => [r.imagePath, r]));

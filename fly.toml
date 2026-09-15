@@ -54,6 +54,15 @@ primary_region = "sjc"
   OVERLAY_CRF = "20"
   OVERLAY_SHARPEN = "0.6"
   OVERLAY_POSE_TRAIL = "0"
+
+  # The most pose frames one run will pay for.
+  #
+  # Pose had never actually run on this box until the ultralytics-warning bug
+  # was fixed: the parse threw, the pass returned nothing, and it did so
+  # instantly. Now it does the real work -- and a 13.7-minute clip is 4,121
+  # frames of CPU inference on a machine with no accelerator. Past this many,
+  # the clip is sampled evenly end to end rather than read in full.
+  POSE_MAX_FRAMES = "1800"
   # Court and skeleton line weights, as multipliers. Thin on purpose: every
   # pixel of drawn line is a pixel not spent on the ball, and court markings
   # do not move and do not need finding. Raise either for a human reader.
