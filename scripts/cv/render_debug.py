@@ -216,6 +216,10 @@ def main() -> int:
     #
     # OVERLAY_POSE_TRAIL=0 turns it off and leaves the single figure.
     pose_trail = max(0, int(os.environ.get("OVERLAY_POSE_TRAIL", "3")))
+
+    # Unsharp mask strength. 0.6 is a visible lift on a small object without
+    # the halo that starts to show around 1.0 on a high-contrast edge.
+    sharpen_amount = max(0.0, float(os.environ.get("OVERLAY_SHARPEN", "0.6")))
     trail_span = pose_hold + (typical_gap or 0.1) * pose_trail
     frames_with_skeletons = 0
     if poses:
@@ -242,6 +246,26 @@ def main() -> int:
         # is the cheap half.
         if (frame_index - start_frame) % step != 0:
             continue
+
+        # SHARPEN THE FOOTAGE, before a single overlay line is drawn on it.
+        #
+        # Here rather than after, deliberately: the court lines and skeletons
+        # are already crisp synthetic edges and sharpening those only adds
+        # ringing. What needs the help is the small, fast, low-contrast thing
+        # in the footage itself -- the ball.
+        #
+        # Why it earns its milliseconds: the model does not see this frame at
+        # its own resolution. At high media resolution a frame costs ~258
+        # tokens, roughly one 768px tile, so every frame is resized down before
+        # anything looks at it. A ball a dozen pixels across survives that
+        # resize only if its edges are still strong, and H.264 spends its bits
+        # on the large moving regions -- players -- not on a dot.
+        #
+        # An unsharp mask restores exactly the edge energy both of those steps
+        # take away. OVERLAY_SHARPEN=0 turns it off.
+        if sharpen_amount > 0:
+            blurred = cv2.GaussianBlur(img, (0, 0), 1.2)
+            img = cv2.addWeighted(img, 1.0 + sharpen_amount, blurred, -sharpen_amount, 0)
 
         # PROGRESS, because this is the longest stage and it used to report
         # nothing at all until it finished. Two runs died in here and the only
@@ -276,10 +300,14 @@ def main() -> int:
             # band is seeing exactly where the crossing test declines to guess.
             bl, br = band["base"]
             tl, tc, tr = band["top"]
-            face = np.array([bl, tl, tc, tr, br], dtype=np.int32)
-            overlay = img.copy()
-            cv2.fillPoly(overlay, [face.reshape(-1, 1, 2)], C_NET)
-            cv2.addWeighted(overlay, 0.18, img, 0.82, 0, img)
+            # OUTLINE ONLY. This used to be a filled translucent slab, and the
+            # slab sat exactly over the net -- which is where the ball is at
+            # the single most important moment in a rally. A pickleball is on
+            # the order of ten pixels wide once the model has resized the frame
+            # to its own budget, and an 18% magenta wash over those ten pixels
+            # is a large fraction of the contrast they had. The band's SHAPE is
+            # what carried the meaning ("a ball in here cannot be assigned to a
+            # side"), and the tape, base and verticals already draw that shape.
             cv2.polylines(img, [np.array([tl, tc, tr], np.int32).reshape(-1, 1, 2)],
                           False, C_NET, max(3, int(3 * scale)), cv2.LINE_AA)
             cv2.line(img, tuple(np.int32(bl)), tuple(np.int32(br)), C_NET,

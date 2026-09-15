@@ -29,11 +29,11 @@ primary_region = "sjc"
   # place, because they are a CHOICE rather than a finding -- detail over
   # cheapness, continuity over round trips. The code defaults match them; these
   # lines exist so changing your mind is one file and one deploy.
-  ANALYST_FPS = "10"
+  ANALYST_FPS = "15"
   ANALYST_MEDIA_RESOLUTION = "high"
   # Raised from the 120s default so the CONTEXT WINDOW is the only thing that
-  # splits a clip. At 10fps and high resolution a second of video costs ~2,580
-  # tokens, so one call holds about 230 seconds — roughly 3 minutes 50. Clips
+  # splits a clip. At 15fps and high resolution a second of video costs ~3,870
+  # tokens, so one call holds about 155 seconds — roughly 2 minutes 35. Clips
   # under that are genuinely one pass; longer ones still split, and no setting
   # here can change that, because it is the size of the window.
   #
@@ -44,6 +44,16 @@ primary_region = "sjc"
   # invented ones. Set this to "120" to trade the continuity back for
   # timestamps that have never been caught drifting.
   ANALYST_MAX_SEGMENT_SECONDS = "900"
+
+  # The overlay encoder, tuned for the thing that is hardest to see in it.
+  #
+  # A pickleball is about a dozen pixels across at match distance, and it is
+  # the first thing both H.264 and the model's own frame resize throw away.
+  # CRF 20 keeps the bits, the unsharp mask restores the edge the resize takes,
+  # and the trail is how a still frame shows a swing as an arc.
+  OVERLAY_CRF = "20"
+  OVERLAY_SHARPEN = "0.6"
+  OVERLAY_POSE_TRAIL = "3"
 
 [http_service]
   internal_port = 3000

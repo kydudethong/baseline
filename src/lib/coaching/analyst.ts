@@ -39,13 +39,19 @@ import { SKILLS, COACHING_DIMENSIONS, type CoachingDimension } from "./types";
  * ten-frames-per-second rates across a whole match to read fifteen swings is
  * most of a $2.50 bill spent on footage where nothing is being judged.
  *
- * TEN, September 2026, by choice. Five was the compromise; ten is the side of
- * it where a swing is actually visible, so the scan sees the same mechanics
- * the burst pass does instead of only where things were. It doubles the
- * frames, and therefore the scan's share of the bill, and it halves how much
- * video fits in one call. ANALYST_FPS=5 puts the compromise back.
+ * FIFTEEN, September 2026, and the reason is the BALL rather than the swing.
+ *
+ * Ten was already enough to see a stroke. What ten is not enough for is a ball
+ * travelling thirty miles an hour: it crosses a large part of the court
+ * between samples, and the frames it does appear in are as likely as not the
+ * ones where it is a streak rather than a dot. Fifteen is half again as many
+ * chances to catch it sharp, and catching it is what makes a contact a
+ * contact.
+ *
+ * It costs half again as much, linearly, and it shortens how much video fits
+ * in one call to about two and a half minutes. ANALYST_FPS=10 steps back.
  */
-export const ANALYST_FPS = 10;
+export const ANALYST_FPS = 15;
 
 /**
  * Segment calls in flight at once.
