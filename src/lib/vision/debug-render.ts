@@ -181,8 +181,14 @@ export async function renderDebugVideo(input: DebugRenderInput): Promise<string 
     if (!fs.existsSync(outPath)) return null;
     return `/rally-debug/${debugVideoKey(input.analysisId)}`;
   } catch (err) {
-    input.onLog?.(`debug overlay not rendered: ${(err as Error).message.split("\n")[0]}`);
-    return null;
+    // The WHOLE message, not the first line.
+    //
+    // A Python traceback puts the useful part -- the exception and its text --
+    // at the END, and the first line is "Traceback (most recent call last):".
+    // So the one thing this logged about the stage that fails most often was
+    // reliably the least informative line available.
+    input.onLog?.(`debug overlay not rendered: ${(err as Error).message}`);
+    throw err;
   }
 }
 

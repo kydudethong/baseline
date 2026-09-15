@@ -663,6 +663,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // used -- after every fallback has been resolved, so it can never show a
   // court or a set of boundaries that lost.
   let debugVideoUrl: string | null = null;
+  let overlayFailure: string | null = null;
   if (debugRenderEnabled() && input.debugId) {
     stage("overlay", "rendering the annotated overlay — the coaching read is written from it…");
     // Roles from the positioning pass, which already knows which side of the
@@ -695,28 +696,38 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
       // Diagnostics must never be the thing that fails a run.
     }
 
-    debugVideoUrl = await renderDebugVideo({
-      roleNames,
-      videoPath: input.videoPath,
-      analysisId: input.debugId,
-      durationSeconds: input.videoDurationSeconds,
-      frameWidthPx: input.frameWidthPx,
-      frameHeightPx: input.frameHeightPx,
-      calibration: courtCalibration,
-      netLinePx,
-      netBandPx,
-      ballGatePx,
-      ballPoints: ballTrack.points,
-      crossings: netCrossings,
-      rallies: ralliesUsed,
-      tracks,
-      poses,
-      selfPlayerId,
-      onLog: (l) => log(`  ${l}`),
-    });
+    try {
+      debugVideoUrl = await renderDebugVideo({
+        roleNames,
+        videoPath: input.videoPath,
+        analysisId: input.debugId,
+        durationSeconds: input.videoDurationSeconds,
+        frameWidthPx: input.frameWidthPx,
+        frameHeightPx: input.frameHeightPx,
+        calibration: courtCalibration,
+        netLinePx,
+        netBandPx,
+        ballGatePx,
+        ballPoints: ballTrack.points,
+        crossings: netCrossings,
+        rallies: ralliesUsed,
+        tracks,
+        poses,
+        selfPlayerId,
+        onLog: (l) => log(`  ${l}`),
+      });
+    } catch (err) {
+      // RECORDED, not just logged. "This analysis has no annotated overlay —
+      // re-run the analysis to render it" is advice, and it is wrong advice
+      // when the render fails the same way every time. The reason belongs on
+      // the run, so the second attempt can say what the first one hit instead
+      // of offering the same suggestion again.
+      overlayFailure = describeError(err);
+      knownLimitations.push(`The annotated overlay could not be rendered: ${overlayFailure}`);
+    }
     log(debugVideoUrl
       ? `  annotated video: http://localhost:3000${debugVideoUrl}`
-      : "  no annotated video was produced");
+      : `  NO ANNOTATED VIDEO — the coaching read cannot run without one${overlayFailure ? `: ${overlayFailure}` : ""}`);
   }
 
   events.sort((a, b) => a.timestampSeconds - b.timestampSeconds);
