@@ -264,6 +264,26 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   // player. Guessing between them would make both feel unreliable.
   const [panMode, setPanMode] = useState(false);
   const panFrom = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  /**
+   * Live pointers, by id.
+   *
+   * POINTER EVENTS RATHER THAN MOUSE EVENTS, and this screen is the reason it
+   * matters more here than anywhere else in the app. A phone synthesises a
+   * click from a tap, so PLACING a corner worked -- but a browser claims a
+   * drag for scrolling long before the canvas sees it, so DRAGGING a corner to
+   * nudge it, which is the whole repair mechanism when the fit is slightly
+   * off, silently did nothing on a phone. One code path now covers mouse,
+   * touch and stylus.
+   *
+   * Two entries means a pinch, which is the only sensible way to zoom on a
+   * phone -- there is no wheel, and the far court corners are the exact thing
+   * you need to zoom in on.
+   */
+  const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
+  /** Distance and midpoint between two fingers when the pinch began. */
+  const pinchFrom = useRef<{ dist: number; zoom: number; midX: number; midY: number } | null>(null);
+  /** Where a press started, to tell a tap from a drag. */
+  const pressFrom = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   // Mirrored in state purely so the cursor can change: a ref cannot be read
   // during render, and "grab" vs "grabbing" is the only feedback that the
   // drag was picked up.
@@ -751,7 +771,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    * wanted for a court corner the camera did not capture, and what the
    * homography consumes without complaint.
    */
-  const toImage = (ev: React.MouseEvent<HTMLCanvasElement>) => {
+  const toImage = (ev: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current!;
     const video = videoRef.current;
     const r = canvas.getBoundingClientRect();
@@ -764,27 +784,26 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     };
   };
 
-  const onDown = (ev: React.MouseEvent<HTMLCanvasElement>) => {
-    // Pan mode, or a shift-drag, moves the view and places nothing. Shift is
-    // there because once you are zoomed in, reaching for a toolbar button
-    // between every adjustment is the slow part.
-    if (panMode || ev.shiftKey) {
-      panFrom.current = { x: ev.clientX, y: ev.clientY, panX: pan.x, panY: pan.y };
-      setPanning(true);
-      return;
-    }
-    const p = toImage(ev);
+  /**
+   * The intent of a press, decided once and acted on at release.
+   *
+   * SPLIT OUT ON PURPOSE. A mouse can place on press: a mouse press that turns
+   * into a drag is rare and undoable. A finger cannot -- every tap carries a
+   * few pixels of travel, so placing on press means a corner appears the
+   * instant you touch the screen to pan. A press only ARMS an action now, and
+   * a release that has not travelled far enough to be a drag commits it.
+   */
+  const placeAt = (client: { clientX: number; clientY: number }) => {
+    const p = toImage(client);
     const canvas = canvasRef.current!;
     const scale = canvas.width / canvas.getBoundingClientRect().width;
-    const grab = 16 * scale;
+    const grab = 30 * scale;
     if (stage === "court") {
-      const hit = corners.findIndex((c) => Math.hypot(c.x - p.x, c.y - p.y) < grab);
-      if (hit >= 0) { commit(); setDragging(hit); return; }
       if (corners.length < 4) { commit(); setCorners([...corners, p]); }
       return;
     }
     if (stage === "players") {
-      // Marking WHO IS ON COURT. A click on somebody already marked removes
+      // Marking WHO IS ON COURT. A tap on somebody already marked removes
       // them; empty court adds one. Nothing here says which is you.
       const hit = hitPlayer(players, p, grab * 2);
       commit();
@@ -799,7 +818,81 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     setPlayers(players.map((q, i) => ({ ...q, isSelf: i === hit ? !q.isSelf : false })));
   };
 
-  const onMove = (ev: React.MouseEvent<HTMLCanvasElement>) => {
+  const onDown = (ev: React.PointerEvent<HTMLCanvasElement>) => {
+    pointers.current.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    // The canvas keeps receiving this pointer after the finger leaves it, so a
+    // drag that runs off the edge finishes instead of sticking.
+    ev.currentTarget.setPointerCapture?.(ev.pointerId);
+
+    // Two fingers is a pinch, and a pinch is never a placement.
+    if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()];
+      const box = frameBoxRef.current?.getBoundingClientRect();
+      pinchFrom.current = {
+        dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+        zoom,
+        midX: (a.x + b.x) / 2 - (box?.left ?? 0),
+        midY: (a.y + b.y) / 2 - (box?.top ?? 0),
+      };
+      // Whatever the first finger armed, it is not happening now.
+      pressFrom.current = null;
+      panFrom.current = null;
+      setDragging(null);
+      return;
+    }
+    if (pointers.current.size > 2) return;
+
+    // Pan mode, or a shift-drag, moves the view and places nothing. Shift is
+    // there because once you are zoomed in, reaching for a toolbar button
+    // between every adjustment is the slow part.
+    if (panMode || ev.shiftKey) {
+      panFrom.current = { x: ev.clientX, y: ev.clientY, panX: pan.x, panY: pan.y };
+      setPanning(true);
+      return;
+    }
+
+    pressFrom.current = { x: ev.clientX, y: ev.clientY, moved: false };
+
+    // Grabbing an existing corner is the one thing that acts on press: it is a
+    // drag by definition, and waiting for release would mean the corner never
+    // followed the finger.
+    if (stage === "court") {
+      const p = toImage(ev);
+      const canvas = canvasRef.current!;
+      const scale = canvas.width / canvas.getBoundingClientRect().width;
+      // A FATTER TARGET FOR A FINGER. 16 canvas-pixels is a comfortable mouse
+      // target and about a third of a fingertip, and a corner you cannot
+      // reliably grab is a corner you end up adding a fifth of.
+      const grab = (ev.pointerType === "mouse" ? 16 : 30) * scale;
+      const hit = corners.findIndex((c) => Math.hypot(c.x - p.x, c.y - p.y) < grab);
+      if (hit >= 0) { commit(); setDragging(hit); }
+    }
+  };
+
+  /** Below this much travel, a press is a tap rather than a drag. */
+  const TAP_SLOP_PX = 8;
+
+  const onMove = (ev: React.PointerEvent<HTMLCanvasElement>) => {
+    if (pointers.current.has(ev.pointerId)) {
+      pointers.current.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    }
+
+    // Pinch: the gap between the fingers sets the zoom and the midpoint stays
+    // under them, so the picture moves with the hands rather than jumping.
+    const pinch = pinchFrom.current;
+    if (pinch && pointers.current.size >= 2) {
+      const [a, b] = [...pointers.current.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      zoomAbout(pinch.zoom * (dist / pinch.dist), pinch.midX, pinch.midY);
+      return;
+    }
+
+    const press = pressFrom.current;
+    if (press && !press.moved
+        && Math.hypot(ev.clientX - press.x, ev.clientY - press.y) > TAP_SLOP_PX) {
+      press.moved = true;
+    }
+
     const from = panFrom.current;
     if (from) {
       setPan(clampPan(
@@ -813,7 +906,32 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     setCorners(corners.map((c, i) => (i === dragging ? p : c)));
   };
 
-  const endPointer = () => { panFrom.current = null; setPanning(false); setDragging(null); };
+  const onUp = (ev: React.PointerEvent<HTMLCanvasElement>) => {
+    pointers.current.delete(ev.pointerId);
+    ev.currentTarget.releasePointerCapture?.(ev.pointerId);
+    if (pointers.current.size < 2) pinchFrom.current = null;
+
+    const press = pressFrom.current;
+    pressFrom.current = null;
+    const wasPanning = panFrom.current !== null;
+    // A press that armed a placement and did not travel is a tap, and a tap
+    // places. One that dragged a corner has already done its work.
+    if (press && !press.moved && dragging === null && !wasPanning) placeAt(ev);
+
+    panFrom.current = null;
+    setPanning(false);
+    setDragging(null);
+  };
+
+  /** The system took the gesture (a swipe from the edge, a call). Drop it. */
+  const onCancel = (ev: React.PointerEvent<HTMLCanvasElement>) => {
+    pointers.current.delete(ev.pointerId);
+    pinchFrom.current = null;
+    pressFrom.current = null;
+    panFrom.current = null;
+    setPanning(false);
+    setDragging(null);
+  };
 
   const seek = (t: number) => {
     const v = videoRef.current;
@@ -970,14 +1088,19 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       >
         <canvas
           ref={canvasRef}
-          onMouseDown={onDown}
-          onMouseMove={onMove}
-          onMouseUp={endPointer}
-          onMouseLeave={endPointer}
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={onCancel}
           style={{
             width: "100%", display: "block",
             // transform-origin at the corner so pan is in plain CSS pixels and
             // the arithmetic in zoomAbout stays readable.
+            // WITHOUT THIS THE BROWSER TAKES EVERY DRAG. touch-action tells it
+            // this element handles its own gestures; at the default, a finger
+            // dragging a corner scrolls the page instead -- which is exactly
+            // how "nudge any corner" was true on a laptop and false on a phone.
+            touchAction: "none",
             transformOrigin: "0 0",
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${baseScale * zoom})`,
             cursor: panMode
