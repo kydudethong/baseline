@@ -1012,7 +1012,9 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
    it; a reader who does not believe it should find everything in one place the
    moment they ask.
    --------------------------------------------------------------------------- */
-.why{margin-top:var(--a3);border-top:1px solid var(--line);padding-top:var(--a3)}
+/* .why-block, not .why: `.read-hero .why` already exists and means the read's
+   headline paragraph. Reusing the name drew a border through it. */
+.why-block{margin-top:var(--a3);border-top:1px solid var(--line);padding-top:var(--a3)}
 .why-sum{
   cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px;
   font-size:13px;color:var(--ink-2);
@@ -1024,7 +1026,7 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .why-sum::before{content:"?";display:grid;place-items:center;width:16px;height:16px;border-radius:50%;
   background:var(--line);color:var(--ink-2);font-size:10px;font-weight:700;flex:none}
 .why-sum:hover{color:var(--ink)}
-details[open] > .why-sum{margin-bottom:var(--a3)}
+.why-block[open] > .why-sum{margin-bottom:var(--a3)}
 .why-body{display:flex;flex-direction:column;gap:var(--a3)}
 .why-lead{margin:0;font-size:14px;color:var(--ink-2)}
 .why-clip{margin:0;display:flex;flex-direction:column;gap:6px}
@@ -1041,3 +1043,62 @@ details[open] > .why-sum{margin-bottom:var(--a3)}
   text-transform:uppercase;color:var(--ink-3)}
 .why-row dd{margin:0;font-size:13px;color:var(--ink)}
 .why-conf{margin:0;color:var(--ink-3)}
+
+/* ===========================================================================
+   PHONE
+   
+   The rail already collapses at 900px and most grids are auto-fit, so the
+   page does not fall apart on a phone. What follows is the difference between
+   "does not fall apart" and "as usable as the desktop", which is the bar.
+   
+   Three things it fixes, all of them things a phone does and a laptop does
+   not: one wide child dragging the whole page sideways, controls sized for a
+   cursor being tapped by a thumb, and dense two-column material that is
+   readable at 1200px and unreadable at 375.
+   =========================================================================== */
+
+/* A single overflowing child -- a wide table, a long unbroken token in a log
+   line -- shifts the ENTIRE page sideways on a phone, and the symptom is not
+   "that table is too wide", it is "the whole app is broken and the header is
+   cut off". `clip` rather than `hidden` because hidden on an ancestor kills
+   position:sticky, and the rail depends on it. */
+.shell{overflow-x:clip}
+
+@media (max-width:640px){
+  /* Side gutters stay, so nothing touches the glass. */
+  .shell-page{padding:var(--a4) var(--a4) var(--a7);gap:var(--a5)}
+
+  /* Tables are the worst offender: a 5-column table cannot become readable at
+     375px, so it scrolls sideways INSIDE its own box rather than taking the
+     page with it. Momentum scrolling because a table that needs a drag should
+     feel like the rest of the phone. */
+  .tbl{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;font-size:13px}
+
+  /* Anything that was two columns of prose is one column of prose. */
+  .grid2{grid-template-columns:1fr;gap:var(--a4)}
+
+  /* TAP TARGETS. 36px is the smallest thing a thumb hits reliably; several of
+     these controls are 28px, which is fine for a cursor and a coin-toss for a
+     finger -- and the ones that matter most here are the setup controls,
+     where a mis-tap adds a player or drops a corner. */
+  .btn-sm{min-height:36px}
+  .why-sum{min-height:36px}
+
+  /* The evidence clip earns the full width on a phone: it is small, it is the
+     whole point of opening the disclosure, and there is no column beside it to
+     balance against. */
+  .why-clip video{max-width:none}
+  /* One fact per row rather than two cramped ones. */
+  .why-grid{grid-template-columns:1fr}
+
+  /* The read headline is set in vw units that stay large on a narrow screen. */
+  .read-hero .issue{font-size:20px}
+  .read-hero .bd{padding:var(--a4)}
+}
+
+/* The setup canvas toolbar: six controls over a frame that is 375px wide on a
+   phone. Left alone they run off the edge of the picture they belong to. */
+@media (max-width:560px){
+  .setup-tools{top:6px;right:6px;flex-wrap:wrap;max-width:calc(100% - 12px);justify-content:flex-end}
+  .setup-tools .btn-sm{min-width:34px;padding:0 8px}
+}

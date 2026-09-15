@@ -1,0 +1,112 @@
+# Ship Baseline without anybody typing a deploy command.
+#
+# WHY THIS EXISTS. Every change so far has ended the same way: "now run
+# npm run deploy, and paste the migrations into the SQL editor". That is two
+# manual steps between a finished change and a working site, both easy to
+# forget, and forgetting them is exactly how an evening gets spent debugging a
+# deployed build that predates the fix. This moves both into the push.
+#
+# WHAT IT CANNOT DO, and why that is the right boundary. Deploying needs a Fly
+# token and applying migrations needs a database password. Those live in
+# GitHub's secret store, typed once by a human into GitHub's own UI. No secret
+# is ever read by, shown to, or passed through anything that writes this file.
+#
+# ONE-TIME SETUP (Settings -> Secrets and variables -> Actions -> New secret):
+#   FLY_API_TOKEN                   `fly tokens create deploy` on your machine
+#   NEXT_PUBLIC_SUPABASE_URL        from .env.local
+#   NEXT_PUBLIC_SUPABASE_ANON_KEY   from .env.local
+# And, only if you want migrations applied automatically:
+#   SUPABASE_ACCESS_TOKEN           supabase.com/dashboard/account/tokens
+#   SUPABASE_DB_PASSWORD            the database password for this project
+#   SUPABASE_PROJECT_REF            the ref in your project URL
+#
+# The migration job is skipped when those three are absent, so the deploy works
+# from the moment the first three exist.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main, gemini-rallies]
+  # So a deploy can be started from the Actions tab — including from a phone,
+  # which is the point: shipping should not require being at the laptop.
+  workflow_dispatch:
+
+# One deploy at a time. Two overlapping ones would race to replace the same
+# machine, and the loser silently wins.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Tests, types and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # BEFORE the deploy, not after. The whole value of an automatic deploy is
+      # that nobody is watching it; a broken build that ships because nothing
+      # checked is worse than no automation at all.
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run lint
+
+  migrate:
+    name: Apply migrations
+    runs-on: ubuntu-latest
+    needs: check
+    # Skipped entirely when the database secrets are not set, so the pipeline
+    # is useful before it is complete.
+    if: ${{ vars.RUN_MIGRATIONS == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      # `db push` records what it applied in supabase_migrations.schema_migrations,
+      # so re-running is a no-op rather than a pile of "already exists" errors.
+      - name: Push migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+          supabase db push
+
+  deploy:
+    name: Deploy to Fly
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # The three build args, for the same reason scripts/deploy.sh passes
+      # them: NEXT_PUBLIC_* values are inlined into the browser bundle at BUILD
+      # time. Deploying without them produces a site whose server half works
+      # and whose client half silently does nothing — which is precisely the
+      # "Internal Server Error on every page" that cost an evening.
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy --remote-only \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL="${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" \
+            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" \
+            --build-arg NEXT_PUBLIC_SITE_URL="https://baseline-court.fly.dev"
+
+      # A machine can report "started" and still not serve — the HOSTNAME
+      # footgun, among others. A deploy that is not checked is a deploy you
+      # find out about from a user.
+      - name: Check it answers
+        run: |
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 https://baseline-court.fly.dev || true)
+            if [ "$code" = "200" ]; then echo "site is up"; exit 0; fi
+            echo "attempt $i: $code"; sleep 10
+          done
+          echo "site did not return 200 after the deploy"; exit 1

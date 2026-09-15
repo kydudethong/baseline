@@ -45,7 +45,7 @@ export function WhyThis({
   if (!clipUrl && before.length === 0 && o.t_s === null && !o.why_it_matters) return null;
 
   return (
-    <details className="why">
+    <details className="why-block">
       <summary className="why-sum">Why am I being told this?</summary>
 
       <div className="why-body">

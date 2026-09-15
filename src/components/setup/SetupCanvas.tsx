@@ -982,7 +982,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             box puts the cursor a long way from it. */}
         {videoReady ? (
           <div
-            className="row g1"
+            className="row g1 setup-tools"
             style={{
               position: "absolute", top: 8, right: 8, gap: 4,
               background: "rgba(10,15,22,.72)", backdropFilter: "blur(4px)",
