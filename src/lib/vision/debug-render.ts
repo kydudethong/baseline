@@ -112,6 +112,9 @@ export function buildOverlayData(input: DebugRenderInput): unknown {
         ]),
         joints: p.keypoints
           .filter((k) => k.xNorm !== null && k.yNorm !== null && (k.confidence ?? 0) >= 0.3)
+          // Same frame check as visibleBones, for the same reason: a joint the
+          // model placed outside the picture is a dot in the corner.
+          .filter((k) => k.xNorm! >= -0.02 && k.xNorm! <= 1.02 && k.yNorm! >= -0.02 && k.yNorm! <= 1.02)
           .map((k) => [Math.round(k.xNorm! * 10000) / 10000, Math.round(k.yNorm! * 10000) / 10000]),
       })),
       paddles: (input.paddles ?? []).map((p) => ({

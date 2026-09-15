@@ -128,10 +128,29 @@ def main():
                             break
                         px, py = float(xy[k][0]), float(xy[k][1])
                         kconf = float(conf_arr[k]) if conf_arr is not None else None
+                        nx = px / w if w else None
+                        ny = py / h if h else None
+                        # A KEYPOINT OUTSIDE THE FRAME WAS NOT SEEN IN THE FRAME.
+                        #
+                        # YOLO's pose head regresses coordinates and does not
+                        # clamp them, so a joint it is unsure about can land
+                        # outside the image -- often at or near the origin,
+                        # which is its way of saying "not here". The confidence
+                        # for those is not always low enough to filter, so what
+                        # reached the overlay was a limb drawn from a real
+                        # shoulder to the top-left corner of the picture: the
+                        # stretched grey lines shooting off every head.
+                        #
+                        # Reported as null, the same shape as any other joint
+                        # the model did not see, so every consumer already
+                        # handles it. A small margin allows the genuine case of
+                        # a joint right at the edge.
+                        if nx is None or ny is None or not (-0.02 <= nx <= 1.02 and -0.02 <= ny <= 1.02):
+                            nx, ny, kconf = None, None, 0.0
                         keypoints.append({
                             "name": name,
-                            "xNorm": px / w if w else None,
-                            "yNorm": py / h if h else None,
+                            "xNorm": nx,
+                            "yNorm": ny,
                             "confidence": kconf,
                         })
 

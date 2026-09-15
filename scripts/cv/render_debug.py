@@ -25,6 +25,7 @@ import argparse
 import json
 import subprocess
 import sys
+import os
 
 import cv2
 import numpy as np
@@ -49,7 +50,20 @@ def main() -> int:
     ap.add_argument("video")
     ap.add_argument("--data", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--crf", type=int, default=26)
+    # ENCODER QUALITY. Lower is better and bigger; each -6 is roughly double
+    # the file.
+    #
+    # 20 rather than 26, and the reason is not that 26 looked bad on a laptop.
+    # This video is no longer only something a person scrubs -- it is the input
+    # the coaching model watches, now at HIGH media resolution, which means the
+    # run is paying full rate per frame to read detail that CRF 26 had already
+    # smeared away on a moving player. Encoding softer than the thing reading
+    # it can resolve is paying for detail twice and throwing it away once.
+    #
+    # The cost is roughly double the file, which lands on the upload to Gemini
+    # (measured at 19s for ~18MB) rather than on the render, since CRF barely
+    # moves encode time at a fixed preset. OVERLAY_CRF tunes it.
+    ap.add_argument("--crf", type=int, default=int(os.environ.get("OVERLAY_CRF", "20")))
     ap.add_argument("--out-fps", type=float, default=10.0,
                     help="Frames per second to WRITE. The source is decoded in full and only "
                          "every Nth frame is drawn on and encoded. 0 keeps the source rate.")
@@ -186,6 +200,23 @@ def main() -> int:
     else:
         typical_gap = 0.0
     pose_hold = max(0.12, min(0.5, typical_gap * 0.75))
+
+    # POSE TRAIL: how many earlier samples to ghost in behind the current one.
+    #
+    # This started as a BUG. The renderer drew every pose within the tolerance
+    # window, so a frame stacked six slightly-offset figures at full brightness
+    # and the result read as scribble. The fix was to draw one.
+    #
+    # Except the thing underneath the scribble was worth keeping: a swing is an
+    # arm moving through an arc, and one frozen stick figure cannot show an
+    # arc. Several, fading backwards in time, can. So the trail is back on
+    # purpose -- dimmer and thinner with age, no joints, no outline, so the
+    # current pose is unambiguously the bright one and the ghosts read as where
+    # the body just was.
+    #
+    # OVERLAY_POSE_TRAIL=0 turns it off and leaves the single figure.
+    pose_trail = max(0, int(os.environ.get("OVERLAY_POSE_TRAIL", "3")))
+    trail_span = pose_hold + (typical_gap or 0.1) * pose_trail
     frames_with_skeletons = 0
     if poses:
         print(f"[overlay] {len(poses)} pose frame(s) at {len(pose_times)} instant(s), "
@@ -315,20 +346,40 @@ def main() -> int:
         # One per player, nearest in time. A dict keyed by playerId rather than
         # a list, so two poses for the same person at two nearby instants can
         # never both be drawn.
-        nearest = {}
-        for bucket in (int(t - 1), int(t), int(t + 1)):
+        # Per player: the pose nearest to now, plus the few before it.
+        # Keyed by playerId so two samples of the same person at the same
+        # instant can never both be drawn at full brightness.
+        by_player = {}
+        for bucket in (int(t - trail_span - 1), int(t - 1), int(t), int(t + 1)):
             for ps in pose_buckets.get(bucket, ()):
-                dt = abs(ps["t"] - t)
-                if dt > pose_hold:
+                age = t - ps["t"]
+                # Forward within the hold window (the nearest sample may be
+                # just ahead of this frame), backward across the whole trail.
+                if age < -pose_hold or age > trail_span:
                     continue
-                pid = ps.get("playerId")
-                prev = nearest.get(pid)
-                if prev is None or dt < prev[0]:
-                    nearest[pid] = (dt, ps)
-        if nearest:
+                by_player.setdefault(ps.get("playerId"), []).append((age, ps))
+
+        if by_player:
             frames_with_skeletons += 1
-        for _dt, ps in nearest.values():
-            for (x1, y1, x2, y2, group) in ps.get("bones", []):
+
+        for series in by_player.values():
+            # Nearest in time first; everything after it is a ghost, oldest
+            # drawn first so the newest sits on top.
+            series.sort(key=lambda a_ps: abs(a_ps[0]))
+            current = series[0][1]
+            ghosts = [ps for _age, ps in series[1 : 1 + pose_trail]]
+            for depth, ps in enumerate(reversed(ghosts)):
+                # Fades with age: the oldest ghost is the faintest and
+                # thinnest. No outline and no joints -- those are what make the
+                # current pose readable, and giving them to the trail is what
+                # turned it into scribble the first time.
+                fade = 0.30 + 0.20 * (depth + 1) / max(1, len(ghosts))
+                for (x1, y1, x2, y2, group) in ps.get("bones", []):
+                    col = limb_bgr.get(group, (200, 200, 200))
+                    dim = tuple(int(c * fade) for c in col)
+                    cv2.line(img, (int(x1 * w), int(y1 * h)), (int(x2 * w), int(y2 * h)),
+                             dim, max(1, int(2 * scale)), cv2.LINE_AA)
+            for (x1, y1, x2, y2, group) in current.get("bones", []):
                 col = limb_bgr.get(group, (200, 200, 200))
                 a = (int(x1 * w), int(y1 * h))
                 b = (int(x2 * w), int(y2 * h))
@@ -340,7 +391,7 @@ def main() -> int:
                 thick = int((4 if group.startswith("arm") else 3) * scale)
                 cv2.line(img, a, b, (12, 12, 12), max(2, thick + 2), cv2.LINE_AA)
                 cv2.line(img, a, b, col, max(1, thick), cv2.LINE_AA)
-            for (jx, jy) in ps.get("joints", []):
+            for (jx, jy) in current.get("joints", []):
                 c = (int(jx * w), int(jy * h))
                 cv2.circle(img, c, max(3, int(3.5 * scale)), (12, 12, 12), -1, cv2.LINE_AA)
                 cv2.circle(img, c, max(2, int(2.5 * scale)), (255, 255, 255), -1, cv2.LINE_AA)

@@ -30,6 +30,15 @@ import type { CocoKeypointName, PlayerPoseFrame, PoseKeypoint } from "./phase2-t
 
 /** Proximal joint, distal joint. The distal one is what gets dropped. */
 const BONES: Array<[CocoKeypointName, CocoKeypointName]> = [
+  // Head first. These were missing, and they are the ones that showed: a
+  // stretched forearm is ugly, while a stretched EAR draws a line from
+  // somebody's face to the edge of the picture. The same fixed-length argument
+  // applies -- an ear does not move relative to an eye -- so the same test
+  // works, and the reference is this player's own head at this distance.
+  ["left_eye", "left_ear"],
+  ["right_eye", "right_ear"],
+  ["nose", "left_eye"],
+  ["nose", "right_eye"],
   ["left_shoulder", "left_elbow"],
   ["left_elbow", "left_wrist"],
   ["right_shoulder", "right_elbow"],

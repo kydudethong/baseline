@@ -81,8 +81,23 @@ export function visibleBones(
 ): Array<{ from: [number, number]; to: [number, number]; group: LimbGroup }> {
   const by = new Map<string, KeypointLike>();
   for (const k of keypoints) by.set(k.name, k);
+  // IN THE FRAME, as well as confident.
+  //
+  // YOLO's pose head does not clamp what it regresses, so a joint it is unsure
+  // about can come back at a coordinate outside the picture -- and its
+  // confidence is not always low enough to catch. Joining one of those to a
+  // real shoulder draws a limb running off the corner of the image, which is
+  // what the stretched lines on every head were. A keypoint outside the frame
+  // was not seen in the frame.
+  //
+  // Belt and braces: estimate_pose.py nulls these at the source now. This is
+  // the same check one layer up, because the still-frame overlay and the video
+  // overlay both read pose data that may have been stored before that fix.
+  const inFrame = (v: number) => v >= -0.02 && v <= 1.02;
   const ok = (k: KeypointLike | undefined): k is KeypointLike =>
-    !!k && k.xNorm !== null && k.yNorm !== null && (k.confidence ?? 0) >= minConfidence;
+    !!k && k.xNorm !== null && k.yNorm !== null
+    && inFrame(k.xNorm) && inFrame(k.yNorm)
+    && (k.confidence ?? 0) >= minConfidence;
 
   const out: Array<{ from: [number, number]; to: [number, number]; group: LimbGroup }> = [];
   for (const b of SKELETON) {
