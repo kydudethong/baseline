@@ -114,3 +114,37 @@ test("data gaps from every segment survive", () => {
 test("merging nothing is an error, not a silently empty analysis", () => {
   assert.throws(() => mergeAnalystOutputs([]));
 });
+
+test("rallies past the end of the clip are dropped, not renumbered", () => {
+  // The real failure: one run returned seven rallies between 506s and 725s of
+  // a 446-second video. The audit reported them and they were stored anyway.
+  const one = base({
+    rallies: [rally(1, 10, 20), rally(2, 506, 512), rally(3, 620, 634)],
+    shots: [shot(15, 1), shot(508, 2)],
+  });
+  const got = mergeAnalystOutputs([one], 446);
+  assert.equal(got.rallies.length, 1);
+  assert.equal(got.rallies[0].start_s, 10);
+});
+
+test("a single segment is still filtered — it hallucinates too", () => {
+  const one = base({ rallies: [rally(1, 900, 910)] });
+  assert.equal(mergeAnalystOutputs([one], 446).rallies.length, 0);
+});
+
+test("a rally ending exactly at the final second survives", () => {
+  const one = base({ rallies: [rally(1, 440, 446)] });
+  assert.equal(mergeAnalystOutputs([one], 446).rallies.length, 1);
+});
+
+test("with no clip length given, nothing is filtered on time", () => {
+  const one = base({ rallies: [rally(1, 900, 910)] });
+  assert.equal(mergeAnalystOutputs([one]).rallies.length, 1);
+});
+
+test("a shot whose rally was dropped keeps counting as a contact", () => {
+  const one = base({ rallies: [rally(1, 10, 20)], shots: [shot(15, 1), shot(508, 2)] });
+  const got = mergeAnalystOutputs([one], 446);
+  assert.equal(got.shots.length, 2, "a contact is still a contact");
+  assert.equal(got.shots.find((s) => s.t === 508)!.rally_idx, 0);
+});

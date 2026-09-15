@@ -35,12 +35,18 @@ type Shot = AnalystOutput["shots"][number];
  * With a single segment (the common case) this is the identity function in
  * everything but name.
  */
-export function mergeAnalystOutputs(parts: AnalystOutput[]): AnalystOutput {
+export function mergeAnalystOutputs(parts: AnalystOutput[], clipSeconds?: number): AnalystOutput {
   const usable = parts.filter(Boolean);
   if (usable.length === 0) throw new Error("nothing to merge");
-  if (usable.length === 1) return usable[0];
 
-  const rallies = mergeRallies(usable);
+  const rallies = mergeRallies(usable, clipSeconds);
+  if (usable.length === 1) {
+    // Still passed through mergeRallies, because a single segment can and does
+    // hallucinate past the end of the clip -- one run returned seven rallies
+    // between 506s and 725s of a 446-second video. Returning the raw output
+    // untouched let every one of those reach the page.
+    return { ...usable[0], rallies, shots: repointShots(usable[0].shots ?? [], rallies) };
+  }
   const shots = repointShots(usable.flatMap((p) => p.shots ?? []), rallies);
 
   // Observations reference rallies too, and by the same broken index. The ones
@@ -76,11 +82,28 @@ export function mergeAnalystOutputs(parts: AnalystOutput[]): AnalystOutput {
   };
 }
 
-/** All rallies, in time order, renumbered from 1. */
-function mergeRallies(parts: AnalystOutput[]): Rally[] {
+/**
+ * All rallies, in time order, renumbered from 1 — and only those that could
+ * have happened.
+ *
+ * A rally past the end of the clip is not a rally. The audit already REPORTS
+ * these, which is how they were found, but reporting is not removing: they
+ * were still being stored, still numbered, still cited in coaching, and still
+ * counted in "N rallies" on the page. A read that says "in rally 15, at 541
+ * seconds" about a 446-second video is worse than one that says nothing,
+ * because it is confidently checkable and wrong.
+ *
+ * Half a second of slack at the end, because a rally genuinely running to the
+ * final frame can round past the duration by a hair.
+ */
+function mergeRallies(parts: AnalystOutput[], clipSeconds?: number): Rally[] {
+  const limit = Number.isFinite(clipSeconds) && (clipSeconds ?? 0) > 0
+    ? (clipSeconds as number) + 0.5
+    : Infinity;
   return parts
     .flatMap((p) => p.rallies ?? [])
     .filter((r) => Number.isFinite(r.start_s) && Number.isFinite(r.end_s) && r.end_s > r.start_s)
+    .filter((r) => r.start_s >= -0.5 && r.end_s <= limit)
     .sort((a, b) => a.start_s - b.start_s)
     .map((r, i) => ({ ...r, idx: i + 1 }));
 }

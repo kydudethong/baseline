@@ -235,7 +235,9 @@ export async function readTechnique(opts: {
         prompt: promptFor(w, inWindow, opts.playerLabel ?? null),
         schema: SCHEMA,
         video,
-        maxOutputTokens: 4000,
+        // Generous on purpose: thinking tokens count against this budget, and at
+        // 4,000 three of six bursts came back as truncated JSON.
+        maxOutputTokens: 16000,
       });
       if (out.pattern) patterns.push(out.pattern);
       return (out.shots ?? [])

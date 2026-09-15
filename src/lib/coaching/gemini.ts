@@ -220,7 +220,17 @@ export async function generateJSONFromText<T>(opts: {
   try {
     return JSON.parse(text) as T;
   } catch {
-    throw new GeminiError(`Gemini returned text that is not JSON: ${text.slice(0, 200)}`);
+    // "not JSON: {" told us nothing. Whether the text STARTS like JSON is the
+    // whole diagnosis: if it does, the answer was cut off and the fix is a
+    // bigger budget; if it does not, the model ignored the schema and the fix
+    // is the prompt. Those need opposite changes.
+    const looksTruncated = text.trimStart().startsWith("{") || text.trimStart().startsWith("[");
+    throw new GeminiError(
+      looksTruncated
+        ? `Gemini's answer was cut off mid-JSON after ${text.length} characters — `
+          + "it needs a larger maxOutputTokens, or thinking is eating the budget."
+        : `Gemini returned text that is not JSON: ${text.slice(0, 200)}`
+    );
   }
 }
 
@@ -272,7 +282,7 @@ async function callGemini(
     }
     if (res.ok) {
       const json = (await res.json()) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
         usageMetadata?: {
           promptTokenCount?: number;
           candidatesTokenCount?: number;
@@ -291,7 +301,27 @@ async function callGemini(
         thoughtsTokens: json.usageMetadata?.thoughtsTokenCount ?? null,
       });
       const text = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-      if (!text) throw new GeminiError("Gemini returned no content — the response may have been truncated.");
+      const finish = json.candidates?.[0]?.finishReason;
+      // THE ANSWER RAN OUT OF ROOM, which is a completely different failure
+      // from "the model wrote something odd" and was being reported as the
+      // latter. Worse, the usual cause is invisible: THINKING TOKENS COUNT
+      // AGAINST maxOutputTokens, so a model that reasons for 4,000 tokens
+      // before answering hits the ceiling with nothing written, and all the
+      // caller sees is half a JSON object starting with "{".
+      if (finish === "MAX_TOKENS") {
+        throw new GeminiError(
+          `${model} hit its output limit before finishing the answer`
+          + (json.usageMetadata?.thoughtsTokenCount
+            ? ` — ${json.usageMetadata.thoughtsTokenCount} of the budget went on thinking`
+            : "")
+          + ". Raise maxOutputTokens for this call."
+        );
+      }
+      if (!text) {
+        throw new GeminiError(
+          `Gemini returned no content${finish ? ` (finishReason ${finish})` : ""}.`
+        );
+      }
       return text;
     }
 

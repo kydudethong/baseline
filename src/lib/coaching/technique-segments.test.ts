@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planSegments, maxSegmentSeconds, isSampled, MAX_SEGMENTS, SEGMENT_TOKEN_BUDGET, TOKENS_PER_FRAME_HIGH } from "./technique-segments";
+import { planSegments, maxSegmentSeconds, isSampled, MAX_SEGMENTS, MAX_SEGMENT_SECONDS, SEGMENT_TOKEN_BUDGET, TOKENS_PER_FRAME_HIGH } from "./technique-segments";
 
 const FPS = 15;
 
@@ -10,12 +10,24 @@ test("a segment fits inside the token budget", () => {
     `${seconds}s at ${FPS}fps exceeds the budget`);
 });
 
-test("a short clip is genuinely ONE call", () => {
-  // The thing that was asked for: a 2:18 clip should not be chopped up.
-  const got = planSegments(138, FPS);
+test("a clip inside the time cap is ONE call", () => {
+  // The cap is now TIME, not tokens: the model loses track of the clock past
+  // about two minutes and starts reporting rallies that are off the end of the
+  // video. A clip under that is still a single call.
+  const got = planSegments(100, FPS);
   assert.equal(got.length, 1);
   assert.equal(got[0].startSeconds, 0);
-  assert.equal(got[0].endSeconds, 138);
+  assert.equal(got[0].endSeconds, 100);
+});
+
+test("a clip past the time cap is split even though the tokens would fit", () => {
+  // 138s at 15fps is well inside the 600k token budget, and is split anyway —
+  // because the binding constraint is the model's sense of time, not context.
+  const got = planSegments(138, FPS);
+  assert.ok(got.length > 1, "a 138s clip should now be split");
+  for (const seg of got) {
+    assert.ok(seg.endSeconds - seg.startSeconds <= MAX_SEGMENT_SECONDS + 0.01);
+  }
 });
 
 test("segments cover the clip end to end with no gap when it fits", () => {

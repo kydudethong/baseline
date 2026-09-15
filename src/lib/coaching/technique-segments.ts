@@ -48,9 +48,28 @@ export interface Segment {
   endSeconds: number;
 }
 
+/**
+ * The longest stretch the model can watch and still know WHERE IT IS.
+ *
+ * MEASURED, and it is the binding constraint rather than the token budget.
+ * Given 446 seconds of video in one call the model returned seven rallies
+ * between 506s and 725s — up to five minutes past the end of a clip that was
+ * seven and a half minutes long. It was not inventing play it never saw; it
+ * lost track of the clock and kept counting. An earlier run did the same on a
+ * 101-second clip, returning rallies at 119s and 131s.
+ *
+ * The context window would happily take 465 seconds at 5fps. The model's sense
+ * of time will not, so the cap is time and not tokens. Two minutes costs more
+ * calls on a long clip and buys timestamps that are worth reading — and every
+ * timestamp in this product is load-bearing, because the rallies, the burst
+ * windows and every coaching citation are all joins on them.
+ */
+export const MAX_SEGMENT_SECONDS = 120;
+
 /** The longest segment that fits the budget at this frame rate, in seconds. */
 export function maxSegmentSeconds(fps: number): number {
-  return Math.max(10, Math.floor(SEGMENT_TOKEN_BUDGET / (fps * TOKENS_PER_FRAME_HIGH)));
+  const byTokens = Math.max(10, Math.floor(SEGMENT_TOKEN_BUDGET / (fps * TOKENS_PER_FRAME_HIGH)));
+  return Math.min(byTokens, MAX_SEGMENT_SECONDS);
 }
 
 /**
