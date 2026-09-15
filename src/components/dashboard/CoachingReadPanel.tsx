@@ -43,6 +43,7 @@ export function CoachingReadPanel({
   analysisId,
   skillKeysWithBlueprint,
   drillNames = {},
+  feedback,
 }: {
   read: CoachingReadRow;
   observations: CoachingObservationRow[];
@@ -52,6 +53,8 @@ export function CoachingReadPanel({
   skillKeysWithBlueprint: Set<string>;
   /** slug → human name, so an insight can name its drill. */
   drillNames?: Record<string, string>;
+  /** observation id → this user's existing verdict, so the control is not blank. */
+  feedback?: Map<string, "right" | "wrong" | "unsure">;
 }) {
   const coaching = parseCoaching(read.coaching_json);
   const quality = read.quality as { usable: boolean; issues: string[] } | null;
@@ -195,6 +198,8 @@ export function CoachingReadPanel({
             <span className="xs">Start here</span>
           </div>
           <CoachingInsight
+            analysisId={analysisId}
+            initialVerdict={feedback?.get(hero.id) ?? null}
             observation={hero}
             drillName={hero.drill_slug ? drillNames[hero.drill_slug] : null}
             hero
@@ -217,6 +222,8 @@ export function CoachingReadPanel({
           <div className="stack g4">
             {clipWide.map((o) => (
               <CoachingInsight
+                analysisId={analysisId}
+                initialVerdict={feedback?.get(o.id) ?? null}
                 key={o.id}
                 observation={o}
                 drillName={o.drill_slug ? drillNames[o.drill_slug] : null}

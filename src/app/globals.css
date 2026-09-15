@@ -984,3 +984,22 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .drill-watch{background:var(--warn-wash);border-radius:var(--r2);padding:10px 12px}
 .drill-watch .eyebrow{color:var(--warn)}
 .drill-watch ul{margin:6px 0 0;padding-left:1.1em;display:flex;flex-direction:column;gap:5px;font-size:12px;line-height:1.5;color:var(--ink-2)}
+
+/* ---- Feedback ----------------------------------------------------------
+   Quiet until touched. A coaching page covered in loud rating controls reads
+   as a survey rather than a read, and the point is that somebody happens to
+   disagree while reading — not that they came to fill in a form. */
+.fb{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.fb-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.fb-q{font-size:11px;color:var(--ink-3);margin-right:2px}
+.fb-btn{font:inherit;font-size:12px;font-weight:500;color:var(--ink-3);background:transparent;border:1px solid var(--line);border-radius:var(--rf);padding:3px 11px;cursor:pointer;transition:all .12s ease}
+.fb-btn:hover{border-color:var(--line-strong);color:var(--ink)}
+.fb-btn.on{font-weight:600;background:var(--sunk);color:var(--ink);border-color:var(--line-strong)}
+.fb-btn.on.good{background:var(--good-wash);color:var(--good);border-color:var(--good)}
+.fb-btn.on.bad{background:var(--bad-wash);color:var(--bad);border-color:var(--bad)}
+.fb-note{font-size:11px;color:var(--ink-3)}
+.fb-note.good{color:var(--good)}
+.fb-reasons{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.fb-reasons .chip{font-size:12px;padding:4px 10px}
+.fb-note-input{flex:1;min-width:200px;height:34px;font-size:13px}
+.fb-compact{margin-top:6px;padding-top:6px}

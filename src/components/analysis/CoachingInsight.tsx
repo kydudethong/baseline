@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { CoachingObservationRow } from "@/lib/db/types";
+import { FeedbackButtons } from "./FeedbackButtons";
 
 /**
  * One coaching point, in the order a coach would actually say it:
@@ -15,7 +16,7 @@ import type { CoachingObservationRow } from "@/lib/db/types";
  * correct about a thing you are doing well.
  */
 export function CoachingInsight({
-  observation, drillName, hero = false, action, eyebrow,
+  observation, drillName, hero = false, action, eyebrow, analysisId, initialVerdict,
 }: {
   observation: CoachingObservationRow;
   /** Resolved from the drill catalogue; the row only stores a slug. */
@@ -25,6 +26,10 @@ export function CoachingInsight({
   action?: ReactNode;
   /** Overrides the pill, for the one insight that leads the read. */
   eyebrow?: string;
+  /** Enables the "is this right?" control. Omit to hide it. */
+  analysisId?: string;
+  /** This user's existing verdict, so the control shows what they already said. */
+  initialVerdict?: "right" | "wrong" | "unsure" | null;
 }) {
   const o = observation;
   const isStrength = o.valence === "strength";
@@ -61,6 +66,21 @@ export function CoachingInsight({
           <span className="eyebrow">Practice</span>
           <span>{drillName ?? o.drill_slug}</span>
         </div>
+      ) : null}
+
+      {/* The correction, on the thing being corrected.
+          Per COACHING POINT rather than per page: "the read was wrong" is not
+          a usable label, and by the time somebody reaches a summary control at
+          the bottom they have forgotten which of six points they disagreed
+          with. The disagreement happens while reading one claim, so the button
+          lives under that claim. */}
+      {analysisId ? (
+        <FeedbackButtons
+          analysisId={analysisId}
+          targetKind="observation"
+          targetId={o.id}
+          initialVerdict={initialVerdict ?? null}
+        />
       ) : null}
 
       {o.rally_idx !== null || action ? (

@@ -72,6 +72,21 @@ export function CalendarMonth({
     }
   }
 
+  async function helped(sessionId: string, value: number) {
+    setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, helped: value } : s)));
+    try {
+      const res = await fetch("/api/practice/tick", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "session", id: sessionId, done: true, helped: value }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      router.refresh();
+    } catch {
+      setError("Couldn't save that.");
+    }
+  }
+
   return (
     <div className="stack g4">
       <div className="row g2">
@@ -132,6 +147,32 @@ export function CalendarMonth({
               {open.completed_at ? "Done ✓ — undo" : "Mark session done"}
             </button>
           </div>
+
+          {/* Only after it is done, and only then. Asking "did this help?"
+              about a session somebody has not run yet is noise, and a control
+              that appears the moment they tick it off is asked at the one
+              moment they actually know. */}
+          {open.completed_at ? (
+            <div className="fb">
+              <div className="fb-row">
+                <span className="fb-q">Did this session help?</span>
+                {([
+                  { v: 1, label: "Yes" },
+                  { v: 0, label: "Too early to tell" },
+                  { v: -1, label: "Not really" },
+                ] as const).map((o) => (
+                  <button
+                    key={o.v}
+                    type="button"
+                    className={`fb-btn${open.helped === o.v ? (o.v === 1 ? " on good" : o.v === -1 ? " on bad" : " on") : ""}`}
+                    onClick={() => helped(open.id, o.v)}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="stack g2">
             {open.drills.map((d) => (

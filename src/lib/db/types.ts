@@ -106,6 +106,43 @@ export type AnalysisRow = {
   updated_at: string;
 };
 
+// --- Capture & feedback — 0018_capture_and_feedback.sql ---------------------
+
+export type CapturePass = "scan" | "technique" | "practice_plan" | "month_plan";
+
+export type AnalysisCaptureRow = {
+  id: string;
+  analysis_id: string;
+  pass: string;
+  model: string;
+  config: unknown;
+  prompt: string | null;
+  output: unknown;
+  usage: unknown;
+  duration_ms: number | null;
+  created_at: string;
+};
+export type AnalysisCaptureInsert = Omit<AnalysisCaptureRow, "id" | "created_at">
+  & { id?: string; created_at?: string };
+
+export type FeedbackTargetKind =
+  | "observation" | "technique" | "rally" | "shot" | "read" | "practice_session";
+export type FeedbackVerdict = "right" | "wrong" | "unsure";
+
+export type CoachingFeedbackRow = {
+  id: string;
+  user_id: string;
+  analysis_id: string;
+  target_kind: FeedbackTargetKind;
+  target_id: string;
+  verdict: FeedbackVerdict;
+  reason: string | null;
+  note: string | null;
+  created_at: string;
+};
+export type CoachingFeedbackInsert = Omit<CoachingFeedbackRow, "id" | "created_at">
+  & { id?: string; created_at?: string };
+
 // --- Practice calendar — 0016_archive_and_calendar.sql ----------------------
 
 export type PracticePlanRow = {
@@ -135,10 +172,12 @@ export type PracticeSessionRow = {
   minutes: number | null;
   completed_at: string | null;
   notes: string | null;
+  /** 0018. -1 didn't help, 0 unsure, 1 helped. The closed loop. */
+  helped: number | null;
   created_at: string;
 };
-export type PracticeSessionInsert = Omit<PracticeSessionRow, "id" | "created_at">
-  & { id?: string; created_at?: string };
+export type PracticeSessionInsert = Omit<PracticeSessionRow, "id" | "created_at" | "helped">
+  & { id?: string; created_at?: string; helped?: number | null };
 
 export type PracticeSessionDrillRow = {
   id: string;
@@ -810,6 +849,18 @@ export type CoachingPracticeBlockInsert = Omit<CoachingPracticeBlockRow, "id" | 
 export type Database = {
   public: {
     Tables: {
+      analysis_captures: {
+        Row: AnalysisCaptureRow;
+        Insert: AnalysisCaptureInsert;
+        Update: Partial<AnalysisCaptureInsert>;
+        Relationships: [];
+      };
+      coaching_feedback: {
+        Row: CoachingFeedbackRow;
+        Insert: CoachingFeedbackInsert;
+        Update: Partial<CoachingFeedbackInsert>;
+        Relationships: [];
+      };
       practice_plans: {
         Row: PracticePlanRow;
         Insert: PracticePlanInsert;

@@ -33,13 +33,14 @@ import type {
 } from "@/lib/db/types";
 import { buildCoachingFacts } from "./facts";
 import { buildAnalystInput } from "./analyst-facts";
-import { runAnalyst, releaseAnalystFile } from "./analyst";
+import { runAnalyst, releaseAnalystFile, analystFps, analystMediaResolution } from "./analyst";
 import { readTechnique } from "./technique-pass";
 import { buildPracticePlan } from "./practice-plan";
 import { matchPlaystyles } from "./pro-playstyles";
 import { shotRowsFromAnalyst } from "./shot-rows";
 import { fillApproachTimes } from "./approach-times";
 import { activeWindows } from "./active-windows";
+import { recordCapture } from "./capture";
 import { readOverlayBytes, OverlayMissingError } from "./overlay-source";
 import { OVERLAY_LEGEND } from "./overlay-legend";
 import { getAllDrills } from "./drills";
@@ -270,6 +271,7 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     await coachingProgress(supabase, analysisId, gate.gated
       ? `Watching the ${gate.windows.length} stretches where you were playing…`
       : "Watching the clip…");
+    const scanStartedAt = Date.now();
     analyst = await runAnalyst({
       videoBytes: overlay,
       videoName: `${analysisId}.mp4`,
@@ -277,6 +279,25 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       legend: OVERLAY_LEGEND,
       activeWindows: gate.gated ? gate.windows : undefined,
       onLog: (line) => console.error(`[coaching] ${line}`),
+    });
+    // The record. Config first, because it is what makes a later correction
+    // attributable: "wrong at 5fps low resolution" is a fixable claim, "wrong"
+    // is not.
+    await recordCapture(supabase, {
+      analysisId,
+      pass: "scan",
+      model: analyst.model,
+      config: {
+        fps: analystFps(),
+        mediaResolution: analystMediaResolution(),
+        gated: gate.gated,
+        coverage: gate.coverage,
+        windows: gate.gated ? gate.windows : null,
+        clipSeconds: analystInput.clipSeconds,
+      },
+      output: analyst.output,
+      usage: { auditProblems: analyst.problems.length },
+      durationMs: Date.now() - scanStartedAt,
     });
   } catch (err) {
     if (err instanceof OverlayMissingError) {
@@ -324,6 +345,7 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
         || subjectLabels.has(String(sh.player ?? "").toLowerCase().replace(/[^a-z0-9]/g, "")))
       .map((sh) => sh.t);
 
+    const techniqueStartedAt = Date.now();
     const { technique, patterns } = analyst.file
       ? await readTechnique({
           model,
@@ -339,6 +361,15 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     // two drops cleared the net and the third clipped it". Logged rather than
     // given a column while the open question is whether they are any good.
     for (const pat of patterns) console.error(`[coaching] technique pattern: ${pat}`);
+
+    await recordCapture(supabase, {
+      analysisId,
+      pass: "technique",
+      model,
+      config: { fps: 10, mediaResolution: "high", shotTimes: mine },
+      output: { technique, patterns },
+      durationMs: Date.now() - techniqueStartedAt,
+    });
 
     if (technique.length > 0) {
       await supabase.from("coaching_shot_technique").delete().eq("analysis_id", analysisId);
@@ -389,9 +420,16 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   // the read, the ratings and the drills are already written by now, and losing
   // those to a failure in the final optional step would be absurd.
   try {
+    const planStartedAt = Date.now();
     const plan = await buildPracticePlan({
       model, analyst: out, drills: allDrills,
       onLog: (l) => console.error(`[coaching] ${l}`),
+    });
+    await recordCapture(supabase, {
+      analysisId, pass: "practice_plan", model,
+      config: { drillCatalogueSize: allDrills.length },
+      output: plan,
+      durationMs: Date.now() - planStartedAt,
     });
     if (plan) {
       // Replace, never accumulate: a re-run must not leave last time's session

@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  let body: { kind?: string; id?: string; done?: boolean; notes?: string };
+  let body: { kind?: string; id?: string; done?: boolean; notes?: string; helped?: number };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -44,7 +44,15 @@ export async function POST(request: Request) {
   const { error } = body.kind === "session"
     ? await supabase
         .from("practice_sessions")
-        .update(body.notes !== undefined ? { completed_at, notes: body.notes } : { completed_at })
+        .update({
+          completed_at,
+          ...(body.notes !== undefined ? { notes: body.notes } : {}),
+          // DID IT HELP. The rarest and most valuable label in the product: it
+          // needs somebody to do the drill AND come back and say. Nothing else
+          // here connects a prescription to an outcome, and without it the
+          // practice plan is advice nobody has ever checked.
+          ...(body.helped !== undefined ? { helped: clampHelped(body.helped) } : {}),
+        })
         .eq("id", body.id)
     : await supabase
         .from("practice_session_drills")
@@ -53,4 +61,10 @@ export async function POST(request: Request) {
 
   if (error) return NextResponse.json({ error: describeError(error) }, { status: 500 });
   return NextResponse.json({ ok: true });
+}
+
+/** -1 didn't help, 0 unsure, 1 helped. Anything else is not an answer. */
+function clampHelped(v: unknown): number | null {
+  const n = Number(v);
+  return n === -1 || n === 0 || n === 1 ? n : null;
 }

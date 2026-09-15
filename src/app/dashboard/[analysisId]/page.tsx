@@ -8,6 +8,7 @@ import { getAnalysisForUser, type AnalysisWithVideo } from "@/lib/db/analyses";
 import { getPhase2Data } from "@/lib/db/vision";
 import { getProfile } from "@/lib/db/profiles";
 import { getCoachingData } from "@/lib/db/coaching";
+import { feedbackForAnalysis } from "@/lib/db/feedback";
 import { getBlueprintsForAnalysis } from "@/lib/db/blueprints";
 import { getPracticePlan } from "@/lib/db/practice-plan";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
@@ -152,7 +153,7 @@ async function AnalysisBreakdown({
   supabase: Awaited<ReturnType<typeof createClient>>;
   analysis: AnalysisWithVideo;
 }) {
-  const [phase2, profile, coachingData, blueprints, view, drills, practice] = await Promise.all([
+  const [phase2, profile, coachingData, blueprints, view, drills, practice, feedback] = await Promise.all([
     getPhase2Data(supabase, analysis.id),
     getProfile(supabase, analysis.user_id),
     getCoachingData(supabase, analysis.id),
@@ -160,6 +161,7 @@ async function AnalysisBreakdown({
     getAnalysisView(supabase, analysis),
     getAllDrills(supabase),
     getPracticePlan(supabase, analysis.id),
+    feedbackForAnalysis(supabase, analysis.id),
   ]);
   const skillKeysWithBlueprint = new Set(blueprints.map((b) => b.blueprint.skill_key));
   const drillNames: Record<string, string> = {};
@@ -295,6 +297,7 @@ async function AnalysisBreakdown({
             analysisId={analysis.id}
             skillKeysWithBlueprint={skillKeysWithBlueprint}
             drillNames={drillNames}
+            feedback={feedback}
           />
         </section>
       ) : (
