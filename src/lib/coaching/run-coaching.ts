@@ -188,13 +188,23 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   // from fresh ones -- and the "not enough data" branch below returned early
   // without touching them at all, so a failed re-run showed its own headline
   // above a full set of observations and ratings from the run before.
+  //
+  // CALLED AT THE WRITE, NOT HERE. This used to run at the top of the
+  // pipeline, which meant pressing "change who you are" deleted the rallies
+  // BEFORE asking Gemini for new ones -- and every way the run could then fail
+  // (no overlay, a model error, a network blip) left the analysis reporting
+  // "no rallies were found in this clip" over footage that had a dozen. The
+  // user's own words: changing who they were deleted the rallies.
+  //
+  // A destructive step belongs next to the write it makes room for, where the
+  // replacement is already in hand and the gap between delete and insert is
+  // one statement rather than the entire expensive half of the pipeline.
   const pruneStale = async () => {
     for (const table of ["coaching_rallies", "coaching_skill_ratings"] as const) {
       const { error } = await supabase.from(table).delete().eq("analysis_id", analysisId);
       if (error) throw new Error(`clearing ${table}: ${describeError(error)}`);
     }
   };
-  await pruneStale();
 
   // NO RALLY GATE HERE ANY MORE, and its removal is the point of the change.
   //
@@ -490,6 +500,8 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     // missing or out of range.
     shots: countContacts(out.shots ?? [], r),
   }));
+  // Now, with the replacement in hand.
+  await pruneStale();
   const { error: rallyError } = await supabase
     .from("coaching_rallies")
     .upsert(rallyRows, { onConflict: "analysis_id,idx" });

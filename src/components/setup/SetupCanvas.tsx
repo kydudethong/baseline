@@ -35,7 +35,6 @@ import CourtPresetBar from "./CourtPresetBar";
 
 import { computeHomography, applyHomography } from "@/lib/vision/homography";
 import { courtSegments, type CourtLineRole } from "@/lib/vision/court-model";
-import { sampleLineColor } from "@/lib/vision/sample-color";
 import { playersForMode, type MatchMode } from "@/lib/db/setup";
 import { SetupExamples } from "./SetupExamples";
 
@@ -47,7 +46,28 @@ type Corner = { x: number; y: number };
  * whole person rather than a dot at their shoes.
  */
 type Player = { x: number; y: number; isSelf: boolean; box?: [number, number, number, number] };
-type Stage = "court" | "players" | "line-colour";
+/**
+ * MARK THE PEOPLE, THEN SAY WHICH ONE IS YOU.
+ *
+ * These were one stage, and the click did both jobs: land on somebody and it
+ * toggled "this is me", land on empty court and it added a marker. Two
+ * different intentions on one gesture, told apart by what happened to be under
+ * the cursor -- so a slightly-off click aimed at yourself silently added a
+ * fifth player instead.
+ *
+ * Separated, each stage has one meaning for a click and the step bar can say
+ * which one you are in.
+ *
+ * "line-colour" is gone. It asked the user to sample their court's paint so the
+ * automatic fitter could look for it -- a real problem, explained in a
+ * paragraph, solved by a step most people skipped. The corners are marked by
+ * hand anyway when the fit is wrong, which is the same fix with nothing to
+ * read.
+ */
+type Stage = "court" | "players" | "self";
+
+/** Everything undo restores. Small enough to copy on every change. */
+interface Snapshot { corners: Corner[]; players: Player[] }
 
 /**
  * Blank margin drawn around the video, as a fraction of its short side.
@@ -154,6 +174,9 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   // asked for, and somebody who bounces has at least told us the thing only
   // they can know.
   const [stage, setStage] = useState<Stage>("players");
+  // Declared up here with the rest of the canvas state, because undo/redo
+  // below need to cancel an in-flight corner drag.
+  const [dragging, setDragging] = useState<number | null>(null);
   const [corners, setCorners] = useState<Corner[]>(() => {
     const c = initial?.court;
     return c ? [c.nearLeft, c.nearRight, c.farRight, c.farLeft].filter(Boolean) : [];
@@ -163,6 +186,61 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     initial?.court?.quadKind ?? "full"
   );
   const [videoReady, setVideoReady] = useState(false);
+  // The margin the canvas adds around the video, as a fraction of the canvas
+  // width. Needed in CSS space to work out what "show the video, and nothing
+  // else" means; stored rather than read off the ref because a ref cannot be
+  // read during render.
+  const [frameInset, setFrameInset] = useState(0);
+
+  // UNDO AND REDO over the two things a click can change.
+  //
+  // Snapshots rather than inverse operations. The state being tracked is two
+  // small arrays, so a snapshot costs nothing to take and nothing to reason
+  // about -- where "undo an add" versus "undo a drag" versus "undo a
+  // self-toggle" is three inverses to write and three to get wrong. The
+  // failure this prevents is the one that makes people abandon the screen:
+  // four corners placed, a mis-click on the fourth, and no way back except
+  // starting over.
+  // State rather than refs: `canUndo` has to be readable while rendering, to
+  // grey out a button, and a ref cannot be.
+  const [past, setPast] = useState<Snapshot[]>([]);
+  const [future, setFuture] = useState<Snapshot[]>([]);
+
+  /** Record the state BEFORE a change. Every mutating handler calls this first. */
+  const commit = useCallback(() => {
+    setPast((h) => [...h.slice(-49), { corners, players }]);
+    setFuture([]);
+  }, [corners, players]);
+
+  const undo = useCallback(() => {
+    setPast((h) => {
+      const prev = h[h.length - 1];
+      if (!prev) return h;
+      setFuture((f) => [...f, { corners, players }]);
+      setCorners(prev.corners);
+      setPlayers(prev.players);
+      setDragging(null);
+      return h.slice(0, -1);
+    });
+  }, [corners, players]);
+
+  const redo = useCallback(() => {
+    setFuture((f) => {
+      const next = f[f.length - 1];
+      if (!next) return f;
+      setPast((h) => [...h, { corners, players }]);
+      setCorners(next.corners);
+      setPlayers(next.players);
+      setDragging(null);
+      return f.slice(0, -1);
+    });
+  }, [corners, players]);
+
+  const canUndo = past.length > 0;
+  const canRedo = future.length > 0;
+
+  const clearCourt = useCallback(() => { commit(); setCorners([]); setStage("court"); }, [commit]);
+  const clearPlayers = useCallback(() => { commit(); setPlayers([]); setStage("players"); }, [commit]);
 
   // ZOOM AND PAN, for the two clicks this screen exists to collect.
   //
@@ -194,22 +272,45 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
 
   const MAX_ZOOM = 6;
 
+  // ZOOM 1 IS THE VIDEO, NOT THE CANVAS.
+  //
+  // The canvas is deliberately larger than the video -- PAD_FRAC of margin on
+  // every side -- so that a court corner the camera did not capture can still
+  // be clicked, out past the dashed edge. That margin was always on screen,
+  // which meant the setup screen opened on a letterboxed, slightly shrunken
+  // version of the user's own footage, and the first impression of the product
+  // was a picture that looked wrong.
+  //
+  // So the default view fills the box with the VIDEO, and the margin is what
+  // zooming out reveals -- which is exactly when it is wanted, and only then.
+  const baseScale = frameInset > 0 ? 1 / (1 - 2 * frameInset) : 1;
+  // Below this there is nothing further to show: the whole padded canvas fits.
+  const MIN_ZOOM = frameInset > 0 ? 1 - 2 * frameInset : 1;
+
   /** Keeps the frame from being dragged off its own window. */
   const clampPan = useCallback((p: { x: number; y: number }, z: number) => {
     const box = frameBoxRef.current;
     if (!box) return p;
+    // The canvas's drawn size at this zoom. `base` is what makes the VIDEO,
+    // rather than the padded canvas, fill the box at zoom 1.
+    const base = frameInset > 0 ? 1 / (1 - 2 * frameInset) : 1;
     const w = box.clientWidth, h = box.clientHeight;
-    // At zoom z the canvas is z times the box, so the visible origin may move
-    // between 0 and -(z-1) * size. Anything else shows background.
-    const minX = Math.min(0, w - w * z);
-    const minY = Math.min(0, h - h * z);
-    return { x: Math.max(minX, Math.min(0, p.x)), y: Math.max(minY, Math.min(0, p.y)) };
-  }, []);
+    const drawnW = w * base * z, drawnH = h * base * z;
+    // Bigger than the box: keep it covering the box. Smaller (zoomed out past
+    // the fill point, to see the margin): centre it, because a picture
+    // floating against one edge reads as a bug.
+    const spanX = drawnW >= w ? { lo: w - drawnW, hi: 0 } : { lo: (w - drawnW) / 2, hi: (w - drawnW) / 2 };
+    const spanY = drawnH >= h ? { lo: h - drawnH, hi: 0 } : { lo: (h - drawnH) / 2, hi: (h - drawnH) / 2 };
+    return {
+      x: Math.max(spanX.lo, Math.min(spanX.hi, p.x)),
+      y: Math.max(spanY.lo, Math.min(spanY.hi, p.y)),
+    };
+  }, [frameInset]);
 
   /** Zoom about a point in BOX coordinates, so the pixel under the cursor stays put. */
   const zoomAbout = useCallback((nextZoom: number, boxX: number, boxY: number) => {
     setZoom((z) => {
-      const nz = Math.max(1, Math.min(MAX_ZOOM, nextZoom));
+      const nz = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, nextZoom));
       setPan((p) => {
         // The image point under the cursor before the zoom must be under it
         // after: solve (boxX - p.x) / z === (boxX - p'.x) / nz.
@@ -217,11 +318,11 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
           x: boxX - ((boxX - p.x) * nz) / z,
           y: boxY - ((boxY - p.y) * nz) / z,
         };
-        return nz === 1 ? { x: 0, y: 0 } : clampPan(next, nz);
+        return clampPan(next, nz);
       });
       return nz;
     });
-  }, [clampPan]);
+  }, [clampPan, MIN_ZOOM]);
 
   const onWheel = useCallback((ev: React.WheelEvent<HTMLDivElement>) => {
     const box = frameBoxRef.current;
@@ -231,7 +332,17 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     zoomAbout(zoom * (ev.deltaY < 0 ? 1.15 : 1 / 1.15), ev.clientX - r.left, ev.clientY - r.top);
   }, [zoom, zoomAbout]);
 
-  const resetView = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }); setPanMode(false); }, []);
+  const resetView = useCallback(() => {
+    setZoom(1);
+    setPanMode(false);
+    // At zoom 1 the video exactly fills the box, so the margin on each side is
+    // scrolled off: the left edge of the VIDEO sits at the left of the box.
+    const box = frameBoxRef.current;
+    const w = box?.clientWidth ?? 0, h = box?.clientHeight ?? 0;
+    const base = frameInset > 0 ? 1 / (1 - 2 * frameInset) : 1;
+    setPan({ x: -frameInset * w * base, y: -frameInset * h * base });
+  }, [frameInset]);
+
   // The correction panel. Closed by default: the common case is that the
   // detection is right and the whole job is one click, so the tools for when
   // it is wrong should be one click away rather than always on screen.
@@ -240,7 +351,6 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   const [duration, setDuration] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dragging, setDragging] = useState<number | null>(null);
   const [auto, setAuto] = useState<"idle" | "running" | "done" | "failed">("idle");
   const [autoNote, setAutoNote] = useState<string | null>(null);
   const [showLines, setShowLines] = useState(true);
@@ -254,9 +364,13 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    * excludes a coloured line by construction rather than by degree, so no
    * amount of retrying or threshold-nudging would ever have found one.
    */
-  const [lineColor, setLineColor] = useState<string | null>(initial?.lineColorHex ?? null);
+  // The court fitter can still be TOLD a line colour -- the API takes one, and
+  // a saved preset may carry one -- but nothing asks the user for it any more.
+  // The step explained a real problem (the fitter looks for white paint) in a
+  // paragraph, and was solved for everybody by marking the corners themselves,
+  // which is the same fix with nothing to read.
+  const lineColor: string | null = initial?.lineColorHex ?? null;
   const [matchMode, setMatchMode] = useState<MatchMode>(initial?.matchMode ?? "doubles");
-  const [colourNote, setColourNote] = useState<string | null>(null);
 
   /* ---------------------------------------------------------------------
    * Finding the frame.
@@ -421,58 +535,6 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    * sample OUR blue rather than the paint underneath -- and the fitter would
    * then be told to look for the colour of its own overlay.
    */
-  const pickColourAt = useCallback((p: Corner) => {
-    const video = videoRef.current;
-    if (!video?.videoWidth) return;
-    const x = Math.round(p.x);
-    const y = Math.round(p.y);
-    if (x < 0 || y < 0 || x >= video.videoWidth || y >= video.videoHeight) {
-      setColourNote("That was in the margin, outside the footage. Click a painted line inside the frame.");
-      return;
-    }
-
-    const R = 2;
-    const side = R * 2 + 1;
-    // Clamped so a click near an edge still yields a full patch, rather than
-    // drawImage silently handing back transparent pixels off the frame.
-    const sx = Math.max(0, Math.min(video.videoWidth - side, x - R));
-    const sy = Math.max(0, Math.min(video.videoHeight - side, y - R));
-
-    const off = document.createElement("canvas");
-    off.width = side;
-    off.height = side;
-    const octx = off.getContext("2d", { willReadFrequently: true });
-    if (!octx) return;
-    octx.drawImage(video, sx, sy, side, side, 0, 0, side, side);
-
-    let data: Uint8ClampedArray;
-    try {
-      data = octx.getImageData(0, 0, side, side).data;
-    } catch {
-      // A cross-origin video with no CORS headers taints the canvas and
-      // getImageData throws. Nothing the user can do about it, so say what
-      // it means rather than showing them a SecurityError.
-      setColourNote(
-        "This video is served without the permissions a browser needs to read its pixels, "
-        + "so the colour can't be sampled here. The analysis still works — it will look for white lines."
-      );
-      return;
-    }
-
-    const got = sampleLineColor(data, side, side, x - sx, y - sy, R);
-    if (!got) return;
-    setLineColor(got.hex);
-    setStage(corners.length === 4 ? "players" : "court");
-    // Agreement is how much of the 5x5 patch matched the clicked pixel. A
-    // painted line is thin, so a genuine hit agrees only partly; near-total
-    // agreement means the click landed in the middle of something large,
-    // which on a court is the surface, not a line.
-    setColourNote(
-      got.agreement > 0.9
-        ? `Sampled ${got.hex}, but that click looks like it landed on open court rather than a line — the whole area around it is the same colour. Try again right on the paint.`
-        : `Line colour set to ${got.hex}. Re-detect to fit the court against it.`
-    );
-  }, [corners.length]);
 
   /** The rectangle that represents this player on screen, box or not. */
   const playerRect = useCallback((q: Player): [number, number, number, number] => {
@@ -705,22 +767,26 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     const canvas = canvasRef.current!;
     const scale = canvas.width / canvas.getBoundingClientRect().width;
     const grab = 16 * scale;
-    if (stage === "line-colour") {
-      pickColourAt(p);
-      return;
-    }
     if (stage === "court") {
       const hit = corners.findIndex((c) => Math.hypot(c.x - p.x, c.y - p.y) < grab);
-      if (hit >= 0) { setDragging(hit); return; }
-      if (corners.length < 4) setCorners([...corners, p]);
-    } else {
-      const hit = hitPlayer(players, p, grab * 2);
-      if (hit >= 0) {
-        setPlayers(players.map((q, i) => ({ ...q, isSelf: i === hit ? !q.isSelf : false })));
-        return;
-      }
-      if (players.length < 8) setPlayers([...players, { x: p.x, y: p.y, isSelf: false }]);
+      if (hit >= 0) { commit(); setDragging(hit); return; }
+      if (corners.length < 4) { commit(); setCorners([...corners, p]); }
+      return;
     }
+    if (stage === "players") {
+      // Marking WHO IS ON COURT. A click on somebody already marked removes
+      // them; empty court adds one. Nothing here says which is you.
+      const hit = hitPlayer(players, p, grab * 2);
+      commit();
+      if (hit >= 0) setPlayers(players.filter((_, i) => i !== hit));
+      else if (players.length < 8) setPlayers([...players, { x: p.x, y: p.y, isSelf: false }]);
+      return;
+    }
+    // stage === "self": one of them is you, and only one.
+    const hit = hitPlayer(players, p, grab * 2);
+    if (hit < 0) return;
+    commit();
+    setPlayers(players.map((q, i) => ({ ...q, isSelf: i === hit ? !q.isSelf : false })));
   };
 
   const onMove = (ev: React.MouseEvent<HTMLCanvasElement>) => {
@@ -841,10 +907,11 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    * tools rather than sending the user somewhere else to find them.
    * ------------------------------------------------------------------- */
   const startPlayersOver = () => {
+    commit();
     setStage("players");
     setPlayers([]);
     setFixing(true);
-    setAutoNote("Click each player at their feet, then click yourself again to tag it.");
+    setAutoNote("Click each player at their feet. Then press \u201cPick who I am\u201d and click yourself.");
   };
 
   return (
@@ -859,6 +926,21 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
         style={{ display: "none" }}
         onLoadedData={() => {
           setVideoReady(true);
+          const v = videoRef.current;
+          const box = frameBoxRef.current;
+          if (v?.videoWidth) {
+            const pad = Math.round(Math.min(v.videoWidth, v.videoHeight) * PAD_FRAC);
+            const inset = pad / (v.videoWidth + pad * 2);
+            setFrameInset(inset);
+            // The opening view, set here rather than in an effect: this is the
+            // moment the video's proportions become known, and the box is
+            // already laid out, so the numbers are all in hand.
+            const base = 1 / (1 - 2 * inset);
+            setPan({
+              x: -inset * (box?.clientWidth ?? 0) * base,
+              y: -inset * (box?.clientHeight ?? 0) * base,
+            });
+          }
           setDuration(videoRef.current?.duration ?? 0);
           seek(time || 5);
         }}
@@ -887,10 +969,10 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             // transform-origin at the corner so pan is in plain CSS pixels and
             // the arithmetic in zoomAbout stays readable.
             transformOrigin: "0 0",
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${baseScale * zoom})`,
             cursor: panMode
               ? (panning ? "grabbing" : "grab")
-              : stage === "line-colour" ? "cell" : stage === "court" ? "crosshair" : "pointer",
+              : stage === "court" ? "crosshair" : "pointer",
             opacity: videoReady ? 1 : 0,
             transition: "opacity .2s ease",
           }}
@@ -908,7 +990,8 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             }}
           >
             <button
-              type="button" className="btn btn-ghost btn-sm" title="Zoom out"
+              type="button" className="btn btn-ghost btn-sm"
+              title="Zoom out — keep going to see past the edge of the video, for a corner the camera missed"
               style={{ color: "#dbe6f2", minWidth: 30 }}
               onClick={() => {
                 const b = frameBoxRef.current;
@@ -933,11 +1016,21 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
               onClick={() => setPanMode((v) => !v)}
             >Pan</button>
             <button
-              type="button" className="btn btn-ghost btn-sm" title="Fit the whole frame"
+              type="button" className="btn btn-ghost btn-sm" title="Back to the video's own frame"
               style={{ color: "#dbe6f2" }}
-              disabled={zoom === 1 && pan.x === 0 && pan.y === 0}
               onClick={resetView}
             >Fit</button>
+            <span style={{ width: 1, alignSelf: "stretch", background: "rgba(255,255,255,.18)", margin: "2px 2px" }} />
+            <button
+              type="button" className="btn btn-ghost btn-sm" title="Undo"
+              style={{ color: "#dbe6f2", minWidth: 30 }}
+              disabled={!canUndo} onClick={undo}
+            >↶</button>
+            <button
+              type="button" className="btn btn-ghost btn-sm" title="Redo"
+              style={{ color: "#dbe6f2", minWidth: 30 }}
+              disabled={!canRedo} onClick={redo}
+            >↷</button>
           </div>
         ) : null}
         {!videoReady ? (
@@ -1149,8 +1242,12 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
               <span className="n">{courtDone ? "✓" : "1"}</span> Court &amp; net
             </span>
             <span className="step"><span className="sep" /></span>
-            <span className={`step ${selfChosen ? "done" : stage === "players" ? "cur" : ""}`}>
-              <span className="n">{selfChosen ? "✓" : "2"}</span> Which player is you
+            <span className={`step ${players.length > 0 ? "done" : stage === "players" ? "cur" : ""}`}>
+              <span className="n">{players.length > 0 ? "✓" : "2"}</span> Mark the players
+            </span>
+            <span className="step"><span className="sep" /></span>
+            <span className={`step ${selfChosen ? "done" : stage === "self" ? "cur" : ""}`}>
+              <span className="n">{selfChosen ? "✓" : "3"}</span> Which one is you
             </span>
           </div>
 
@@ -1162,7 +1259,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                   ? "Drag any corner to nudge it. The kitchen line, centre lines and net follow the corners — when those land on the paint, the geometry is right. A corner can sit outside the video: drag it out into the margin past the dashed edge."
                   : `Click the ${CORNER_STEPS[corners.length].label.toLowerCase()} — ${CORNER_STEPS[corners.length].hint}. If it is off-screen, click out in the margin where it would be.`}
               </p>
-              <div className="row g2">
+              <div className="row g2" style={{ flexWrap: "wrap" }}>
                 <button
                   type="button"
                   className={`btn btn-sm ${stage === "court" ? "btn-primary" : "btn-soft"}`}
@@ -1170,76 +1267,26 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                 >
                   {stage === "court" ? "Adjusting corners" : "Adjust corners"}
                 </button>
+                <button
+                  type="button" className="btn btn-ghost btn-sm"
+                  disabled={corners.length === 0}
+                  onClick={clearCourt}
+                >
+                  Clear the court
+                </button>
               </div>
               {/* The example, shown only while the corners are actually being
                   placed. Once they are down the reader has the answer and the
                   diagram is just a thing taking up room. */}
               {stage === "court" && corners.length < 4 ? <CornerGuide compact /> : null}
-              <label className="sm" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
-                <input type="checkbox" checked={quadKind === "near-half"}
-                  onChange={(e) => setQuadKind(e.target.checked ? "near-half" : "full")} />
-                The far baseline is hidden — I marked the net instead
-              </label>
+              {/* The "far baseline is hidden, I marked the net" checkbox used
+                  to live here. It asked the user to classify their own
+                  camera angle, in a sentence that only makes sense once you
+                  already understand what the fitter does with it -- and the
+                  detector reports the same fact itself. It still does; nobody
+                  is asked. */}
               {/* Presets live in the MAIN view now. Two copies of one control
                   in two panels is two places for the same state to disagree. */}
-            </div>
-
-            <div className="stack g2">
-              <strong style={{ fontSize: 14 }}>Line colour</strong>
-              <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
-                The court fitter looks for white paint. If yours is blue,
-                yellow or black it will not find the court at all — no amount
-                of retrying helps, because it is testing for
-                &ldquo;bright and colourless&rdquo;. Click a line to sample its
-                real colour, then re-detect.
-              </p>
-              <div className="row g2" style={{ alignItems: "center" }}>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${stage === "line-colour" ? "btn-primary" : "btn-soft"}`}
-                  onClick={() => {
-                    setStage(stage === "line-colour" ? "court" : "line-colour");
-                    setColourNote(stage === "line-colour" ? null : "Click straight down the middle of a painted line.");
-                  }}
-                >
-                  {stage === "line-colour" ? "Cancel" : lineColor ? "Pick again" : "Pick the line colour"}
-                </button>
-                {lineColor ? (
-                  <>
-                    <span
-                      aria-label={`Sampled line colour ${lineColor}`}
-                      style={{
-                        width: 22, height: 22, borderRadius: 6, background: lineColor,
-                        border: "1px solid var(--line)", flex: "0 0 auto",
-                      }}
-                    />
-                    <code className="num sm" style={{ opacity: 0.8 }}>{lineColor}</code>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => { setLineColor(null); setColourNote("Back to looking for white lines."); }}
-                    >
-                      Clear
-                    </button>
-                  </>
-                ) : (
-                  <span className="sm" style={{ opacity: 0.6 }}>Assuming white</span>
-                )}
-              </div>
-              {lineColor ? (
-                <button
-                  type="button"
-                  className="btn btn-soft btn-sm"
-                  disabled={auto === "running"}
-                  onClick={() => void findFrame(lineColor)}
-                  style={{ alignSelf: "flex-start" }}
-                >
-                  {auto === "running" ? "Re-detecting…" : "Re-detect with this colour"}
-                </button>
-              ) : null}
-              {colourNote ? (
-                <p className="sm" style={{ margin: 0, opacity: 0.75 }}>{colourNote}</p>
-              ) : null}
             </div>
 
             <div className="stack g2">
@@ -1274,16 +1321,36 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             <div className="stack g2">
               <strong style={{ fontSize: 14 }}>The players are wrong</strong>
               <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
-                Click anywhere on a player to tag them as you. Click empty court
-                to add someone the detector missed. Everyone on your court is
-                tracked either way — this only says which one is you.
+                {stage === "self"
+                  ? "Click the person who is you. Only one can be, so clicking somebody else moves the tag rather than adding a second."
+                  : "Click each player at their feet. Click a marked player again to remove them. Everyone on your court is tracked either way — who is you comes next."}
               </p>
-              <div className="row g2">
-                <button type="button" className="btn btn-soft btn-sm" onClick={startPlayersOver}>
+              <div className="row g2" style={{ flexWrap: "wrap" }}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={startPlayersOver}>
                   Redo the players
                 </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setStage("players")}>
-                  Pick who I am
+                <button
+                  type="button"
+                  className={`btn btn-sm ${stage === "players" ? "btn-primary" : "btn-soft"}`}
+                  onClick={() => setStage("players")}
+                >
+                  {stage === "players" ? "Choosing players" : "Choose players"}
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${stage === "self" ? "btn-primary" : "btn-soft"}`}
+                  disabled={players.length === 0}
+                  title={players.length === 0 ? "Mark the players first" : undefined}
+                  onClick={() => setStage("self")}
+                >
+                  {stage === "self" ? "Picking who I am" : "Pick who I am"}
+                </button>
+                <button
+                  type="button" className="btn btn-ghost btn-sm"
+                  disabled={players.length === 0}
+                  onClick={clearPlayers}
+                >
+                  Clear all players
                 </button>
               </div>
             </div>
