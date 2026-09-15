@@ -1003,3 +1003,41 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .fb-reasons .chip{font-size:12px;padding:4px 10px}
 .fb-note-input{flex:1;min-width:200px;height:34px;font-size:13px}
 .fb-compact{margin-top:6px;padding-top:6px}
+
+/* ---------------------------------------------------------------------------
+   "Why am I being told this?"
+
+   Styled as a quiet closed thing that opens into something substantial. A
+   reader who accepts the claim should not have to scroll past the evidence for
+   it; a reader who does not believe it should find everything in one place the
+   moment they ask.
+   --------------------------------------------------------------------------- */
+.why{margin-top:var(--a3);border-top:1px solid var(--line);padding-top:var(--a3)}
+.why-sum{
+  cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px;
+  font-size:13px;color:var(--ink-2);
+  /* Underlined rather than button-shaped: it is a question the page invites,
+     not an action competing with the drill and the feedback controls beside it. */
+  text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--line)
+}
+.why-sum::-webkit-details-marker{display:none}
+.why-sum::before{content:"?";display:grid;place-items:center;width:16px;height:16px;border-radius:50%;
+  background:var(--line);color:var(--ink-2);font-size:10px;font-weight:700;flex:none}
+.why-sum:hover{color:var(--ink)}
+details[open] > .why-sum{margin-bottom:var(--a3)}
+.why-body{display:flex;flex-direction:column;gap:var(--a3)}
+.why-lead{margin:0;font-size:14px;color:var(--ink-2)}
+.why-clip{margin:0;display:flex;flex-direction:column;gap:6px}
+/* Capped rather than full-bleed: three seconds of a rally is a detail inside a
+   coaching point, and a video the width of the column reads as the subject of
+   the page rather than the support for a sentence. */
+.why-clip video{width:100%;max-width:520px;border-radius:var(--r3);background:#0b0f14;display:block}
+.why-noclip{margin:0;color:var(--ink-3)}
+.why-before{display:flex;flex-direction:column;gap:6px}
+.why-grid{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.why-row{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:var(--r3);
+  background:var(--card);border:1px solid var(--line)}
+.why-row dt{font-family:var(--data);font-size:10px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3)}
+.why-row dd{margin:0;font-size:13px;color:var(--ink)}
+.why-conf{margin:0;color:var(--ink-3)}

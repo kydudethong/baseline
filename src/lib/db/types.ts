@@ -685,10 +685,22 @@ export type CoachingObservationRow = {
   drill_slug: string | null;
   /** Position in the rally, when the observation is about one specific shot. */
   shot_idx: number | null;
+  /**
+   * The clip that shows this moment, cut from the overlay it was read from.
+   *
+   * Null is normal and not a failure: an observation about the clip as a whole
+   * has no single moment to cut, and a cut can fail without the observation
+   * becoming less true. The UI shows the claim either way and the evidence
+   * when there is some.
+   */
+  clip_path: string | null;
+  /** Which bucket clip_path is in, mirroring analyses.debug_video_bucket. */
+  clip_bucket: string | null;
 };
 export type CoachingObservationInsert =
   Omit<CoachingObservationRow, "id" | "dismissed"
-       | "why_it_matters" | "what_to_change" | "drill_slug" | "shot_idx">
+       | "why_it_matters" | "what_to_change" | "drill_slug" | "shot_idx"
+       | "clip_path" | "clip_bucket">
   & {
     id?: string;
     dismissed?: boolean;
@@ -698,6 +710,10 @@ export type CoachingObservationInsert =
     what_to_change?: string | null;
     drill_slug?: string | null;
     shot_idx?: number | null;
+    // Written by a later step than the insert: the clip is cut after the read
+    // exists, because the read is what says which moments are worth cutting.
+    clip_path?: string | null;
+    clip_bucket?: string | null;
   };
 export type CoachingObservationUpdate = Partial<CoachingObservationInsert>;
 
@@ -805,6 +821,10 @@ export type CoachingShotTechniqueRow = {
   stroke_visible: boolean;
   paddle_face: string | null;
   contact_height: string | null;
+  /** Shoulders BEFORE contact — where a late preparation actually shows. */
+  shoulder_rotation: string | null;
+  /** Stance and weight at contact: set, moving, reaching, off the back foot. */
+  foot_position: string | null;
   correction: string | null;
   confidence: string | null;
   /** The exact window judged — and therefore the exact window to play back. */

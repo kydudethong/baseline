@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import type { CoachingObservationRow } from "@/lib/db/types";
 import { FeedbackButtons } from "./FeedbackButtons";
+import { WhyThis } from "./WhyThis";
+import type { CoachingShotTechniqueRow } from "@/lib/db/types";
 
 /**
  * One coaching point, in the order a coach would actually say it:
@@ -17,6 +19,7 @@ import { FeedbackButtons } from "./FeedbackButtons";
  */
 export function CoachingInsight({
   observation, drillName, hero = false, action, eyebrow, analysisId, initialVerdict,
+  clipUrl, technique,
 }: {
   observation: CoachingObservationRow;
   /** Resolved from the drill catalogue; the row only stores a slug. */
@@ -30,6 +33,10 @@ export function CoachingInsight({
   analysisId?: string;
   /** This user's existing verdict, so the control shows what they already said. */
   initialVerdict?: "right" | "wrong" | "unsure" | null;
+  /** The clip cut around this observation's moment, when one was cut. */
+  clipUrl?: string | null;
+  /** What the technique pass saw at that moment, when it was one of the shots read. */
+  technique?: CoachingShotTechniqueRow | null;
 }) {
   const o = observation;
   const isStrength = o.valence === "strength";
@@ -67,6 +74,12 @@ export function CoachingInsight({
           <span>{drillName ?? o.drill_slug}</span>
         </div>
       ) : null}
+
+      {/* The evidence, above the "is this right?" control on purpose: somebody
+          about to disagree should have had the chance to look at what the
+          claim rests on first. That is the difference between a disagreement
+          and a dismissal. */}
+      <WhyThis observation={o} clipUrl={clipUrl} technique={technique} />
 
       {/* The correction, on the thing being corrected.
           Per COACHING POINT rather than per page: "the read was wrong" is not

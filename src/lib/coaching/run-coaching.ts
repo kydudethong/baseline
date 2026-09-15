@@ -42,6 +42,7 @@ import { fillApproachTimes } from "./approach-times";
 import { activeWindows } from "./active-windows";
 import { recordCapture } from "./capture";
 import { readOverlayBytes, OverlayMissingError } from "./overlay-source";
+import { cutEvidenceClips } from "./evidence-clips";
 import { OVERLAY_LEGEND } from "./overlay-legend";
 import { getAllDrills } from "./drills";
 import type { CoachingDrillRow } from "@/lib/db/types";
@@ -250,6 +251,11 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   });
 
   let analyst;
+  // Hoisted: the evidence clips at the end are cut from these same bytes --
+  // the ones the model actually watched. Re-reading them, or re-rendering
+  // them, would open the door to a clip and an overlay disagreeing about what
+  // happened, which is the one thing a piece of evidence must never do.
+  let overlayBytes: Uint8Array | null = null;
   try {
     const overlay = await readOverlayBytes(
       analysisId, analysis.debug_video_bucket ?? null, analysis.debug_video_path ?? null
@@ -259,6 +265,7 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     // what an analysis costs -- roughly half a recreational game is people
     // walking to fetch a ball, and the model was being charged full price at
     // 10fps and high resolution to watch all of it.
+    overlayBytes = overlay;
     const gate = activeWindows(
       (tracksRes.data ?? []).map((t) =>
         ((t.points as Array<{ timestampSeconds: number; boxImageNorm?: { x: number; y: number } }> | null) ?? [])
@@ -391,6 +398,8 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
           stroke_visible: t.strokeVisible,
           paddle_face: t.paddleFace,
           contact_height: t.contactHeight,
+          shoulder_rotation: t.shoulderRotation,
+          foot_position: t.footPosition,
           correction: t.correction,
           confidence: t.confidence,
           clip_start_s: t.clipStartSeconds,
@@ -636,8 +645,39 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       drill_slug: o.drill_slug && validSlugs.has(o.drill_slug) ? o.drill_slug : null,
       shot_idx: shotIdxAt(o.shot_t),
     }));
-    const { error: insertObsError } = await supabase.from("coaching_observations").insert(obsRows);
+    const { data: inserted, error: insertObsError } = await supabase
+      .from("coaching_observations").insert(obsRows).select("id, t_s, severity");
     if (insertObsError) throw insertObsError;
+
+    // THE EVIDENCE. Every observation that names a moment gets the footage of
+    // that moment, cut from the overlay the model read.
+    //
+    // After the insert rather than before it, and never throwing: the read is
+    // already written and a failed cut must not lose it. An observation
+    // without a clip is still a true observation -- it just cannot be checked,
+    // and the UI shows it without a play control rather than with a broken one.
+    if (overlayBytes && inserted && inserted.length > 0) {
+      try {
+        const clips = await cutEvidenceClips({
+          analysisId,
+          overlayBytes,
+          clipSeconds: Number(analysis.video?.duration_seconds ?? 0),
+          requests: (inserted as Array<{ id: string; t_s: number | null; severity: number }>)
+            .filter((r) => r.t_s !== null)
+            .map((r) => ({ id: r.id, tSeconds: Number(r.t_s), severity: r.severity })),
+          onLog: (line) => console.error(`[coaching] ${line}`),
+        });
+        for (const c of clips) {
+          const { error } = await supabase
+            .from("coaching_observations")
+            .update({ clip_path: c.path, clip_bucket: c.bucket })
+            .eq("id", c.id);
+          if (error) console.warn(`[coaching] clip path not recorded: ${describeError(error)}`);
+        }
+      } catch (err) {
+        console.warn(`[coaching] evidence clips skipped: ${describeError(err)}`);
+      }
+    }
   }
 
   if (out.skills.length > 0) {

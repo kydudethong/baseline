@@ -9,6 +9,7 @@ import { getPhase2Data } from "@/lib/db/vision";
 import { getProfile } from "@/lib/db/profiles";
 import { getCoachingData } from "@/lib/db/coaching";
 import { feedbackForAnalysis } from "@/lib/db/feedback";
+import { evidenceForObservations } from "@/lib/db/evidence";
 import { getBlueprintsForAnalysis } from "@/lib/db/blueprints";
 import { getPracticePlan } from "@/lib/db/practice-plan";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
@@ -169,6 +170,9 @@ async function AnalysisBreakdown({
   // Computed once and shared, so the workspace and the read below cannot
   // disagree about which point leads — if they did, it would print twice.
   const hero = topPriorityObservation(coachingData.observations);
+  // The footage behind each claim. After the parallel fetch above because it
+  // needs the observations it is evidence for.
+  const evidence = await evidenceForObservations(supabase, analysis.id, coachingData.observations);
 
   const video = analysis.video;
   let videoUrl: string | null = null;
@@ -298,6 +302,7 @@ async function AnalysisBreakdown({
             skillKeysWithBlueprint={skillKeysWithBlueprint}
             drillNames={drillNames}
             feedback={feedback}
+            evidence={evidence}
           />
         </section>
       ) : (

@@ -63,6 +63,10 @@ export interface ShotTechnique {
   strokeVisible: boolean;
   paddleFace: string | null;
   contactHeight: string | null;
+  /** Shoulders before contact: turned, square, opening early. */
+  shoulderRotation: string | null;
+  /** Stance and weight at contact: set, moving, reaching, off-balance. */
+  footPosition: string | null;
   correction: string | null;
   confidence: string | null;
   clipStartSeconds: number;
@@ -84,6 +88,22 @@ const SCHEMA = {
           },
           paddle_face: { type: "string", nullable: true, description: "open / closed / neutral / cannot tell" },
           contact_height: { type: "string", nullable: true, description: "Relative to the striker's own body." },
+          // THE BODY, not just the paddle. A late preparation shows in the
+          // shoulders and the feet long before it shows at the contact, and
+          // "your preparation is late" is unanswerable without them -- the
+          // player has nothing to check it against and nothing to change.
+          shoulder_rotation: {
+            type: "string", nullable: true,
+            description:
+              "Shoulders in the frames BEFORE contact: already turned, still square, "
+              + "opening early. Say 'cannot tell' rather than guessing from one frame.",
+          },
+          foot_position: {
+            type: "string", nullable: true,
+            description:
+              "Stance and weight at contact: set and balanced, still moving, reaching, "
+              + "off the back foot. 'cannot tell' if the feet are out of frame or blurred.",
+          },
           correction: { type: "string", nullable: true, description: "The single most useful change, in a coach's words." },
           confidence: { type: "string", nullable: true, description: "high / medium / low, and why." },
         },
@@ -173,6 +193,10 @@ function promptFor(
     "",
     "RULES",
     "- At this frame rate you CAN see the paddle, the backswing, the contact and the follow-through.",
+    "- Describe the BODY as well as the paddle: where the shoulders were before contact, and what",
+    "  the feet were doing at it. Those two are the evidence behind almost every correction worth",
+    "  making, and a correction the player cannot check against their own footage is one they are",
+    "  entitled to ignore.",
     "  Describe them. Do not describe spin or where on the face contact was made — those are not",
     "  visible from this camera angle at any frame rate.",
     "- A player in the far court is small in frame. Judge what you can, say in `confidence` that",
@@ -226,6 +250,7 @@ export async function readTechnique(opts: {
       const out = await generateJSON<{
         shots?: Array<{
           t?: number; stroke_visible?: boolean; paddle_face?: string | null;
+          shoulder_rotation?: string | null; foot_position?: string | null;
           contact_height?: string | null; correction?: string | null; confidence?: string | null;
         }>;
         pattern?: string | null;
@@ -251,6 +276,8 @@ export async function readTechnique(opts: {
           tSeconds: Math.round(sh.t! * 100) / 100,
           strokeVisible: sh.stroke_visible === true,
           paddleFace: sh.paddle_face ?? null,
+          shoulderRotation: sh.shoulder_rotation ?? null,
+          footPosition: sh.foot_position ?? null,
           contactHeight: sh.contact_height ?? null,
           correction: sh.correction ?? null,
           confidence: sh.confidence ?? null,

@@ -97,3 +97,29 @@ export async function debugVideoUrl(
     return null;
   }
 }
+
+/**
+ * A URL for one evidence clip, or null when there is nothing to play.
+ *
+ * Same two-bucket resolution as the overlay, and deliberately a separate
+ * function rather than a flag on debugVideoUrl: a missing overlay is a broken
+ * analysis, while a missing clip is an ordinary absence -- an observation
+ * about the clip as a whole has no single moment to cut. Sharing one code path
+ * would mean sharing one meaning for null, and they are not the same thing.
+ */
+export async function evidenceClipUrl(
+  clipPath: string | null,
+  clipBucket: string | null
+): Promise<string | null> {
+  if (!clipPath) return null;
+  if ((clipBucket ?? LOCAL_BUCKET) === LOCAL_BUCKET) {
+    const onDisk = path.join(debugVideoDir(), clipPath);
+    return fs.existsSync(onDisk) ? `/rally-debug/${clipPath}` : null;
+  }
+  const { getSignedDownloadUrl } = await import("@/lib/storage/r2");
+  try {
+    return await getSignedDownloadUrl(clipPath);
+  } catch {
+    return null;
+  }
+}

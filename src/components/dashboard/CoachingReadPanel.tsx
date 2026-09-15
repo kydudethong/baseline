@@ -5,6 +5,7 @@ import { rankObservations, topPriorityObservation } from "@/lib/coaching/ranking
 import { SkillMeter } from "@/components/breakdown/SkillMeter";
 import { Check, Paddle } from "@/components/motifs/Motifs";
 import { CoachingInsight } from "@/components/analysis/CoachingInsight";
+import type { CoachingShotTechniqueRow } from "@/lib/db/types";
 import { BuildBlueprintButton } from "./BuildBlueprintButton";
 
 /**
@@ -44,6 +45,7 @@ export function CoachingReadPanel({
   skillKeysWithBlueprint,
   drillNames = {},
   feedback,
+  evidence,
 }: {
   read: CoachingReadRow;
   observations: CoachingObservationRow[];
@@ -55,6 +57,12 @@ export function CoachingReadPanel({
   drillNames?: Record<string, string>;
   /** observation id → this user's existing verdict, so the control is not blank. */
   feedback?: Map<string, "right" | "wrong" | "unsure">;
+  /**
+   * observation id → the clip that shows it and the technique read at that
+   * moment. Resolved on the server, because a clip URL may be a signed one
+   * with an expiry and that is not a thing to mint in the browser.
+   */
+  evidence?: Map<string, { clipUrl: string | null; technique: CoachingShotTechniqueRow | null }>;
 }) {
   const coaching = parseCoaching(read.coaching_json);
   const quality = read.quality as { usable: boolean; issues: string[] } | null;
@@ -200,6 +208,8 @@ export function CoachingReadPanel({
           <CoachingInsight
             analysisId={analysisId}
             initialVerdict={feedback?.get(hero.id) ?? null}
+            clipUrl={evidence?.get(hero.id)?.clipUrl ?? null}
+            technique={evidence?.get(hero.id)?.technique ?? null}
             observation={hero}
             drillName={hero.drill_slug ? drillNames[hero.drill_slug] : null}
             hero
@@ -224,6 +234,8 @@ export function CoachingReadPanel({
               <CoachingInsight
                 analysisId={analysisId}
                 initialVerdict={feedback?.get(o.id) ?? null}
+                clipUrl={evidence?.get(o.id)?.clipUrl ?? null}
+                technique={evidence?.get(o.id)?.technique ?? null}
                 key={o.id}
                 observation={o}
                 drillName={o.drill_slug ? drillNames[o.drill_slug] : null}
