@@ -63,6 +63,12 @@ primary_region = "sjc"
   # frames of CPU inference on a machine with no accelerator. Past this many,
   # the clip is sampled evenly end to end rather than read in full.
   POSE_MAX_FRAMES = "1800"
+
+  # The overlay is rendered at 720p whatever the source is. 1080p buys nothing:
+  # the coaching model resizes every frame it is given to roughly a 768px tile
+  # before looking at it, and a person scrubbing is checking whether the boxes
+  # sit on the players. 0 renders at the source resolution.
+  OVERLAY_MAX_HEIGHT = "720"
   # Court and skeleton line weights, as multipliers. Thin on purpose: every
   # pixel of drawn line is a pixel not spent on the ball, and court markings
   # do not move and do not need finding. Raise either for a human reader.

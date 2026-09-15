@@ -109,8 +109,47 @@ def main() -> int:
         print(f"cannot open {args.video}", file=sys.stderr)
         return 1
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    # RENDERED AT 720p, WHATEVER THE SOURCE IS, and this is the single largest
+    # saving available in the whole pipeline.
+    #
+    # This stage is the longest one in a run and the one runs die in. On a
+    # 13.7-minute clip at 15fps out it is 12,363 frames to draw on, sharpen and
+    # H.264-encode -- and at 1080p each of those is 6MB of raw pixels through
+    # every one of those steps.
+    #
+    # 1080p buys nothing. The coaching model resizes every frame it is given to
+    # roughly a 768px tile before it looks at it, so rendering at 1920 wide to
+    # hand it to something that immediately throws two thirds of that away is
+    # 2.25x the work for no information. A person scrubbing the overlay is
+    # looking at whether the boxes sit on the players, which 720p answers.
+    #
+    # Everything drawn below is in NORMALISED coordinates except the court, the
+    # net and the ball gate, which are in source pixels -- those are scaled once,
+    # here, so no drawing code has to know this happened.
+    max_h = max(0, int(os.environ.get("OVERLAY_MAX_HEIGHT", "720")))
+    if max_h and src_h > max_h:
+        # Even dimensions: H.264 with yuv420p cannot encode an odd one.
+        w = (round(src_w * max_h / src_h) // 2) * 2
+        h = (max_h // 2) * 2
+    else:
+        w, h = src_w, src_h
+    downscaled = (w, h) != (src_w, src_h)
+    if downscaled:
+        k = w / src_w
+        corners = [[p[0] * k, p[1] * k] for p in corners] if corners else corners
+        net = [[p[0] * k, p[1] * k] for p in net] if net else net
+        ball_gate = [[p[0] * k, p[1] * k] for p in ball_gate] if ball_gate else ball_gate
+        if band:
+            band = {
+                "base": [[p[0] * k, p[1] * k] for p in band["base"]],
+                "top": [[p[0] * k, p[1] * k] for p in band["top"]],
+            }
+        print(f"[overlay] {src_w}x{src_h} source rendered at {w}x{h} "
+              f"({(src_w * src_h) / (w * h):.2f}x less to draw and encode)",
+              file=sys.stderr, flush=True)
 
     # Seek by FRAME, not by CAP_PROP_POS_MSEC.  Seeking by milliseconds lands
     # on the nearest keyframe on some containers and reports a position that
@@ -269,22 +308,40 @@ def main() -> int:
     while True:
         if end_frame is not None and i > end_frame:
             break
-        ok, img = cap.read()
-        if not ok:
+        # GRAB, THEN RETRIEVE ONLY WHAT IS DRAWN ON.
+        #
+        # cap.read() is grab + retrieve, and retrieve is the expensive half:
+        # it converts the decoded frame into a BGR numpy array. On 60fps
+        # footage written at 15 this loop skips three frames out of every four,
+        # and it was paying full price to materialise every one of them before
+        # throwing it away. grab() advances the stream without building the
+        # array, so the skipped three now cost a fraction of what they did.
+        #
+        # The comment this replaces said decoding "is the cheap half". It is
+        # not, and that assumption is a good part of why this stage is the one
+        # runs die in.
+        if not cap.grab():
             break
         # Absolute time in the SOURCE video, so every lookup below is against
         # the same timeline the data was recorded on.
         t = i / fps
         frame_index = i
         i += 1
-        # Decoded but not drawn on: skipping before the drawing is where the
-        # saving is. Decoding still has to happen to advance the stream, and it
-        # is the cheap half.
-        #
         # One frame per output slot: this frame is skipped if the slot its
         # timestamp falls in has already been filled.
         if (t - start_time) * out_fps < written:
             continue
+        ok, img = cap.retrieve()
+        if not ok:
+            break
+
+        if downscaled:
+            # After the skip, not before: there is no point shrinking a frame
+            # nobody is going to draw on. INTER_AREA is the right filter for
+            # shrinking -- it averages the pixels it discards rather than
+            # sampling one of them, which is what keeps a twelve-pixel ball
+            # visible instead of aliased away.
+            img = cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
 
         # SHARPEN THE FOOTAGE, before a single overlay line is drawn on it.
         #
