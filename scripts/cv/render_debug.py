@@ -123,6 +123,7 @@ def main() -> int:
         start_frame = max(0, int(round(args.start * fps)))
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     end_frame = None if args.end is None else int(round(args.end * fps))
+    start_time = start_frame / fps
 
     # OUTPUT FRAME RATE, and the reason this exists.
     #
@@ -142,9 +143,22 @@ def main() -> int:
     # written at out_fps so a given second of output is the same second of
     # source. Decimating without also setting the writer's rate would speed the
     # video up and silently offset every timestamp the model reports.
+    # SELECTED BY TIME, not by taking every Nth frame.
+    #
+    # Integer stepping could only ever produce source_fps divided by a whole
+    # number: from 24fps footage that is 24, 12, 8, 6 and nothing in between.
+    # Ask it for 15 and it quietly gives 12 -- which matters now, because the
+    # coaching model samples this video at its own rate and anything the
+    # renderer fails to deliver is a duplicate frame the run paid full price
+    # for.
+    #
+    # Choosing the first source frame at or after each output slot gives the
+    # requested rate exactly, for any request up to the source rate, and every
+    # emitted frame is still a real distinct frame rather than an interpolated
+    # one.
     out_fps = min(fps, float(args.out_fps)) if args.out_fps else fps
-    step = max(1, int(round(fps / out_fps))) if out_fps > 0 else 1
-    out_fps = fps / step  # the rate actually produced, after integer stepping
+    if out_fps <= 0:
+        out_fps = fps
 
     ff = subprocess.Popen(
         ["ffmpeg", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{w}x{h}",
@@ -157,8 +171,8 @@ def main() -> int:
     written = 0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     span = (end_frame if end_frame is not None else (total_frames or 0)) - start_frame
-    total_out = max(0, span // step) if span > 0 else 0
-    print(f"[overlay] source {fps:.1f}fps -> writing {out_fps:.1f}fps (1 frame in {step}), "
+    total_out = max(0, int(span / fps * out_fps)) if span > 0 else 0
+    print(f"[overlay] source {fps:.1f}fps -> writing {out_fps:.1f}fps, "
           f"~{total_out or '?'} frames to draw", file=sys.stderr, flush=True)
 
     # Index by time for cheap lookup.
@@ -244,7 +258,10 @@ def main() -> int:
         # Decoded but not drawn on: skipping before the drawing is where the
         # saving is. Decoding still has to happen to advance the stream, and it
         # is the cheap half.
-        if (frame_index - start_frame) % step != 0:
+        #
+        # One frame per output slot: this frame is skipped if the slot its
+        # timestamp falls in has already been filled.
+        if (t - start_time) * out_fps < written:
             continue
 
         # SHARPEN THE FOOTAGE, before a single overlay line is drawn on it.

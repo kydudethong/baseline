@@ -28,30 +28,11 @@ import { mapWithConcurrency } from "./concurrency";
 import { mergeAnalystOutputs } from "./analyst-merge";
 import { SKILLS, COACHING_DIMENSIONS, type CoachingDimension } from "./types";
 
-/**
- * Frames per second for the SCAN.
- *
- * Five, and the number is a compromise between two things that pull opposite
- * ways. Gemini's 1fps default cannot count the contacts in a fast kitchen
- * exchange -- four frames of a four-second rally with six shots in it -- so
- * the counting this pass is responsible for needs more. But a stroke lasts
- * about a third of a second, so SEEING a swing needs ten or more, and paying
- * ten-frames-per-second rates across a whole match to read fifteen swings is
- * most of a $2.50 bill spent on footage where nothing is being judged.
- *
- * FIFTEEN, September 2026, and the reason is the BALL rather than the swing.
- *
- * Ten was already enough to see a stroke. What ten is not enough for is a ball
- * travelling thirty miles an hour: it crosses a large part of the court
- * between samples, and the frames it does appear in are as likely as not the
- * ones where it is a streak rather than a dot. Fifteen is half again as many
- * chances to catch it sharp, and catching it is what makes a contact a
- * contact.
- *
- * It costs half again as much, linearly, and it shortens how much video fits
- * in one call to about two and a half minutes. ANALYST_FPS=10 steps back.
- */
-export const ANALYST_FPS = 15;
+// The scan's frame rate lives in read-rate.ts, because the OVERLAY RENDERER
+// needs the same number and importing this module would drag the Gemini client
+// into the vision layer. Re-exported so every existing caller is unchanged.
+export { ANALYST_FPS, analystFps } from "./read-rate";
+import { analystFps } from "./read-rate";
 
 /**
  * Segment calls in flight at once.
@@ -86,16 +67,6 @@ export const ANALYST_CONCURRENCY = 2;
 export function analystMediaResolution(): "low" | "medium" | "high" {
   const v = (process.env.ANALYST_MEDIA_RESOLUTION ?? "high").toLowerCase();
   return v === "low" ? "low" : v === "medium" ? "medium" : "high";
-}
-
-/** Frames per second, overridable for the same reason. */
-export function analystFps(): number {
-  const v = Number(process.env.ANALYST_FPS);
-  // Below about 3fps a stroke stops being visible at all (it lasts roughly a
-  // third of a second), which would silently turn technique back into guesses
-  // while still charging for the pass. Above 15 buys nothing a paddle swing
-  // needs and shrinks the segment length fast.
-  return Number.isFinite(v) && v >= 3 && v <= 15 ? v : ANALYST_FPS;
 }
 
 const SHOT_TYPES = [

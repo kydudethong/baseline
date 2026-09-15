@@ -25,6 +25,7 @@ export function cvPython(): string {
   return process.env.CV_PYTHON || "python3";
 }
 import { activeRunSignal } from "../analysis/run-registry";
+import { overlayFps } from "../coaching/read-rate";
 
 const POSE_MODEL_PATH = path.join(process.cwd(), "models", "yolov8n-pose.pt");
 
@@ -467,7 +468,21 @@ export async function renderOverlayViaPython(
   outPath: string,
   opts: { startS?: number; endS?: number; sourceFrames: number } = { sourceFrames: 1 }
 ): Promise<void> {
-  const args = [path.resolve(videoPath), "--data", dataPath, "--out", outPath];
+  const args = [
+    path.resolve(videoPath), "--data", dataPath, "--out", outPath,
+    // ASKED FOR, not assumed.
+    //
+    // The overlay is the coaching model's input, and the model samples it at
+    // analystFps(). Writing it any slower hands the model duplicate frames: it
+    // cannot sample fifteen distinct frames a second out of a ten-frame-a-
+    // second video, so the extra samples carry nothing and the run is billed
+    // at the higher rate for the lower rate's information.
+    //
+    // This shipped wrong once -- the read rate was raised and the write rate
+    // was not -- which is exactly what happens when two files each hold their
+    // own copy of one number.
+    "--out-fps", String(overlayFps()),
+  ];
   if (opts.startS !== undefined && opts.endS !== undefined) {
     args.push("--start", opts.startS.toFixed(3), "--end", opts.endS.toFixed(3));
   }
