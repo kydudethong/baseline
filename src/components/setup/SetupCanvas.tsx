@@ -338,9 +338,19 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     // At zoom 1 the video exactly fills the box, so the margin on each side is
     // scrolled off: the left edge of the VIDEO sits at the left of the box.
     const box = frameBoxRef.current;
-    const w = box?.clientWidth ?? 0, h = box?.clientHeight ?? 0;
+    // BOTH OFFSETS COME FROM THE WIDTH, and the reason is worth stating
+    // because using the height looked obviously right and was wrong.
+    //
+    // The margin is the same number of CANVAS pixels on every side, and the
+    // canvas is scaled uniformly, so the margin is the same number of SCREEN
+    // pixels on every side too. The box's height is not that number -- it is
+    // shorter than its width on a landscape frame, so a y offset derived from
+    // it was too small, and the top band of margin stayed on screen while the
+    // bottom of the video was cropped away under it.
+    const w = box?.clientWidth ?? 0;
     const base = frameInset > 0 ? 1 / (1 - 2 * frameInset) : 1;
-    setPan({ x: -frameInset * w * base, y: -frameInset * h * base });
+    const offset = -frameInset * w * base;
+    setPan({ x: offset, y: offset });
   }, [frameInset]);
 
   // The correction panel. Closed by default: the common case is that the
@@ -936,10 +946,10 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             // moment the video's proportions become known, and the box is
             // already laid out, so the numbers are all in hand.
             const base = 1 / (1 - 2 * inset);
-            setPan({
-              x: -inset * (box?.clientWidth ?? 0) * base,
-              y: -inset * (box?.clientHeight ?? 0) * base,
-            });
+            // Same offset on both axes: an equal canvas-pixel margin under a
+            // uniform scale is an equal screen-pixel margin.
+            const offset = -inset * (box?.clientWidth ?? 0) * base;
+            setPan({ x: offset, y: offset });
           }
           setDuration(videoRef.current?.duration ?? 0);
           seek(time || 5);
