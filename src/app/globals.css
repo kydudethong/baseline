@@ -1102,3 +1102,84 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
   .setup-tools{top:6px;right:6px;flex-wrap:wrap;max-width:calc(100% - 12px);justify-content:flex-end}
   .setup-tools .btn-sm{min-width:34px;padding:0 8px}
 }
+
+/* ---------------------------------------------------------------------------
+   PHONE NAVIGATION — a bottom bar, not a squeezed rail.
+   
+   The 900px rule turned the rail into a horizontal strip and hid the labels,
+   which works on a tablet and does not work on a phone: mark plus wordmark
+   plus six icons plus "+ Analyze a game" plus an avatar is around 400px of
+   content in 375px of screen, so the wordmark clipped, the nav collapsed to
+   whatever fitted, and four of the six destinations were simply unreachable.
+   
+   Six destinations on a phone is a bottom tab bar. It is the pattern every
+   phone app uses for the same reason -- it is where the thumb already is,
+   it holds six items comfortably with labels, and it takes the pressure off
+   the top row, which then has room for the one action worth a button.
+   --------------------------------------------------------------------------- */
+@media (max-width:640px){
+  .rail{
+    /* Top row: mark, then the action, then the account. Nothing else. */
+    gap:var(--a3);padding:var(--a3) var(--a4);
+  }
+  /* The wordmark is the first thing to go: the mark alone is unambiguous when
+     it sits in the corner of the app it names. */
+  .rail-brand .wm{display:none}
+  .rail-foot{margin-left:auto;gap:var(--a2)}
+
+  .rail-nav{
+    position:fixed;left:0;right:0;bottom:0;z-index:50;
+    display:grid;grid-auto-flow:column;grid-auto-columns:1fr;
+    gap:0;overflow:visible;
+    background:var(--card);border-top:1px solid var(--line);
+    /* Clear of the home indicator on a notched phone, and still fine without one. */
+    padding:6px 2px calc(6px + env(safe-area-inset-bottom));
+  }
+  /* The labels come BACK. They were hidden to save width in a row that had
+     none; a bottom bar has width, and six unlabelled line icons is a memory
+     test. */
+  .rail-nav a{
+    flex-direction:column;gap:3px;padding:6px 2px;border-radius:var(--r2);
+    font-size:10px;font-weight:600;line-height:1.1;text-align:center;
+  }
+  .rail-nav a span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* The active item reads as a tint rather than a filled block: a solid green
+     tile in a bar of six is heavy, and at this size the colour alone is clear. */
+  .rail-nav a[data-active="true"]{background:none;color:var(--blue-deep)}
+
+  /* Nothing may hide under the bar. */
+  .shell-page{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+  /* Neither may a toast. */
+  .toast{bottom:calc(84px + env(safe-area-inset-bottom))}
+}
+
+/* ---------------------------------------------------------------------------
+   PHONE, second pass — from walking the actual screens at 375px rather than
+   reading the stylesheet and guessing.
+   --------------------------------------------------------------------------- */
+@media (max-width:640px){
+  /* THE TAB ROW SCROLLS AND DOES NOT LOOK LIKE IT. "Overview · Rally ·
+     Technique · Drills" is wider than a phone, so Drills sits half off the
+     right edge -- which reads as a clipped, broken row rather than as an
+     invitation to swipe. A fade on the trailing edge is the difference
+     between "this is cut off" and "there is more that way". */
+  .panel-tabs{
+    scrollbar-width:none;
+    -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);
+    mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);
+  }
+  .panel-tabs::-webkit-scrollbar{display:none}
+  /* Padding so the last tab can be scrolled clear of the fade. */
+  .panel-tabs{padding-right:32px}
+
+  /* An insight's footer is "Seen in rally 3" with the action pushed right by
+     margin-left:auto. In a 343px column the two collide and the button ends up
+     jammed against the edge with its label wrapping. Auto margins stop
+     applying once the row wraps, so each gets its own line. */
+  .insight .row{gap:var(--a2) var(--a3)}
+  .insight .row .mla{margin-left:0}
+
+  /* Filter and meta chip rows: wrapping already, but let them breathe rather
+     than sit one pixel from the card edge. */
+  .drill-meta{gap:5px}
+}
