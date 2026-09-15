@@ -19,7 +19,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { debugVideoDir, debugVideoKey, overlayDataKey, shotClipKey } from "./debug-video-store";
 
-import { cvPython } from "./cv-scripts";
+import { cvPython, frameScaledTimeoutMs } from "./cv-scripts";
 import type { BallTrackPoint } from "./ball";
 import type { NetBand, NetCrossing } from "./rallies-net";
 import type { ClusteredRally } from "./rallies";
@@ -149,6 +149,8 @@ export function buildOverlayData(input: DebugRenderInput): unknown {
 /** Run the Python renderer. Shared by the full overlay and by clips. */
 async function runRenderer(
   videoPath: string, dataPath: string, outPath: string,
+  /** Clip length, for a timeout that scales with the work. */
+  durationSeconds: number,
   window?: { startS: number; endS: number }
 ): Promise<void> {
   const { execFile } = await import("node:child_process");
@@ -159,7 +161,27 @@ async function runRenderer(
   if (window) {
     args.push("--start", window.startS.toFixed(3), "--end", window.endS.toFixed(3));
   }
-  await run(cvPython(), args, { maxBuffer: 8 * 1024 * 1024 });
+
+  // A TIMEOUT, which this call did not have.
+  //
+  // Every other Python step goes through runPython and inherits one. This one
+  // spawns execFile directly, so it was the single place in the pipeline where
+  // a wedged process could run until something else killed it -- the exact
+  // shape of the ten-hour "Tracking the ball" hang, in the one step the fix
+  // for that never reached, because the guard was put on a FUNCTION rather
+  // than on the behaviour.
+  //
+  // Scaled by frames rather than fixed: this draws on every frame of the
+  // source at its native rate, so a 30-minute match is ~54,000 frames against
+  // a short clip's 700, and one number cannot be both generous enough for the
+  // first and useful on the second.
+  const frames = window
+    ? Math.max(1, Math.round((window.endS - window.startS) * 30))
+    : Math.max(1, Math.round(durationSeconds * 30));
+  await run(cvPython(), args, {
+    maxBuffer: 8 * 1024 * 1024,
+    timeout: frameScaledTimeoutMs(frames, 0.05, 2 * 60_000, 40 * 60_000),
+  });
 }
 
 export async function renderDebugVideo(input: DebugRenderInput): Promise<string | null> {
@@ -173,7 +195,7 @@ export async function renderDebugVideo(input: DebugRenderInput): Promise<string 
   try {
     await fsp.mkdir(outDir, { recursive: true });
     await fsp.writeFile(dataPath, JSON.stringify(buildOverlayData(input)), "utf8");
-    await runRenderer(input.videoPath, dataPath, outPath);
+    await runRenderer(input.videoPath, dataPath, outPath, input.durationSeconds);
     if (!fs.existsSync(outPath)) return null;
     return `/rally-debug/${debugVideoKey(input.analysisId)}`;
   } catch (err) {
@@ -217,7 +239,7 @@ export async function renderShotClip(opts: {
 
   try {
     await fsp.mkdir(outDir, { recursive: true });
-    await runRenderer(opts.videoPath, opts.overlayDataPath, outPath, { startS, endS });
+    await runRenderer(opts.videoPath, opts.overlayDataPath, outPath, opts.durationSeconds ?? endS, { startS, endS });
     if (!fs.existsSync(outPath)) return null;
     return name;
   } catch (err) {

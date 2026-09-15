@@ -50,6 +50,9 @@ def main() -> int:
     ap.add_argument("--data", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--crf", type=int, default=26)
+    ap.add_argument("--out-fps", type=float, default=10.0,
+                    help="Frames per second to WRITE. The source is decoded in full and only "
+                         "every Nth frame is drawn on and encoded. 0 keeps the source rate.")
     ap.add_argument("--start", type=float, default=None,
                     help="first second to render (absolute, from the source video)")
     ap.add_argument("--end", type=float, default=None,
@@ -107,12 +110,36 @@ def main() -> int:
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     end_frame = None if args.end is None else int(round(args.end * fps))
 
+    # OUTPUT FRAME RATE, and the reason this exists.
+    #
+    # This used to draw on and encode EVERY source frame. On a 30fps 20-minute
+    # match that is 36,000 frames of OpenCV drawing plus 36,000 frames of H.264
+    # -- measured at roughly 1.8x realtime, so about eleven minutes of pure
+    # rendering, and it is the stage a long run dies in.
+    #
+    # Nothing needs 30. The coaching model samples this video at 5fps, and a
+    # person scrubbing the debug view is looking for whether the boxes sit on
+    # the players, not for smooth motion. Emitting 10fps cuts the drawing and
+    # encoding by two thirds and is still twice what the model reads.
+    #
+    # The TIMELINE IS UNCHANGED, which is the part that matters: `t` is still
+    # derived from the source frame index over the source fps, so every lookup
+    # is against the same clock the data was recorded on, and the output is
+    # written at out_fps so a given second of output is the same second of
+    # source. Decimating without also setting the writer's rate would speed the
+    # video up and silently offset every timestamp the model reports.
+    out_fps = min(fps, float(args.out_fps)) if args.out_fps else fps
+    step = max(1, int(round(fps / out_fps))) if out_fps > 0 else 1
+    out_fps = fps / step  # the rate actually produced, after integer stepping
+
     ff = subprocess.Popen(
         ["ffmpeg", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{w}x{h}",
-         "-r", f"{fps:.4f}", "-i", "-", "-an", "-vcodec", "libx264",
+         "-r", f"{out_fps:.4f}", "-i", "-", "-an", "-vcodec", "libx264",
          "-preset", "veryfast", "-crf", str(args.crf), "-pix_fmt", "yuv420p", args.out],
         stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
+    print(f"[overlay] source {fps:.1f}fps -> writing {out_fps:.1f}fps "
+          f"(1 frame in {step})", file=sys.stderr, flush=True)
 
     # Index by time for cheap lookup.
     ball_sorted = sorted(ball, key=lambda p: p["t"])
@@ -128,7 +155,13 @@ def main() -> int:
         # Absolute time in the SOURCE video, so every lookup below is against
         # the same timeline the data was recorded on.
         t = i / fps
+        frame_index = i
         i += 1
+        # Decoded but not drawn on: skipping before the drawing is where the
+        # saving is. Decoding still has to happen to advance the stream, and it
+        # is the cheap half.
+        if (frame_index - start_frame) % step != 0:
+            continue
 
         if corners:
             # THICKER THAN IT LOOKS LIKE IT NEEDS TO BE. This line is drawn on
