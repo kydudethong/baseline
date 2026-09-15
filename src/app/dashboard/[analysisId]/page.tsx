@@ -545,7 +545,26 @@ async function TagSection({
 }) {
   if (phase2Tracks.length === 0) return null; // nothing to tag yet
 
-  const players = [...phase2Tracks].map((t) => t.player_label).sort();
+  // ORDERED BY HOW MUCH OF THE CLIP EACH TRACK ACTUALLY COVERS.
+  //
+  // Sorting by label put "Player 1, Player 10, Player 11, Player 12..." in
+  // front of somebody who plays in a doubles game, which is four people. The
+  // tracker has no re-identification, so every time it loses a player behind
+  // another one it picks them back up under a new id -- over a fourteen-minute
+  // clip that turns four players into sixteen tracks, most of them a few
+  // seconds long.
+  //
+  // The long-lived ones are the real players. Ordering by lifetime puts them
+  // first, where the four chips somebody is looking for are the four chips
+  // they see, and leaves the fragments after them rather than interleaved with
+  // them by a lexicographic accident.
+  const players = [...phase2Tracks]
+    .map((t) => ({
+      label: t.player_label,
+      seen: ((t.points as unknown[] | null) ?? []).length,
+    }))
+    .sort((a, b) => b.seen - a.seen || a.label.localeCompare(b.label))
+    .map((t) => t.label);
   const width = analysis.video?.width ?? 1920;
   const height = analysis.video?.height ?? 1080;
 

@@ -58,6 +58,22 @@ export function PlayerTagPicker({
   const router = useRouter();
   const dialog = useDialog();
   const [selected, setSelected] = useState<Set<string>>(new Set(initialSelfLabels));
+  const [showAll, setShowAll] = useState(false);
+  /**
+   * How many chips to show before "show more".
+   *
+   * Six, not four: a doubles game is four people, and the tracker splitting one
+   * of them in half is the normal case rather than the exception, so the list
+   * has to have room for a couple of those without hiding a real player behind
+   * a button.
+   */
+  const VISIBLE = 6;
+  // Anything already tagged stays visible whatever its rank -- a selection the
+  // user cannot see is a selection they cannot undo.
+  const shown = showAll
+    ? players
+    : players.filter((p, i) => i < VISIBLE || selected.has(p));
+  const hidden = players.filter((p) => !shown.includes(p));
   const [skillLevel, setSkillLevel] = useState(initialSkillLevel ?? "");
   const [paddleHand, setPaddleHand] = useState(initialPaddleHand ?? "");
   const [coachingKind, setCoachingKind] = useState(initialCoachingKind);
@@ -162,7 +178,7 @@ export function PlayerTagPicker({
       ) : null}
 
       <div className="row g2">
-        {players.map((label, i) => {
+        {shown.map((label, i) => {
           const isOn = selected.has(label);
           const color = colorForPlayer(label, colorIndex.get(label) ?? i);
           return (
@@ -180,7 +196,33 @@ export function PlayerTagPicker({
             </button>
           );
         })}
+        {/* THE REST, BEHIND ONE CLICK.
+            A doubles game is four people, and the tracker -- which has no
+            re-identification -- hands back sixteen tracks for a fourteen-minute
+            clip, because every time it loses somebody behind another player it
+            picks them back up under a new id. Showing all sixteen at once asks
+            a question ("which of these is you?") that looks much harder than it
+            is. The long-lived ones come first, so the four that matter are the
+            four on screen; the fragments are still reachable, because
+            occasionally one of them IS you for part of the clip. */}
+        {hidden.length > 0 ? (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => setShowAll((v) => !v)}
+          >
+            {showAll
+              ? "Show fewer"
+              : `+ ${hidden.length} more the tracker split off`}
+          </button>
+        ) : null}
       </div>
+      {hidden.length > 0 && !showAll ? (
+        <p className="xs" style={{ margin: 0, color: "var(--ink-3)" }}>
+          Showing the {shown.length} players on court longest. The rest are
+          short fragments — worth opening only if none of these is you.
+        </p>
+      ) : null}
 
       <div className="dashline" />
 
