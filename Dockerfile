@@ -80,6 +80,19 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/scripts/cv ./scripts/cv
 COPY --from=build /app/models ./models
 
+# ASSERTED AT BUILD TIME, because the runtime symptom is silent.
+#
+# ultralytics treats a weights path it cannot find as a model NAME and fetches
+# it from GitHub. On a laptop that succeeds and hides the fact that the file
+# was never there; in here it fails from inside the batch loop, which reports
+# the failure as per-frame DATA rather than as a crash -- so the analysis
+# completes, the overlay renders, and the only symptom anywhere is "Pose rows:
+# 0" with no explanation. That cost several days of looking at the renderer.
+#
+# An image without these weights is not a working image. Fail the build.
+RUN test -s models/yolov8n-pose.pt || (echo "MISSING models/yolov8n-pose.pt — pose would silently produce nothing" && exit 1) \
+ && test -s models/yolov8n.pt      || (echo "MISSING models/yolov8n.pt — player detection would fail" && exit 1)
+
 # rally_seg, the pipeline behind the setup screen's automatic court fit and
 # player detection. It used to live outside this repo (~/coach/ml on the
 # laptop), which is why the first deploy came up without it: RALLY_SEG_DIR
