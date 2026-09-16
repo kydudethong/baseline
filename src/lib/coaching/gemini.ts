@@ -410,19 +410,24 @@ function mediaResolutionFor(cfg?: VideoConfig): Record<string, unknown> {
   };
 }
 
-export async function generateJSON<T>(opts: {
-  model: string;
+/**
+ * The request body for one video-reading call.
+ *
+ * PULLED OUT SO THE BATCH PATH CANNOT DRIFT FROM THE LIVE ONE. Batch is the
+ * same request submitted to a different endpoint, and the moment the two build
+ * their own bodies they will disagree about a schema tweak or a resolution
+ * setting -- and the batch one will disagree silently, because nobody watches
+ * a job that finishes in six hours as closely as one that finishes in ten
+ * seconds.
+ */
+export function buildGenerateBody(opts: {
   file: UploadedFile;
   prompt: string;
   schema: Record<string, unknown>;
   maxOutputTokens?: number;
   video?: VideoConfig;
-  /** Names this call in any error it raises ("scan segment 2/4", "technique burst 3"). */
-  label?: string;
-  onLog?: (line: string) => void;
-  onUsage?: (usage: UsageInfo) => void;
-}): Promise<T> {
-  const body = {
+}): Record<string, unknown> {
+  return {
     contents: [{
       parts: [
         videoPart(opts.file, opts.video),
@@ -436,6 +441,21 @@ export async function generateJSON<T>(opts: {
       ...mediaResolutionFor(opts.video),
     },
   };
+}
+
+export async function generateJSON<T>(opts: {
+  model: string;
+  file: UploadedFile;
+  prompt: string;
+  schema: Record<string, unknown>;
+  maxOutputTokens?: number;
+  video?: VideoConfig;
+  /** Names this call in any error it raises ("scan segment 2/4", "technique burst 3"). */
+  label?: string;
+  onLog?: (line: string) => void;
+  onUsage?: (usage: UsageInfo) => void;
+}): Promise<T> {
+  const body = buildGenerateBody(opts);
 
   // The retry, quota and 404 handling all live in callGemini; duplicating it
   // here is how the two copies drift.
