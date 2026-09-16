@@ -49,6 +49,19 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # TYPES NEXT GENERATES, BEFORE ANYTHING TYPE-CHECKS THEM.
+      #
+      # `LayoutProps<"/">` and `PageProps<...>` are not imported from anywhere
+      # -- Next writes them into .next/types during a build, as globals. A
+      # developer's machine always has them lying around from the last `next
+      # dev`, so `tsc --noEmit` passes locally forever while failing on a fresh
+      # checkout with "Cannot find name 'LayoutProps'". That is exactly what
+      # happened on this workflow's first run, and it is the more interesting
+      # half of the bug: the local check was GREEN because of build leftovers,
+      # so no amount of care locally would have caught it.
+      #
+      # `next typegen` writes those types without a full build.
+      - run: npx next typegen
       # BEFORE the deploy, not after. The whole value of an automatic deploy is
       # that nobody is watching it; a broken build that ships because nothing
       # checked is worse than no automation at all.

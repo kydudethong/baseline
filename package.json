@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "rm -rf .vision-test-build 2>/dev/null || true; tsc -p tsconfig.test.json && node --test .vision-test-build/**/*.test.js",
     "deploy": "bash scripts/deploy.sh",
+    "check": "next typegen && tsc --noEmit && npm test && npm run lint",
     "verify-models": "bash scripts/verify-models.sh",
     "sleep": "bash scripts/sleep.sh",
     "wake": "bash scripts/wake.sh",
