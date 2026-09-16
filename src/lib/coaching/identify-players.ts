@@ -27,7 +27,7 @@
  * enforces it.
  */
 
-import { generateJSON, uploadVideo, analystModel, deleteFile } from "./gemini";
+import { generateJSON, uploadVideo, analystModel, deleteFile, type UploadedFile } from "./gemini";
 
 /** Frames a second the identity clip is rendered and read at. */
 export const IDENTITY_FPS = 2;
@@ -119,8 +119,23 @@ export async function identifyPlayers(opts: {
 }): Promise<IdentityGroup[]> {
   if (opts.trackIds.length < 2) return [];
   const model = analystModel();
-  let file = null;
+  let file: UploadedFile | null = null;
   try {
+    // BOUNDED, because every other long stage is and this one was not.
+    //
+    // It uploads a video and waits on a model. Both can stall -- a slow
+    // upload, a retry loop backing off, a call that never returns -- and
+    // nothing here would have stopped it. Identity is an improvement on the
+    // tag screen, not a requirement for one, so the right answer to "this is
+    // taking too long" is to carry on without it.
+    return await withDeadline(IDENTITY_TIMEOUT_MS, run(), opts.onLog);
+  } catch (err) {
+    opts.onLog?.(`identity: skipped — ${(err as Error).message.split("\n")[0]}`);
+    return [];
+  }
+
+  async function run(): Promise<IdentityGroup[]> {
+   try {
     file = await uploadVideo(opts.clipBytes, opts.clipName, "video/mp4", opts.onLog);
     const out = await generateJSON<{ people?: Array<{ track_ids?: string[]; description?: string }> }>({
       model,
@@ -152,10 +167,41 @@ export async function identifyPlayers(opts: {
       opts.onLog?.(`  ${g.trackIds.join(" + ")} — ${g.description || "no description given"}`);
     }
     return groups;
-  } catch (err) {
-    opts.onLog?.(`identity: skipped — ${(err as Error).message.split("\n")[0]}`);
-    return [];
-  } finally {
+   } finally {
     if (file) await deleteFile(file.name).catch(() => {});
+   }
+  }
+}
+
+/** How long the identity pass may take before the run carries on without it. */
+export const IDENTITY_TIMEOUT_MS = 6 * 60_000;
+
+/**
+ * Resolves whatever finishes first: the work, or the clock.
+ *
+ * The losing promise is not cancelled -- there is nothing to cancel in a fetch
+ * already in flight -- it is simply no longer waited on, and its result is
+ * discarded. That is the right trade here: the cost of an abandoned upload is
+ * a few cents of bandwidth, and the cost of waiting for it is the whole run.
+ */
+async function withDeadline<T>(
+  ms: number,
+  work: Promise<T>,
+  onLog?: (line: string) => void
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          onLog?.(`identity: gave up after ${Math.round(ms / 60_000)} min`);
+          reject(new Error(`identity pass exceeded ${Math.round(ms / 60_000)} minutes`));
+        }, ms);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }

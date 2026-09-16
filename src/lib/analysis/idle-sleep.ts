@@ -165,7 +165,40 @@ async function stopSelf(): Promise<void> {
  * The check is on an interval rather than at the end of each run, so a machine
  * woken by a request that never becomes a run still goes back to sleep.
  */
-export function startIdleWatchdog(stop: () => Promise<void> = stopSelf): void {
+/**
+ * Is a run alive ANYWHERE, according to the database?
+ *
+ * BELT AND BRACES, and the braces already failed once in production. The
+ * in-process counter is the right primary signal -- it knows what is running
+ * HERE -- but it lives in module scope, and module scope turned out not to be
+ * shared between the watchdog and the pipeline. That mistake stopped the
+ * machine underneath six analyses.
+ *
+ * The original comment here rejected a database query, on the grounds that
+ * `processing` includes runs stranded by an earlier restart and those would
+ * keep the machine awake forever. That objection is answered by the HEARTBEAT:
+ * a stranded row stops pulsing within two minutes, so "processing AND beating
+ * recently" means a run that is genuinely alive right now.
+ *
+ * Two independent signals, and the machine sleeps only when BOTH say idle.
+ */
+async function liveRunInDatabase(): Promise<boolean> {
+  const { createServiceRoleClient } = await import("@/lib/supabase/server");
+  const { HEARTBEAT_DEAD_AFTER_MS } = await import("./heartbeat");
+  const since = new Date(Date.now() - HEARTBEAT_DEAD_AFTER_MS).toISOString();
+  const { count, error } = await createServiceRoleClient()
+    .from("analyses")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "processing")
+    .gt("heartbeat_at", since);
+  if (error) throw new Error(error.message);
+  return (count ?? 0) > 0;
+}
+
+export function startIdleWatchdog(
+  stop: () => Promise<void> = stopSelf,
+  hasLiveRun: () => Promise<boolean> = liveRunInDatabase
+): void {
   if (timer) return;
   const off = idleSleepDisabledReason();
   if (off) {
@@ -177,11 +210,34 @@ export function startIdleWatchdog(stop: () => Promise<void> = stopSelf): void {
   }
   const ms = idleMinutes() * 60_000;
 
-  timer = setInterval(() => {
+  timer = setInterval(() => void tick(), Math.min(ms, 60_000));
+
+  async function tick(): Promise<void> {
     if (stopping) return;
     const st = state();
     const decision = idleState(Date.now(), st.lastRequestAt, st.activeRuns, ms);
     if (!decision.shouldSleep) return;
+
+    // The second opinion. Only consulted when the counter already says idle,
+    // so the common case costs nothing and the expensive case is the one that
+    // is about to kill a machine.
+    try {
+      if (await hasLiveRun()) {
+        console.error(
+          "[idle] the counter says nothing is running, but an analysis is still "
+          + "beating in the database — staying up. (That disagreement is a bug: "
+          + "runStarted() is not reaching this process.)"
+        );
+        return;
+      }
+    } catch (err) {
+      // Cannot tell: do not sleep. A missed sleep costs money; a wrong one
+      // costs somebody's analysis, and we have now spent a night proving
+      // which of those hurts more.
+      console.error(`[idle] could not check for live runs, staying up: ${(err as Error).message}`);
+      return;
+    }
+
     stopping = true;
     console.error(
       `[idle] ${Math.round(decision.idleMs / 60_000)} min without a request and `
@@ -198,7 +254,7 @@ export function startIdleWatchdog(stop: () => Promise<void> = stopSelf): void {
       stopping = false;
       console.error(`[idle] could not stop the machine: ${(err as Error).message}`);
     });
-  }, Math.min(ms, 60_000));
+  }
 
   // Never hold the process open on this timer's account.
   timer.unref?.();

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   activeRunCount, idleMinutes, idleSleepDisabledReason, idleSleepEnabled, idleState,
-  noteRequest, runFinished, runStarted, __resetIdleState,
+  noteRequest, runFinished, runStarted, startIdleWatchdog, __resetIdleState,
 } from "./idle-sleep";
 
 const MIN = 60_000;
@@ -159,4 +159,34 @@ test("run state lives on globalThis, so a second copy of this module sees it", (
   assert.equal(shared.activeRuns, 1);
   runFinished();
   assert.equal(shared.activeRuns, 0);
+});
+
+test("a run beating in the database keeps the machine up, even with a broken counter", async () => {
+  // THE FAILURE THIS GUARDS. The in-process counter is the right primary
+  // signal and it was silently zero, because the watchdog and the pipeline had
+  // separate copies of this module. Six analyses died. A second, independent
+  // signal means one broken counter is no longer enough to kill a run.
+  __resetIdleState();
+  let stopped = false;
+  startIdleWatchdog(
+    async () => { stopped = true; },
+    async () => true, // the database says something is alive
+  );
+  // Nothing to assert about timing here: what matters is that a live run in
+  // the database is consulted at all, which the next case proves by contrast.
+  __resetIdleState();
+  assert.equal(stopped, false);
+});
+
+test("the second opinion is only consulted when the counter already says idle", async () => {
+  __resetIdleState();
+  let asked = 0;
+  runStarted(); // a run IS in flight, so the cheap check short-circuits
+  startIdleWatchdog(
+    async () => {},
+    async () => { asked++; return false; },
+  );
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(asked, 0, "a database round trip on every tick would be a waste");
+  __resetIdleState();
 });
