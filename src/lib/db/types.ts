@@ -20,6 +20,17 @@
 
 import type { AnalysisResult } from "@/lib/analysis/types";
 
+/**
+ * How an analysis is read.
+ *
+ * 'now' is the full-price, answer-in-minutes path. 'overnight' submits to the
+ * batch queue at half the token price and collects the result later, which is
+ * the right trade for a backlog and the wrong one for somebody still on court.
+ * A heartbeat is meaningless on an overnight run: nothing is holding a process
+ * open, and the silence means "queued", not "dead".
+ */
+export type AnalysisMode = "now" | "overnight";
+
 export type AnalysisStatus =
   | "uploaded"
   | "queued"
@@ -95,6 +106,25 @@ export type AnalysisRow = {
   finished_at: string | null;
   /** Touched every ~15s by the live run. Quiet on a 'processing' row = dead, not busy. */
   heartbeat_at: string | null;
+  /**
+   * Whether this analysis was read immediately or queued overnight — 0021.
+   *
+   * 'overnight' buys a half-price read and pays for it with up to a day of
+   * waiting, so it is a property of one analysis rather than a setting: the
+   * player decides at upload which of those they want for this clip.
+   */
+  analysis_mode: AnalysisMode;
+  /**
+   * The batch job this run is waiting on, e.g. "batches/abc123".
+   *
+   * THE HANDLE THAT LETS A RUN OUTLIVE ITS PROCESS. Everything else about a
+   * run lives in one process's memory, which a deploy kills and an idle
+   * machine sleeps through. A batch run writes this, exits, and is finished by
+   * whichever process next notices the row.
+   */
+  batch_job_name: string | null;
+  /** When the job went in. A job older than the expiry is abandoned, whatever it claims. */
+  batch_submitted_at: string | null;
   /**
    * Set when the player archives this analysis — 0016. Archived rows are
    * hidden from the library, the calendar and trends but keep every dependent

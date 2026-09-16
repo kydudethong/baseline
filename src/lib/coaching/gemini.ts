@@ -45,17 +45,16 @@ export function analystModel(): string {
  * The model every call uses unless GEMINI_MODEL says otherwise.
  *
  * 3.8 FLASH, and the reason to stay on it is that the cost argument for
- * dropping down stopped being compelling. Splitting the analysis into a cheap
- * 5fps low-resolution scan plus high-resolution bursts on the subject's own
- * shots took a 20-minute game from ~1.55M tokens to ~0.23M. At $1.50 per
- * million that is about 34 cents a game -- against roughly 11 cents on 3 Flash
- * Preview at $0.50.
+ * dropping down stopped being compelling. The architecture was the expensive
+ * problem; the model was not.
  *
- * A saving of ~23 cents per analysis is not worth paying for with a model that
- * is generally weaker at video, in a pipeline whose every output depends on
- * reading video well. The architecture was the expensive problem; the model
- * was not. Doing the cheap thing here would have been optimising the wrong
- * number after the right one was already fixed.
+ * THE PRICE, CHECKED RATHER THAN REMEMBERED: $0.75 per million input tokens,
+ * $3.75 per million output, halved on both by the Batch API. This comment said
+ * $1.50 for a long time and that one wrong number made every cost estimate
+ * built on it twice what it should have been -- including the ones that argued
+ * for dropping to low resolution. A figure in a comment gets quoted as fact
+ * long after anyone remembers where it came from, so: from the pricing page,
+ * September 2026, and worth re-checking before it is used to justify anything.
  *
  * GEMINI_MODEL overrides it with no deploy, and the 404 path in callGemini
  * lists exactly which models a key can call, so a wrong name fails loudly.

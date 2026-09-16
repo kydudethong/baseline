@@ -94,11 +94,28 @@ export function livenessOf(
   status: string,
   heartbeatAt: string | null,
   now: number = Date.now(),
-  deadAfterMs: number = HEARTBEAT_DEAD_AFTER_MS
+  deadAfterMs: number = HEARTBEAT_DEAD_AFTER_MS,
+  /**
+   * The batch job this run is waiting on, when it is waiting on one.
+   *
+   * A RUN WAITING ON BATCH IS SILENT BY DESIGN, and without this that silence
+   * reads as death. There is no process to beat: the run submitted its job and
+   * exited on purpose, which is the whole point of the mode. Two minutes later
+   * the sweeper would call it dead and restart it -- and restarting it means
+   * submitting a second job and paying a second time, every two minutes, for
+   * up to a day. The one interaction in this change that could have cost real
+   * money, and it is the one nothing in the batch code itself would have
+   * caught.
+   *
+   * The collector is what decides an overnight run has failed, on the job's
+   * own state and its age. Not this.
+   */
+  batchJobName: string | null = null
 ): Liveness {
   if (status !== "processing" && status !== "queued") {
     return { looksDead: false, quietForSeconds: null };
   }
+  if (batchJobName) return { looksDead: false, quietForSeconds: null };
   if (!heartbeatAt) return { looksDead: false, quietForSeconds: null };
   const last = Date.parse(heartbeatAt);
   if (!Number.isFinite(last)) return { looksDead: false, quietForSeconds: null };

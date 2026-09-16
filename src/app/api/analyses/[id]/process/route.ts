@@ -48,7 +48,13 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     // it arrives ~28 minutes sooner. The window stays as the fallback for rows
     // written before 0014 and by older builds, which have no heartbeat at all
     // and must not be presumed dead on missing data.
-    const { looksDead, quietForSeconds } = livenessOf(analysis.status, analysis.heartbeat_at ?? null);
+    const { looksDead, quietForSeconds } = livenessOf(
+      analysis.status, analysis.heartbeat_at ?? null, Date.now(), undefined,
+      // Never restart a run that is waiting on a batch job. It is quiet
+      // because it exited on purpose; restarting it submits and pays for a
+      // second job.
+      (analysis as { batch_job_name?: string | null }).batch_job_name ?? null
+    );
     if (looksDead) {
       console.warn(`[process] restarting ${id}: no heartbeat for ${quietForSeconds}s — its process is gone`);
     } else {

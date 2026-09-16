@@ -57,3 +57,19 @@ test("a clock skewed into the future reads as quiet-for-zero, not negative", () 
   assert.equal(l.quietForSeconds, 0);
   assert.equal(l.looksDead, false);
 });
+
+test("a run waiting on a batch job is never called dead", () => {
+  // THE ONE THAT COULD HAVE COST REAL MONEY. An overnight run is silent by
+  // design -- it submitted its job and exited, which is the whole point of the
+  // mode. Without this guard the sweeper calls it dead two minutes later and
+  // restarts it, and a restart means submitting and paying for a SECOND job.
+  // Every two minutes. For up to a day.
+  const longAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+  const waiting = livenessOf("processing", longAgo, Date.now(), undefined, "batches/abc123");
+  assert.equal(waiting.looksDead, false, "a batch run was called dead");
+
+  // And the guard must not make every run immortal: the same row with no job
+  // to wait on is still dead.
+  const orphan = livenessOf("processing", longAgo, Date.now(), undefined, null);
+  assert.equal(orphan.looksDead, true, "a genuinely dead run stopped being reported");
+});
