@@ -31,6 +31,8 @@ import { CornerGuide } from "./CornerGuide";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import CourtPresetBar from "./CourtPresetBar";
+
 
 import { computeHomography, applyHomography } from "@/lib/vision/homography";
 import { courtSegments, type CourtLineRole } from "@/lib/vision/court-model";
@@ -90,18 +92,50 @@ interface Snapshot { corners: Corner[]; players: Player[] }
  */
 const PAD_FRAC = 0.18;
 
-const CORNER_STEPS = [
-  { key: "nearLeft", label: "Near-left corner", hint: "baseline closest to the camera, left side" },
-  { key: "nearRight", label: "Near-right corner", hint: "same baseline, right side" },
-  { key: "farRight", label: "Far-right corner", hint: "far baseline — or where the net meets the right sideline" },
-  { key: "farLeft", label: "Far-left corner", hint: "far baseline, left side" },
-] as const;
 
 // Court in feet. Same numbers the Python side uses; a pickleball court is 20
 // by 44 with a 7ft non-volley zone each side of the net.
 const COURT_W = 20;
 const COURT_L = 44;
 const NET_Y = 22;
+
+/**
+ * A court to start from, when detection did not find one.
+ *
+ * NOBODY SHOULD EVER FACE AN EMPTY FRAME. Placing four corners in a fixed
+ * order, precisely, some of them off the edge of the picture, is the hardest
+ * thing this app has ever asked anyone to do -- and the version that asked it
+ * is the version people abandoned. Dragging a court that is already there onto
+ * the court that is really there is a different task: you can see what you are
+ * aiming at, you can see when you have arrived, and no step of it can be done
+ * in the wrong order.
+ *
+ * The shape is a TRAPEZOID rather than a rectangle because that is what a
+ * court looks like from behind a baseline -- the far end is narrower and
+ * higher up the frame. Starting from roughly the right shape means the first
+ * drag is a nudge instead of a rescue. The numbers are fractions of the frame,
+ * from where a court sits in a phone video shot from the fence.
+ */
+function seedCourt(vw: number, vh: number): Corner[] {
+  return [
+    { x: vw * 0.06, y: vh * 0.92 },  // near-left
+    { x: vw * 0.94, y: vh * 0.92 },  // near-right
+    { x: vw * 0.72, y: vh * 0.30 },  // far-right
+    { x: vw * 0.28, y: vh * 0.30 },  // far-left
+  ];
+}
+
+/**
+ * How much the magnifier enlarges, and how wide it is on screen.
+ *
+ * A LOUPE, because a fingertip is about forty pixels across and the line you
+ * are trying to land on is two. Without one, placing a corner accurately on a
+ * phone is not difficult, it is impossible: the thing you are aiming at is
+ * underneath the thing you are aiming with. This is the same trick a phone
+ * keyboard uses for text selection, for the same reason.
+ */
+const LOUPE_ZOOM = 3.5;
+const LOUPE_R = 62;
 
 export interface SetupCourt {
   nearLeft: Corner;
@@ -238,7 +272,39 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   const canUndo = past.length > 0;
   const canRedo = future.length > 0;
 
-  const clearCourt = useCallback(() => { commit(); setCorners([]); setStage("court"); }, [commit]);
+  /**
+   * Whether the tool panel is open.
+   *
+   * Declared up here with the rest of the setup state because openCourt()
+   * below opens it, and a hook defined before the state it touches cannot
+   * reach it.
+   */
+  const [fixing, setFixing] = useState(false);
+
+  /** The frame's size, or a 16:9 guess before the video has loaded. */
+  const frameSize = useCallback(() => {
+    const v = videoRef.current;
+    return v && v.videoWidth > 0 ? { w: v.videoWidth, h: v.videoHeight } : { w: 1280, h: 720 };
+  }, []);
+
+  /**
+   * RESET, not clear. The button used to empty the court and leave the user
+   * facing the blank frame and the four-corners-in-order sequence again --
+   * which is to say it punished a wrong drag with the hardest screen in the
+   * app. It now puts the starting court back, so the worst outcome of any
+   * mistake is one more drag.
+   */
+  const clearCourt = useCallback(() => {
+    const { w, h } = frameSize();
+    commit(); setCorners(seedCourt(w, h)); setStage("court");
+  }, [commit, frameSize]);
+
+  /** Open the court editor, laying a court down first if there is none. */
+  const openCourt = useCallback(() => {
+    const { w, h } = frameSize();
+    if (corners.length < 4) { commit(); setCorners(seedCourt(w, h)); }
+    setFixing(true); setStage("court");
+  }, [commit, corners.length, frameSize]);
   const clearPlayers = useCallback(() => { commit(); setPlayers([]); setStage("players"); }, [commit]);
 
   // ZOOM AND PAN, for the two clicks this screen exists to collect.
@@ -375,7 +441,6 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   // The correction panel. Closed by default: the common case is that the
   // detection is right and the whole job is one click, so the tools for when
   // it is wrong should be one click away rather than always on screen.
-  const [fixing, setFixing] = useState(false);
   const [time, setTime] = useState(initial?.frameTimestampSeconds ?? 0);
   const [duration, setDuration] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -718,8 +783,55 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       ctx.fillText(text, labelX, labelY);
     });
 
+    // THE MAGNIFIER, last, so nothing draws over it.
+    //
+    // Offset UP AND LEFT of the corner rather than centred on it, because the
+    // whole point is to show the pixels the finger is covering. Flipped to the
+    // other side when the corner is near an edge, so the loupe never runs off
+    // the canvas -- a magnifier you cannot see is worse than none, since the
+    // user assumes it is helping.
+    if (dragging !== null && corners[dragging]) {
+      const c = corners[dragging];
+      const r = LOUPE_R * s;
+      const off = (LOUPE_R + 34) * s;
+      const cx = c.x - off < r ? c.x + off : c.x - off;
+      const cy = c.y - off < r ? c.y + off : c.y - off;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.clip();
+      // The video again, scaled up around the corner. Drawn from the video
+      // element rather than from the canvas so the magnified picture is the
+      // FOOTAGE and not a magnified copy of the court lines we drew on it --
+      // which would be showing the user their own guess, enlarged.
+      ctx.drawImage(
+        video,
+        cx - c.x * LOUPE_ZOOM, cy - c.y * LOUPE_ZOOM,
+        vw * LOUPE_ZOOM, vh * LOUPE_ZOOM
+      );
+      // Crosshair at the exact pixel the corner is on. Thin, and in the court
+      // colour, so it reads as the thing being placed.
+      ctx.strokeStyle = "rgba(255, 210, 58, 0.95)";
+      ctx.lineWidth = 1.5 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx - 14 * s, cy); ctx.lineTo(cx - 4 * s, cy);
+      ctx.moveTo(cx + 4 * s, cy); ctx.lineTo(cx + 14 * s, cy);
+      ctx.moveTo(cx, cy - 14 * s); ctx.lineTo(cx, cy - 4 * s);
+      ctx.moveTo(cx, cy + 4 * s); ctx.lineTo(cx, cy + 14 * s);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.lineWidth = 2 * s;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
     ctx.restore();
-  }, [corners, players, courtLines, showLines, playerRect]);
+  }, [corners, players, courtLines, showLines, playerRect, dragging]);
 
   useEffect(() => { draw(); }, [draw, time, videoReady]);
 
@@ -1267,13 +1379,12 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                   Change who is you
                 </button>
               ) : null}
-              {/* The repair door. Deliberately quiet and deliberately last:
-                  most clips never need it, and a prominent "fix the court"
-                  control is what made ordinary setup feel like error
-                  recovery. */}
+              <button type="button" className="btn btn-sm btn-soft" onClick={openCourt}>
+                {courtDone ? "Adjust the court lines" : "Set up the court lines"}
+              </button>
               <button type="button" className="btn btn-sm btn-ghost"
-                      onClick={() => { setFixing(true); setStage(courtDone ? "players" : "court"); }}>
-                {courtDone ? "Players or court look wrong?" : "Court not detected \u2014 mark it by hand"}
+                      onClick={() => { setFixing(true); setStage("players"); }}>
+                Players look wrong?
               </button>
             </div>
           </div>
@@ -1355,27 +1466,38 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             </button>
           </div>
 
+          {/* Not numbered. Numbering says "do these in order", and none of
+              these have to be done at all -- the only required answer lives on
+              the panel outside this one. These are three tools. */}
           <div className="stepbar">
-            <span className={`step ${courtDone ? "done" : stage === "court" ? "cur" : ""}`}>
-              <span className="n">{courtDone ? "✓" : "1"}</span> Court &amp; net
+            <span className={`step ${stage === "court" ? "cur" : courtDone ? "done" : ""}`}>
+              <span className="n">{courtDone ? "✓" : "·"}</span> Court &amp; net
             </span>
             <span className="step"><span className="sep" /></span>
-            <span className={`step ${players.length > 0 ? "done" : stage === "players" ? "cur" : ""}`}>
-              <span className="n">{players.length > 0 ? "✓" : "2"}</span> Mark the players
+            <span className={`step ${stage === "players" ? "cur" : players.length > 0 ? "done" : ""}`}>
+              <span className="n">{players.length > 0 ? "✓" : "·"}</span> The players
             </span>
             <span className="step"><span className="sep" /></span>
-            <span className={`step ${selfChosen ? "done" : stage === "self" ? "cur" : ""}`}>
-              <span className="n">{selfChosen ? "✓" : "3"}</span> Which one is you
+            <span className={`step ${stage === "self" ? "cur" : selfChosen ? "done" : ""}`}>
+              <span className="n">{selfChosen ? "✓" : "·"}</span> Which one is you
             </span>
           </div>
 
           <div className="grid2">
             <div className="stack g2">
               <strong style={{ fontSize: 14 }}>Court &amp; net</strong>
+              {/*
+                ONE SENTENCE, AND IT IS THE SAME SENTENCE EVERY TIME.
+                This used to read out a four-step script -- near-left, then
+                near-right, then far-right, then far-left -- which meant the
+                instruction changed under you as you worked and a corner placed
+                out of order could not be placed at all. There is always a court
+                on the frame now, so there is only ever one thing to say.
+              */}
               <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
-                {courtDone
-                  ? "Drag any corner to nudge it. The kitchen line, centre lines and net follow the corners — when those land on the paint, the geometry is right. A corner can sit outside the video: drag it out into the margin past the dashed edge."
-                  : `Click the ${CORNER_STEPS[corners.length].label.toLowerCase()} — ${CORNER_STEPS[corners.length].hint}. If it is off-screen, click out in the margin where it would be.`}
+                Drag the four yellow corners onto the corners of the court. The
+                kitchen line, centre line and net follow them — when those sit on
+                the painted lines, it is right.
               </p>
               <div className="row g2" style={{ flexWrap: "wrap" }}>
                 <button
@@ -1387,12 +1509,31 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                 </button>
                 <button
                   type="button" className="btn btn-ghost btn-sm"
-                  disabled={corners.length === 0}
                   onClick={clearCourt}
                 >
-                  Clear the court
+                  Start the court over
                 </button>
               </div>
+              {/*
+                MARK A COURT ONCE, REUSE IT FOREVER.
+                Inside the court tools rather than on the front panel: someone
+                filming from the same fence post every week should answer this
+                question once, and someone who has never opened this panel
+                should not have to read about it.
+              */}
+              <CourtPresetBar
+                corners={corners}
+                lineColorHex={lineColor}
+                matchMode={matchMode}
+                readFrameSize={() => {
+                  const v = videoRef.current;
+                  return v && v.videoWidth > 0 && v.videoHeight > 0
+                    ? { width: v.videoWidth, height: v.videoHeight }
+                    : null;
+                }}
+                onApply={(next) => { commit(); setCorners(next); setStage("court"); }}
+              />
+
               {/* The example, shown only while the corners are actually being
                   placed. Once they are down the reader has the answer and the
                   diagram is just a thing taking up room. */}
