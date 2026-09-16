@@ -19,7 +19,7 @@
 /**
  * Frames per second for the SCAN.
  *
- * TEN. It was fifteen for a while and the reason was the BALL rather than the
+ * EIGHT. It was fifteen for a while and the reason was the BALL rather than the
  * swing: ten is plenty to see a stroke, but a ball travelling thirty miles an
  * hour crosses much of the court between samples, and half the frames it does
  * land in show a streak rather than a dot.
@@ -29,10 +29,17 @@
  * of the two ways to spend that money: more detail per frame rather than more
  * frames, on footage where the hard thing to see is small rather than fast.
  *
+ * Eight rather than ten because it is linear and cheap to reverse: at high
+ * resolution each frame per second is about 46 cents on a twenty-minute game,
+ * and a pickleball stroke lasts roughly a third of a second, so eight samples
+ * a second still puts two or three frames inside every swing. Ten was not
+ * buying a third look at anything.
+ *
  * If detection gets worse, this is the knob to try before anything else: it is
- * linear, where resolution is a 4x step.
+ * linear, where resolution is a 4x step. Below about 5 a stroke stops being
+ * reliably visible and the clamp in analystFps() refuses anything under 3.
  */
-export const ANALYST_FPS = 10;
+export const ANALYST_FPS = 8;
 
 /** The rate in force, from ANALYST_FPS, clamped to what is worth paying for. */
 export function analystFps(): number {

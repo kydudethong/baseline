@@ -49,7 +49,7 @@ primary_region = "sjc"
   # High is about 3.8x the bill -- roughly $4.69 against $1.23 for a
   # twenty-minute game on 3.8-flash. That is the real trade, with no ring in
   # it. ANALYST_MEDIA_RESOLUTION=low goes back the other way in one line.
-  ANALYST_FPS = "10"
+  ANALYST_FPS = "8"
   ANALYST_MEDIA_RESOLUTION = "high"
   # Raised from the 120s default so the CONTEXT WINDOW is the only thing that
   # splits a clip. At 10fps and HIGH resolution a second of video costs ~2,580
