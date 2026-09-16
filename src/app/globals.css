@@ -1286,18 +1286,6 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 }
 
 
-/* ---------------------------------------------------------------------------
-   THE OVERVIEW: the shape on the left, the words on the right.
-   One column below 900px, chart first -- on a phone the chart is the thing
-   that reads at a glance, and the takeaways are what you scroll for.
-   --------------------------------------------------------------------------- */
-.overview-grid{
-  display:grid;grid-template-columns:minmax(0,320px) minmax(0,1fr);
-  gap:var(--a5);align-items:start;
-}
-.overview-chart{display:flex;flex-direction:column;gap:8px;min-width:0}
-.overview-takes{display:flex;flex-direction:column;gap:var(--a3);min-width:0}
-
-@media (max-width:900px){
-  .overview-grid{grid-template-columns:minmax(0,1fr);gap:var(--a4)}
-}
+/* The ratings chart lives in the film-room's left column now, under the
+   reliability note, where there was a screen of empty space. It sizes itself
+   to that column, so it needs no grid of its own. */

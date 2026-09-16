@@ -66,6 +66,20 @@ export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
   const maxR = size / 2 - 34;
   const n = groups.length;
 
+  /**
+   * Room for the labels, outside the square the chart is drawn in.
+   *
+   * "Defense" was rendering as "efense" and "Movement" as "Moveme". A label
+   * sits 96px from the centre of a 220px box, so its middle is 14px from the
+   * edge and half of a 70px word hangs outside the viewBox, which clips it
+   * rather than overflowing. Widening the viewBox alone is not enough either:
+   * a centred label still straddles the axis it names. So the box grows
+   * sideways AND the side labels anchor away from the chart, which is also
+   * what stops them sitting on top of the outer ring.
+   */
+  const padX = 52;
+  const viewW = size + padX * 2;
+
   const pointFor = (i: number, value: number) => {
     const angle = (i / n) * 2 * Math.PI - Math.PI / 2;
     const r = (Math.max(0, Math.min(5, value)) / 5) * maxR;
@@ -89,7 +103,14 @@ export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
           <span className="d1" style={{ lineHeight: 1 }}>{overall !== null ? overall.toFixed(2) : "—"}</span>
         </div>
 
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flex: "none" }}>
+        <svg
+          width={viewW}
+          height={size}
+          viewBox={`${-padX} 0 ${viewW} ${size}`}
+          style={{ flex: "none", maxWidth: "100%" }}
+          role="img"
+          aria-label={`Skill ratings: ${groups.map((g) => `${g.group} ${g.avg === null ? "not rated" : g.avg.toFixed(1)}`).join(", ")}`}
+        >
           {gridRings.map((ring) => {
             const pts = groups
               .map((_, i) => pointFor(i, ring))
@@ -110,16 +131,22 @@ export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
           })}
           {groups.map((g, i) => {
             const [x, y] = labelPointFor(i);
+            // Anchored by which side of the chart it is on: a label to the
+            // right grows rightwards, one to the left grows leftwards, and
+            // only the ones at the top and bottom stay centred.
+            const dx = x - center;
+            const anchor = Math.abs(dx) < 8 ? "middle" : dx > 0 ? "start" : "end";
+            const nudge = anchor === "middle" ? 0 : dx > 0 ? 6 : -6;
             return (
               <text
                 key={g.group}
-                x={x}
+                x={x + nudge}
                 y={y}
                 fontSize={10.5}
                 fontFamily="var(--ui)"
                 fontWeight={600}
                 fill="var(--ink-3)"
-                textAnchor="middle"
+                textAnchor={anchor}
                 dominantBaseline="middle"
               >
                 {g.group}

@@ -222,6 +222,21 @@ export function AnalysisWorkspace({
           )}
 
           {view.quality ? <QualityNote view={view} /> : null}
+
+          {/* THE RATINGS, IN THE COLUMN THAT HAD ROOM.
+              They were inside the Overview tab, which meant two things
+              competing for one narrow panel: the radar came out with "Defense"
+              clipped to "efense" and the takeaways wrapped one word per line.
+              This column ends after four rally chips and a disclosure, so
+              there was a screen of empty space beside the thing being
+              squeezed. Now the chart has width and the takeaways have the tab
+              to themselves. */}
+          {skills && skills.length > 0 ? (
+            <section className="stack g2">
+              <p className="eyebrow">Where those ratings sit against each other</p>
+              <SkillRatingsPanel skills={skills} bare />
+            </section>
+          ) : null}
         </div>
 
         <section className="panel">
@@ -241,9 +256,7 @@ export function AnalysisWorkspace({
           </div>
 
           <div className="panel-body">
-            {tab === "overview"
-              ? <Overview view={view} observations={observations} skills={skills} />
-              : null}
+            {tab === "overview" ? <Overview view={view} observations={observations} /> : null}
 
             {tab === "rally" ? (
               rally ? (
@@ -349,13 +362,7 @@ export function AnalysisWorkspace({
  * deliberately no headline score above it: nothing in this pipeline computes
  * a composite rating, and a number in that slot would be invented.
  */
-function Overview({
-  view, observations, skills = [],
-}: {
-  view: AnalysisView;
-  observations: CoachingObservationRow[];
-  skills?: CoachingSkillRatingRow[];
-}) {
+function Overview({ view, observations }: { view: AnalysisView; observations: CoachingObservationRow[] }) {
   if (observations.length === 0) {
     return (
       <p className="sm">
@@ -366,19 +373,7 @@ function Overview({
   }
   const coverage = view.quality?.ball_coverage ?? null;
   return (
-    <div className="overview-grid">
-      {/* THE CHART, LEFT OF THE WORDS. Both answer "how did I play", one as a
-          shape and one as a list, and they were several screens apart -- so
-          the shape got read without its reasons and the list got read without
-          its context. Side by side they are one answer. */}
-      {skills.length > 0 ? (
-        <div className="overview-chart">
-          <p className="eyebrow">Where those ratings sit against each other</p>
-          <SkillRatingsPanel skills={skills} bare />
-        </div>
-      ) : null}
-
-      <div className="overview-takes">
+    <>
       <p className="eyebrow">Key takeaways</p>
       <div className="stack g4">
         {observations.slice(0, 6).map((o) => {
@@ -401,8 +396,7 @@ function Overview({
           frames. Everything above rests on that.
         </p>
       ) : null}
-      </div>
-    </div>
+    </>
   );
 }
 
