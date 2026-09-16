@@ -137,3 +137,26 @@ test("a disabled watchdog says which piece is missing", () => {
   if (saved.m === undefined) delete process.env.FLY_MACHINE_ID; else process.env.FLY_MACHINE_ID = saved.m;
   if (saved.s === undefined) delete process.env.IDLE_SLEEP; else process.env.IDLE_SLEEP = saved.s;
 });
+
+test("run state lives on globalThis, so a second copy of this module sees it", () => {
+  // THE BUG THAT KILLED EVERY LONG ANALYSIS. The watchdog starts from
+  // instrumentation.ts and runStarted() is called from a route handler, and
+  // Next.js does not guarantee those share one instance of this module. They
+  // did not: the pipeline incremented its copy, the watchdog read its own, saw
+  // zero, and stopped the machine out from under a render that was two thirds
+  // done.
+  //
+  // What makes a second copy see the first one's count is that the state is
+  // reachable through a well-known symbol rather than a module-scoped `let`.
+  // That is the contract worth pinning; a real second bundle cannot be
+  // conjured inside one test process.
+  __resetIdleState();
+  runStarted();
+  const shared = (globalThis as unknown as Record<symbol, { activeRuns: number } | undefined>)[
+    Symbol.for("baseline.idle-sleep.state")
+  ];
+  assert.ok(shared, "no shared state on globalThis — a second copy would start from zero");
+  assert.equal(shared.activeRuns, 1);
+  runFinished();
+  assert.equal(shared.activeRuns, 0);
+});

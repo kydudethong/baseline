@@ -8,6 +8,8 @@ import { livenessOf } from "@/lib/analysis/heartbeat";
 
 export const runtime = "nodejs";
 
+import { noteRequest } from "@/lib/analysis/idle-sleep";
+
 /**
  * The whole analysis as one typed object — see getAnalysisView().
  *
@@ -25,6 +27,19 @@ export const runtime = "nodejs";
  * follow a run without a full round-trip, not to move rendering to the browser.
  */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // SOMEBODY IS WATCHING, so the machine is not idle.
+  //
+  // noteRequest() existed and nothing called it. The idle watchdog's "time
+  // since the last request" was therefore only ever moved by a run starting or
+  // finishing -- so a person sitting on the progress page, polling this route
+  // every few seconds, counted for nothing. Twenty minutes after a run BEGAN,
+  // the machine stopped itself with the run still going and the page still
+  // open.
+  //
+  // This route is the poll. It runs on the Node runtime, which is where the
+  // watchdog lives; proxy.ts would have been the obvious home and is on the
+  // Edge runtime, which shares no state with it.
+  noteRequest();
   const { id } = await params;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

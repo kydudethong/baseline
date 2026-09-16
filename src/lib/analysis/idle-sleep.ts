@@ -34,30 +34,55 @@ const DEFAULT_IDLE_MINUTES = 20;
  * indefinitely over work that no longer exists. What must not be interrupted
  * is what is running HERE, and this process is the only thing that knows it.
  */
-let activeRuns = 0;
-let lastRequestAt = Date.now();
+/**
+ * ON globalThis, NOT IN MODULE SCOPE, and this is the whole bug.
+ *
+ * The watchdog is started from instrumentation.ts; runStarted() is called from
+ * a route handler. Next.js does not guarantee those share one instance of this
+ * module -- and they did not. The pipeline incremented `activeRuns` in its
+ * copy, the watchdog read `activeRuns` in a different copy, saw 0, and
+ * reported "no runs in flight" about a run that was two thirds of the way
+ * through rendering an overlay.
+ *
+ * It then SIGINTed the machine out from under it. Every long analysis died
+ * this way, and the message it left behind -- "stopped responding, its server
+ * was almost certainly restarted or ran out of memory" -- was right about the
+ * restart and pointed at the wrong culprit, because the thing doing the
+ * restarting was us.
+ *
+ * globalThis is the one scope Next cannot duplicate.
+ */
+interface ProcessState { activeRuns: number; lastRequestAt: number }
+const STATE_KEY = Symbol.for("baseline.idle-sleep.state");
+function state(): ProcessState {
+  const g = globalThis as unknown as Record<symbol, ProcessState | undefined>;
+  return (g[STATE_KEY] ??= { activeRuns: 0, lastRequestAt: Date.now() });
+}
+
 let timer: ReturnType<typeof setInterval> | null = null;
 let stopping = false;
 
 export function runStarted(): void {
-  activeRuns++;
-  lastRequestAt = Date.now();
+  const st = state();
+  st.activeRuns++;
+  st.lastRequestAt = Date.now();
 }
 
 export function runFinished(): void {
+  const st = state();
   // Clamped at zero: a double-call must not drive the count negative, because
   // a later real run would then be treated as already finished and the
   // machine could sleep underneath it.
-  activeRuns = Math.max(0, activeRuns - 1);
-  lastRequestAt = Date.now();
+  st.activeRuns = Math.max(0, st.activeRuns - 1);
+  st.lastRequestAt = Date.now();
 }
 
 export function noteRequest(): void {
-  lastRequestAt = Date.now();
+  state().lastRequestAt = Date.now();
 }
 
 export function activeRunCount(): number {
-  return activeRuns;
+  return state().activeRuns;
 }
 
 export interface IdleState {
@@ -154,11 +179,17 @@ export function startIdleWatchdog(stop: () => Promise<void> = stopSelf): void {
 
   timer = setInterval(() => {
     if (stopping) return;
-    const state = idleState(Date.now(), lastRequestAt, activeRuns, ms);
-    if (!state.shouldSleep) return;
+    const st = state();
+    const decision = idleState(Date.now(), st.lastRequestAt, st.activeRuns, ms);
+    if (!decision.shouldSleep) return;
     stopping = true;
     console.error(
-      `[idle] ${Math.round(state.idleMs / 60_000)} min without a request and no runs in flight — `
+      `[idle] ${Math.round(decision.idleMs / 60_000)} min without a request and `
+      // The COUNT, not the word "no". "No runs in flight" is a claim, and when
+      // it was wrong there was nothing in the log to say so -- the line read
+      // identically whether the counter was right or had never been
+      // incremented in this copy of the module.
+      + `${decision.activeRuns} run(s) in flight — `
       + "stopping this machine. The next visitor wakes it (auto_start_machines)."
     );
     void stop().catch((err) => {
@@ -178,7 +209,8 @@ export function startIdleWatchdog(stop: () => Promise<void> = stopSelf): void {
 export function __resetIdleState(): void {
   if (timer) clearInterval(timer);
   timer = null;
-  activeRuns = 0;
+  const st = state();
+  st.activeRuns = 0;
+  st.lastRequestAt = Date.now();
   stopping = false;
-  lastRequestAt = Date.now();
 }
