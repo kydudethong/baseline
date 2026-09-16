@@ -7,6 +7,7 @@ import { courtFrameFor, sideOf as courtSideOf, type Shot } from "./shots";
 import type { AnalysisStage } from "@/lib/db/types";
 import { StageTimer } from "@/lib/analysis/stage-timer";
 import { calibrationFromSetup, isPlausibleCourtQuad, playerGatePolygonPx, pointInPolygon, transformToCourtCoordinates } from "./court";
+import { buildRoster } from "./roster";
 import type { ClusteredRally } from "./rallies";
 import { netBandImagePx, netLineImagePx, type NetCrossing } from "./rallies-net";
 import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
@@ -394,7 +395,37 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     "Without a usable court, players on neighbouring courts and spectators could not be excluded."
   );
 
-  const rawTracks = await provider.trackPlayers(filteredDetections, { sideOf });
+  // FOUR SLOTS, NOT HOWEVER MANY IDENTITIES FALL OUT.
+  //
+  // The tracker treats the number of players as an OUTPUT: it matches each
+  // detection to an overlapping track and mints a new one when nothing fits.
+  // Every occlusion and every walk out of frame is another chance to mint,
+  // and a real clip produced SEVENTY-THREE tracks for four players -- which
+  // the tag page then asked the user to pick themselves out of.
+  //
+  // buildRoster takes the count as an INPUT instead, because the sport
+  // already knows it: doubles is two players each side of the net, in every
+  // frame of every clip. It needs court geometry to do that and returns
+  // nothing when there is none, which is when the tracker is still the best
+  // available answer.
+  const rosterSlots = input.setup?.matchMode === "singles" ? 1 : 2;
+  const roster = buildRoster(filteredDetections, {
+    toCourtFeet: feetCourt,
+    slotsPerSide: rosterSlots,
+  });
+  let rawTracks: PlayerTrack[];
+  if (roster.tracks.length > 0) {
+    rawTracks = roster.tracks;
+    log(`roster: ${roster.tracks.length} player(s) from ${roster.detectionsSeen} detections`
+      + ` — ${roster.droppedOffCourt} off court, ${roster.droppedSurplus} surplus bodies`);
+  } else {
+    rawTracks = await provider.trackPlayers(filteredDetections, { sideOf });
+    log(`roster: no court geometry, fell back to tracking — ${rawTracks.length} track(s)`);
+    knownLimitations.push(
+      "Without a usable court the players could not be pinned to a fixed four, "
+      + "so the same person may appear more than once."
+    );
+  }
   // trackPlayers() has no calibration context of its own, so it always
   // leaves courtPosition null -- backfill it here using the same
   // homography (feetCourt) already computed above for on-court filtering
@@ -472,7 +503,20 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   //
   // Never fails a run. No identity pass means the behaviour every run had
   // until now.
-  if (tracks.length > 1 && input.debugId) {
+  //
+  // SKIPPED ENTIRELY WHEN THE ROSTER ALREADY SETTLED IT. This pass exists to
+  // group fragments back into people and to mark the bystanders -- both jobs
+  // the slot assignment has now done by construction, using geometry that
+  // cannot be argued with instead of a model's judgement of a video. Running
+  // it anyway would cost a render, an upload and a call to be told what we
+  // already know, and its only possible effect would be to merge two of the
+  // four (which the overlap veto would refuse). So it runs only on the
+  // fallback path, where the tracks really can be fragments.
+  const rosterSettled = roster.tracks.length > 0;
+  if (rosterSettled) {
+    log(`identity: not needed — the roster is already ${tracks.length} player(s) from fixed slots`);
+  }
+  if (!rosterSettled && tracks.length > 1 && input.debugId) {
     try {
       const { renderIdentityClip } = await import("./debug-render");
       const { identifyPlayers } = await import("@/lib/coaching/identify-players");
