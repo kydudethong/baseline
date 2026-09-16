@@ -1,5 +1,13 @@
 node_modules
 .next
+# LOCAL PYTHON VENVS. Measured: 3,636 of the 4,071 files in the build context
+# were .venv-gemini -- 89% of everything Docker had to walk and hash, for a
+# directory the image never uses (it installs from requirements.txt). A build
+# context is priced in FILES, not megabytes: this is 65MB that took minutes to
+# enumerate while transferring 44kB, and it is what made a deploy time out.
+.venv
+.venv*
+venv
 .git
 .env*
 !.env.example
