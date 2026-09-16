@@ -42,6 +42,11 @@ import { fillApproachTimes } from "./approach-times";
 import { activeWindows } from "./active-windows";
 import { recordCapture } from "./capture";
 import { readOverlayBytes, OverlayMissingError } from "./overlay-source";
+import fsp from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { downloadToFile } from "@/lib/storage/r2";
 import { cutEvidenceClips } from "./evidence-clips";
 import { OVERLAY_LEGEND } from "./overlay-legend";
 import { getAllDrills } from "./drills";
@@ -251,11 +256,6 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   });
 
   let analyst;
-  // Hoisted: the evidence clips at the end are cut from these same bytes --
-  // the ones the model actually watched. Re-reading them, or re-rendering
-  // them, would open the door to a clip and an overlay disagreeing about what
-  // happened, which is the one thing a piece of evidence must never do.
-  let overlayBytes: Uint8Array | null = null;
   try {
     const overlay = await readOverlayBytes(
       analysisId, analysis.debug_video_bucket ?? null, analysis.debug_video_path ?? null
@@ -265,7 +265,6 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     // what an analysis costs -- roughly half a recreational game is people
     // walking to fetch a ball, and the model was being charged full price at
     // 10fps and high resolution to watch all of it.
-    overlayBytes = overlay;
     const gate = activeWindows(
       (tracksRes.data ?? []).map((t) =>
         ((t.points as Array<{ timestampSeconds: number; boxImageNorm?: { x: number; y: number } }> | null) ?? [])
@@ -684,11 +683,21 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     // already written and a failed cut must not lose it. An observation
     // without a clip is still a true observation -- it just cannot be checked,
     // and the UI shows it without a play control rather than with a broken one.
-    if (overlayBytes && inserted && inserted.length > 0) {
+    const sourceKey = analysis.video?.storage_path ?? null;
+    if (sourceKey && inserted && inserted.length > 0) {
+      // THE PLAYER'S OWN FOOTAGE, fetched for the cuts.
+      //
+      // Downloaded here rather than reusing the pipeline's working copy
+      // because coaching can run on its own, long after the vision pass that
+      // had that copy has finished and cleaned up after itself. One download,
+      // a dozen cuts off it, and it goes away again in the finally.
+      const evTmp = await fsp.mkdtemp(path.join(os.tmpdir(), "pb-evsrc-"));
+      const evSrc = path.join(evTmp, "source.mp4");
       try {
+        await downloadToFile(sourceKey, evSrc);
         const clips = await cutEvidenceClips({
           analysisId,
-          overlayBytes,
+          sourcePath: evSrc,
           clipSeconds: Number(analysis.video?.duration_seconds ?? 0),
           requests: (inserted as Array<{ id: string; t_s: number | null; severity: number }>)
             .filter((r) => r.t_s !== null)
@@ -704,6 +713,8 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
         }
       } catch (err) {
         console.warn(`[coaching] evidence clips skipped: ${describeError(err)}`);
+      } finally {
+        await fsp.rm(evTmp, { recursive: true, force: true }).catch(() => {});
       }
     }
   }

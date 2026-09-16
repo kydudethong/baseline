@@ -1,4 +1,5 @@
 import type { CoachingObservationRow, CoachingShotTechniqueRow } from "@/lib/db/types";
+import { EvidenceVideo } from "./EvidenceVideo";
 
 /**
  * The footage behind a coaching point, ALWAYS VISIBLE.
@@ -30,20 +31,28 @@ export function EvidenceClip({
   clipUrl,
   fallbackUrl,
   startSeconds,
+  windowStartSeconds,
+  windowEndSeconds,
   technique,
 }: {
   observation: CoachingObservationRow;
   /** The cut clip. Preferred: it is already trimmed to the moment. */
   clipUrl?: string | null;
-  /** The full overlay with a #t= fragment, when no cut clip exists. */
+  /** The whole source video, when no cut clip exists. Windowed by the player. */
   fallbackUrl?: string | null;
+  /** The window to play out of the fallback. Ignored when a cut clip exists. */
+  windowStartSeconds?: number | null;
+  windowEndSeconds?: number | null;
   /** Where the moment is, for the caption. */
   startSeconds?: number | null;
   /** The technique read nearest this moment, when the burst pass caught it. */
   technique?: CoachingShotTechniqueRow | null;
 }) {
   const o = observation;
-  const src = clipUrl || fallbackUrl || null;
+  // A cut clip IS its window and needs no seeking. The source video is the
+  // whole film, so it only works with one.
+  const cut = clipUrl || null;
+  const src = cut || fallbackUrl || null;
   const t = startSeconds ?? (o.t_s === null ? null : Number(o.t_s));
   const approx = o.t_is_approx === true;
 
@@ -73,12 +82,10 @@ export function EvidenceClip({
           page that downloads a dozen videos before anyone presses anything is
           a page that loads slowly on a phone at a court.
         */}
-        <video
+        <EvidenceVideo
           src={src}
-          controls
-          muted
-          playsInline
-          preload="metadata"
+          startSeconds={cut ? null : windowStartSeconds}
+          endSeconds={cut ? null : windowEndSeconds}
           className="evidence-video"
         />
         <figcaption className="evidence-cap">
@@ -87,7 +94,7 @@ export function EvidenceClip({
             : t !== null
               ? <>The seconds around <strong>{timecode(t)}</strong>{o.rally_idx !== null ? <>, rally {o.rally_idx}</> : null}</>
               : <>From the clip the coach read</>}
-          {clipUrl ? null : <span className="evidence-full"> · full overlay</span>}
+
         </figcaption>
       </figure>
 

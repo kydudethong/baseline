@@ -13,28 +13,30 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AnalysisRow, CoachingObservationRow, CoachingShotTechniqueRow } from "./types";
-import { debugVideoUrl, evidenceClipUrl } from "@/lib/vision/debug-video-store";
+import type { CoachingObservationRow, CoachingShotTechniqueRow } from "./types";
+import { evidenceClipUrl } from "@/lib/vision/debug-video-store";
 
 export interface Evidence {
   /** The cut clip, when one exists. Preferred: it starts where it should. */
   clipUrl: string | null;
   /**
-   * The full overlay, seeked to this moment with a media fragment.
+   * THE WHOLE SOURCE VIDEO, for when no clip was cut.
    *
-   * THE REASON THERE IS A SECOND URL. A cut can fail, the cap can be hit, the
-   * clip can have been cut before this analysis was re-run -- and every one of
-   * those used to end in a paragraph apologising instead of a video. The
-   * overlay is already rendered and already stored; #t=start,end costs nothing
-   * and plays the same seconds. There is no reason for a criticism to have
-   * nothing to show.
+   * The player windows it to startSeconds..endSeconds itself rather than
+   * trusting a #t= media fragment, which several browsers ignore -- that is
+   * exactly how a criticism ended up showing the entire twenty-minute film
+   * and asking the reader to find the moment.
    *
-   * Null only when the overlay itself failed to render, which the analysis
-   * already reports as a known limitation.
+   * It is the SOURCE, not the overlay, for the same reason the cut clips are:
+   * a player checking a claim about their own swing should be looking at
+   * themselves, not at a wireframe.
    */
   fallbackUrl: string | null;
-  /** Where to start playing, in seconds. Null when the observation names no moment at all. */
+  /** Where the moment is, in seconds. Null when the observation names none. */
   startSeconds: number | null;
+  /** Window the fallback plays, so it sections out rather than playing everything. */
+  windowStartSeconds: number | null;
+  windowEndSeconds: number | null;
   technique: CoachingShotTechniqueRow | null;
 }
 
@@ -60,25 +62,16 @@ export async function evidenceForObservations(
   analysisId: string,
   observations: CoachingObservationRow[],
   /**
-   * The analysis row, for the overlay fallback. Optional so the older callers
-   * keep compiling; without it a missing clip has nothing to fall back to.
+   * A playable url for the SOURCE video, for observations whose clip was
+   * never cut. Optional: without it, a missing clip simply has no video.
    */
-  analysis?: Pick<AnalysisRow, "id" | "debug_video_path" | "debug_video_bucket">
+  sourceVideoUrl?: string | null
 ): Promise<Map<string, Evidence>> {
   const out = new Map<string, Evidence>();
   if (observations.length === 0) return out;
 
-  // One signed url for the whole overlay, reused by every observation that
-  // needs it. Minting one per observation would be a dozen identical round
-  // trips for a dozen identical files.
-  let overlay: string | null = null;
-  if (analysis) {
-    try {
-      overlay = await debugVideoUrl(analysis);
-    } catch {
-      // No overlay is a quieter page, not a broken one -- same as the rest.
-    }
-  }
+  // One url for the whole source, reused by every observation that needs it.
+  const source = sourceVideoUrl ?? null;
 
   let technique: CoachingShotTechniqueRow[] = [];
   try {
@@ -120,27 +113,17 @@ export async function evidenceForObservations(
 
   observations.forEach((o, i) => {
     const t = o.t_s === null || !Number.isFinite(Number(o.t_s)) ? null : Number(o.t_s);
+    const start = t === null ? null : Math.max(0, t - LEAD_S);
     out.set(o.id, {
       clipUrl: urls[i],
-      fallbackUrl: overlay && t !== null ? withFragment(overlay, t) : overlay,
+      fallbackUrl: source,
       startSeconds: t,
+      windowStartSeconds: start,
+      windowEndSeconds: start === null ? null : start + LEAD_S + TRAIL_S,
       technique: nearest(t),
     });
   });
   return out;
 }
 
-/**
- * The overlay url, told to play the seconds around a moment.
- *
- * A media fragment rather than a JS seek, because the browser handles it
- * before the element is hydrated and it survives a reload and a shared link.
- * Appended after any existing query string -- a signed R2 url carries one, and
- * dropping it would turn a working video into a 403.
- */
-function withFragment(url: string, t: number): string {
-  const start = Math.max(0, t - LEAD_S).toFixed(2);
-  const end = (Math.max(0, t - LEAD_S) + LEAD_S + TRAIL_S).toFixed(2);
-  const base = url.split("#")[0];
-  return `${base}#t=${start},${end}`;
-}
+

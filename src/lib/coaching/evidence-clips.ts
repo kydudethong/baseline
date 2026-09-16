@@ -7,14 +7,24 @@
  * now an observation carried a timestamp, which is a number. This turns the
  * number into the footage.
  *
- * CUT FROM THE OVERLAY, NOT RE-RENDERED FROM IT. There is already a
- * renderShotClip() that re-runs the Python renderer over a window, and it
- * would work. This does not use it, for two reasons. It would re-derive
- * everything -- court, boxes, skeletons -- from the overlay DATA, so a clip
- * and the overlay it claims to come from could disagree about what happened,
- * which is the one thing evidence must never do. And trimming an existing mp4
- * costs a fraction of a second where a re-render costs the best part of one,
- * times a dozen observations.
+ * CUT FROM THE SOURCE VIDEO, NOT THE OVERLAY.
+ *
+ * It used to cut from the overlay, and the argument was good: that is the
+ * exact footage the model watched, so the clip was evidence rather than an
+ * illustration. In front of an actual player it was wrong. Somebody told
+ * their contact point is late wants to see THEMSELVES hit the ball -- they
+ * recognise their own swing, their own shoes, the moment they remember. A
+ * wireframe skeleton over a downscaled 720p re-encode is the machine showing
+ * its working, and the working is not what makes a player believe it.
+ *
+ * So the clip is their own footage, at their own resolution, with nothing
+ * drawn on it. The skeletons still exist on the full overlay for anyone who
+ * wants to see what the system saw; they are just not what gets put in front
+ * of a criticism.
+ *
+ * Trimming an existing mp4 costs a fraction of a second where re-rendering
+ * costs the best part of one, times a dozen observations -- which is why this
+ * still trims rather than calling renderShotClip().
  *
  * Never throws. Evidence is an addition to a coaching read; a read without it
  * is diminished, not broken, and a failed cut must never lose a finished
@@ -23,7 +33,6 @@
 
 import { execFile } from "node:child_process";
 import fsp from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -111,8 +120,15 @@ async function cut(src: string, out: string, startS: number, durationS: number):
  */
 export async function cutEvidenceClips(opts: {
   analysisId: string;
-  /** The rendered overlay, as bytes -- the same ones the model watched. */
-  overlayBytes: Uint8Array;
+  /**
+   * The SOURCE video on local disk -- the player's own footage, undrawn-on.
+   *
+   * A path rather than bytes: the source is the full-resolution original and
+   * can be hundreds of megabytes, where the overlay this used to take was a
+   * downscaled re-encode. Holding that in memory to write it straight back to
+   * a temp file was pointless even then.
+   */
+  sourcePath: string;
   clipSeconds: number;
   requests: ClipRequest[];
   onLog?: (line: string) => void;
@@ -124,13 +140,11 @@ export async function cutEvidenceClips(opts: {
     .slice(0, MAX_CLIPS);
   if (wanted.length === 0) return [];
 
-  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), "pb-evidence-"));
-  const srcPath = path.join(tmp, "overlay.mp4");
+  const srcPath = opts.sourcePath;
   const results: ClipResult[] = [];
   const startedAt = Date.now();
 
   try {
-    await fsp.writeFile(srcPath, opts.overlayBytes);
     const outDir = debugVideoDir();
     await fsp.mkdir(outDir, { recursive: true });
 
@@ -160,9 +174,9 @@ export async function cutEvidenceClips(opts: {
     }
   } catch (err) {
     opts.onLog?.(`evidence clips skipped: ${describeError(err)}`);
-  } finally {
-    await fsp.rm(tmp, { recursive: true, force: true }).catch(() => {});
   }
+  // Nothing to clean up: the source is the pipeline's own working copy and is
+  // removed by whoever downloaded it, and the cut clips are the output.
 
   opts.onLog?.(
     `evidence: ${results.length}/${wanted.length} clip(s) cut in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`

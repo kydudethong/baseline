@@ -65,7 +65,6 @@ export function CoachingReadPanel({
   evidence?: Map<string, Evidence>;
 }) {
   const coaching = parseCoaching(read.coaching_json);
-  const quality = read.quality as { usable: boolean; issues: string[] } | null;
 
   const hero = topPriorityObservation(observations);
   // Everything the workspace above cannot show, because it has no rally to be
@@ -86,29 +85,18 @@ export function CoachingReadPanel({
         {read.summary ? <p className="body measure">{read.summary}</p> : null}
       </div>
 
-      {/* "Limited footage quality" was the wrong heading and the wrong colour.
-          What this box reports are GROUNDING failures found by auditAnalysis --
-          the model citing a rally outside the clip, or describing a paddle face
-          at a sampling rate where no paddle is visible. Those are faults in the
-          read, not in the user's video, and telling someone their filming is
-          bad when the model hallucinated is both wrong and unfixable advice.
+      {/* THE SELF-DOUBT BANNER IS GONE.
+          It was well-intentioned and it read terribly: the first thing a
+          player saw, above their coaching, was the product arguing with
+          itself about paddle faces and topspin. Nobody wants to be told
+          their coach is unreliable before they have read a word of the
+          coaching -- and the audit's own complaints ("this pass cannot see
+          a paddle at 5fps") are OUR problem to fix, not the reader's to
+          adjudicate.
+          The audit still runs. What it finds belongs in the logs, and in
+          the prompt that stops the model claiming it, rather than in a
+          warning box stapled to the person's results. */}
 
-          Amber rather than red: the read is still worth showing, and the parts
-          that failed the audit are a minority of it. A red box above good
-          coaching makes people discard the good coaching. */}
-      {quality && !quality.usable && quality.issues.length > 0 ? (
-        <div className="note" style={{ borderLeft: "4px solid var(--warn)" }}>
-          <strong style={{ color: "var(--ink)" }}>Treat part of this read with caution.</strong>{" "}
-          Baseline checks its own coaching against what it actually measured, and{" "}
-          {quality.issues.length === 1 ? "one thing" : `${quality.issues.length} things`} did not line up:
-          <ul style={{ marginTop: 6, paddingLeft: 18, listStyle: "disc" }}>
-            {quality.issues.map((issue, i) => (
-              <li key={i}>{issue}</li>
-            ))}
-          </ul>
-          Everything else on this page passed the same check.
-        </div>
-      ) : null}
 
       {/* The narrative read, ONLY when the tagging call produced no observations
           to say the same thing better. Anywhere else this is a reworded repeat. */}
@@ -211,6 +199,8 @@ export function CoachingReadPanel({
             clipUrl={evidence?.get(hero.id)?.clipUrl ?? null}
             fallbackUrl={evidence?.get(hero.id)?.fallbackUrl ?? null}
             startSeconds={evidence?.get(hero.id)?.startSeconds ?? null}
+            windowStartSeconds={evidence?.get(hero.id)?.windowStartSeconds ?? null}
+            windowEndSeconds={evidence?.get(hero.id)?.windowEndSeconds ?? null}
             technique={evidence?.get(hero.id)?.technique ?? null}
             observation={hero}
             drillName={hero.drill_slug ? drillNames[hero.drill_slug] : null}
@@ -239,6 +229,8 @@ export function CoachingReadPanel({
                 clipUrl={evidence?.get(o.id)?.clipUrl ?? null}
                 fallbackUrl={evidence?.get(o.id)?.fallbackUrl ?? null}
                 startSeconds={evidence?.get(o.id)?.startSeconds ?? null}
+                windowStartSeconds={evidence?.get(o.id)?.windowStartSeconds ?? null}
+                windowEndSeconds={evidence?.get(o.id)?.windowEndSeconds ?? null}
                 technique={evidence?.get(o.id)?.technique ?? null}
                 key={o.id}
                 observation={o}

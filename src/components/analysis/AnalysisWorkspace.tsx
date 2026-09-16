@@ -257,6 +257,8 @@ export function AnalysisWorkspace({
                           clipUrl={evidence?.get(o.id)?.clipUrl ?? null}
                           fallbackUrl={evidence?.get(o.id)?.fallbackUrl ?? null}
                           startSeconds={evidence?.get(o.id)?.startSeconds ?? null}
+                          windowStartSeconds={evidence?.get(o.id)?.windowStartSeconds ?? null}
+                          windowEndSeconds={evidence?.get(o.id)?.windowEndSeconds ?? null}
                           technique={evidence?.get(o.id)?.technique ?? null}
                           drillName={o.drill_slug ? drillNames[o.drill_slug] : null}
                         />

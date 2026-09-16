@@ -211,17 +211,18 @@ async function AnalysisBreakdown({
   const hero = topPriorityObservation(coachingData.observations);
   // The footage behind each claim. After the parallel fetch above because it
   // needs the observations it is evidence for.
-  // The analysis row goes in so a criticism whose clip was never cut can still
-  // play the overlay seeked to its moment, rather than apologise in prose.
-  const evidence = await evidenceForObservations(
-    supabase, analysis.id, coachingData.observations, analysis
-  );
-
   const video = analysis.video;
   let videoUrl: string | null = null;
   if (video) {
     videoUrl = await getSignedDownloadUrl(video.storage_path).catch(() => null);
   }
+
+  // Resolved AFTER the video url, because a criticism whose clip was never cut
+  // falls back to playing a window of the source -- the player's own footage,
+  // not the overlay, and not the whole film.
+  const evidence = await evidenceForObservations(
+    supabase, analysis.id, coachingData.observations, videoUrl
+  );
 
   const hasRead = coachingData.read !== null;
   const selfLabels = (analysis.self_player_label ?? "")

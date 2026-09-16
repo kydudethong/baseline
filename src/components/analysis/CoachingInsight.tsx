@@ -19,7 +19,7 @@ import type { CoachingShotTechniqueRow } from "@/lib/db/types";
  */
 export function CoachingInsight({
   observation, drillName, hero = false, action, eyebrow, analysisId, initialVerdict,
-  clipUrl, fallbackUrl, startSeconds, technique,
+  clipUrl, fallbackUrl, startSeconds, windowStartSeconds, windowEndSeconds, technique,
 }: {
   observation: CoachingObservationRow;
   /** Resolved from the drill catalogue; the row only stores a slug. */
@@ -39,6 +39,9 @@ export function CoachingInsight({
   fallbackUrl?: string | null;
   /** Where the moment is, in seconds. */
   startSeconds?: number | null;
+  /** The window to play, when falling back to the whole source video. */
+  windowStartSeconds?: number | null;
+  windowEndSeconds?: number | null;
   /** What the technique pass saw at that moment, when it was one of the shots read. */
   technique?: CoachingShotTechniqueRow | null;
 }) {
@@ -50,6 +53,8 @@ export function CoachingInsight({
       clipUrl={clipUrl}
       fallbackUrl={fallbackUrl}
       startSeconds={startSeconds}
+      windowStartSeconds={windowStartSeconds}
+      windowEndSeconds={windowEndSeconds}
       technique={technique}
     />
   );
