@@ -18,7 +18,19 @@ import { SkillRadar } from "@/components/breakdown/SkillRadar";
  * legible on its own; hidden and reachable is the right shape for a thing you
  * consult when something surprises you.
  */
-export function SkillRatingsPanel({ skills }: { skills: CoachingSkillRatingRow[] }) {
+export function SkillRatingsPanel({
+  skills, bare = false,
+}: {
+  skills: CoachingSkillRatingRow[];
+  /**
+   * Drop the section heading and the trend link.
+   *
+   * Set when this renders INSIDE the overview panel, which supplies its own
+   * heading and sits in a column too narrow for a footnote. The chart and its
+   * "see why" are the same either way -- only the furniture around them goes.
+   */
+  bare?: boolean;
+}) {
   if (skills.length === 0) return null;
 
   // DECISIONS IS OFF THE CHART, so its ratings do not belong under it either.
@@ -32,8 +44,8 @@ export function SkillRatingsPanel({ skills }: { skills: CoachingSkillRatingRow[]
 
   return (
     <section className="stack g4">
-      <h2 className="eyebrow">Where those ratings sit against each other</h2>
-      <div className="card">
+      {bare ? null : <h2 className="eyebrow">Where those ratings sit against each other</h2>}
+      <div className={bare ? "" : "card"}>
         <SkillRadar skills={shown} />
       </div>
 
@@ -49,17 +61,20 @@ export function SkillRatingsPanel({ skills }: { skills: CoachingSkillRatingRow[]
                 name={skillName(s.skill_key)}
                 raw={s.raw}
                 basis={s.basis}
+                skillKey={s.skill_key}
               />
             ))}
           </div>
         </details>
       ) : null}
 
-      <p className="note">
-        <Link href="/dashboard/practice" className="crumb" style={{ color: "var(--blue)" }}>
-          See how each skill is trending across your games →
-        </Link>
-      </p>
+      {bare ? null : (
+        <p className="note">
+          <Link href="/dashboard/practice" className="crumb" style={{ color: "var(--blue)" }}>
+            See how each skill is trending across your games →
+          </Link>
+        </p>
+      )}
     </section>
   );
 }

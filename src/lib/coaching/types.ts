@@ -107,9 +107,22 @@ export const SKILLS: Array<{ key: string; name: string; group: string }> = [
   { key: "defense", name: "Defense", group: "Defense" },
   { key: "transition", name: "Transition game", group: "Movement" },
   { key: "positioning", name: "Positioning", group: "Movement" },
-  { key: "serve", name: "Serve", group: "Serve & return" },
-  { key: "return", name: "Return", group: "Serve & return" },
-  { key: "thirdshot", name: "Third shot", group: "Serve & return" },
+  // SERVE AND RETURN SPLIT BY WHAT THEY ARE, not by when they happen.
+  //
+  // They shared an axis because they are the first two shots of a point, which
+  // is a fact about the clock rather than about the skill. Everything that
+  // makes a serve good -- depth, pace, a target you chose -- is the same thing
+  // that makes a drive good, and everything that makes a return good is
+  // absorbing someone else's pace and taking their advantage away. A player
+  // reading "Serve & return: 3" learns less than one reading that their
+  // offense is a 3 and their defense is a 4.
+  //
+  // The third shot goes with the serve: it belongs to the serving side and its
+  // whole job is converting the disadvantage of having served into a way
+  // forward.
+  { key: "serve", name: "Serve", group: "Offense" },
+  { key: "thirdshot", name: "Third shot", group: "Offense" },
+  { key: "return", name: "Return", group: "Defense" },
   { key: "offense", name: "Offense", group: "Offense" },
   { key: "selection", name: "Shot selection", group: "Decisions" },
   { key: "iq", name: "Court IQ", group: "Decisions" },

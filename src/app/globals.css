@@ -188,7 +188,47 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 
 .meter{display:flex;flex-direction:column;gap:8px}
 .meter-top{display:flex;align-items:center;gap:8px}
-.meter-top .nm{font-size:15px;font-weight:600}
+.meter-top .nm{font-size:15px;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+
+/* ---------------------------------------------------------------------------
+   THE SKILL INFO DISCLOSURE.
+   A number with no handle on it is not coaching. The icon is deliberately
+   quiet -- a rating people are happy with should not have something shouting
+   next to it -- but it is a real 20px target, because the people most likely
+   to press it are on a phone at a court.
+   --------------------------------------------------------------------------- */
+.skill-info{display:inline}
+.skill-info-ic{
+  list-style:none;cursor:pointer;display:inline-grid;place-items:center;
+  width:18px;height:18px;border-radius:50%;
+  border:1px solid var(--line);background:transparent;
+  font-size:11px;font-weight:700;font-style:italic;color:var(--ink-3);
+  line-height:1;user-select:none;
+}
+.skill-info-ic::-webkit-details-marker{display:none}
+.skill-info-ic:hover{color:var(--ink);border-color:var(--ink-3)}
+.skill-info[open] > .skill-info-ic{background:var(--line);color:var(--ink)}
+.skill-info-body{
+  display:flex;flex-direction:column;gap:12px;
+  margin-top:10px;padding:14px;border-radius:var(--r3);
+  background:var(--card);border:1px solid var(--line);
+}
+.skill-info-what{margin:0;font-size:13.5px;font-weight:600;color:var(--ink)}
+.skill-info-row{display:flex;flex-direction:column;gap:3px}
+.skill-info-row p{margin:0;font-size:13px;line-height:1.5;color:var(--ink-2)}
+.skill-info-lbl{
+  font-family:var(--data);font-size:10px;font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-3);
+}
+.skill-info-lbl.good{color:var(--good)}
+.skill-info-lbl.warn{color:var(--warn)}
+
+@media (max-width:640px){
+  /* A finger needs more than eighteen pixels. The icon stays the same size;
+     the tappable area grows around it. */
+  .skill-info-ic{width:22px;height:22px}
+  .skill-info-body{padding:12px}
+}
 .meter-top .sc{margin-left:auto;font-family:var(--display);font-size:19px;font-weight:700;letter-spacing:-.02em}
 .meter-top .sc small{font-size:12px;font-weight:500;color:var(--ink-3);font-family:var(--ui)}
 .track{height:8px;background:var(--sunk);border-radius:var(--rf);overflow:hidden}
@@ -1243,4 +1283,21 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
   .player-meta{font-size:11px;gap:2px 9px}
   /* Portrait phones have the height to spare and the width they do not. */
   .ws-video-lead .player video{max-height:none}
+}
+
+
+/* ---------------------------------------------------------------------------
+   THE OVERVIEW: the shape on the left, the words on the right.
+   One column below 900px, chart first -- on a phone the chart is the thing
+   that reads at a glance, and the takeaways are what you scroll for.
+   --------------------------------------------------------------------------- */
+.overview-grid{
+  display:grid;grid-template-columns:minmax(0,320px) minmax(0,1fr);
+  gap:var(--a5);align-items:start;
+}
+.overview-chart{display:flex;flex-direction:column;gap:8px;min-width:0}
+.overview-takes{display:flex;flex-direction:column;gap:var(--a3);min-width:0}
+
+@media (max-width:900px){
+  .overview-grid{grid-template-columns:minmax(0,1fr);gap:var(--a4)}
 }

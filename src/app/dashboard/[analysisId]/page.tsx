@@ -33,7 +33,6 @@ import { ErrorState } from "@/components/analysis/ErrorState";
 import { getAnalysisView, type ViewRally } from "@/lib/db/analysis-view";
 import { getAllDrills } from "@/lib/coaching/drills";
 import { topPriorityObservation } from "@/lib/coaching/ranking";
-import { SkillRatingsPanel } from "@/components/dashboard/SkillRatingsPanel";
 import type { AnalysisFrameRow, PlayerTrackRow } from "@/lib/db/types";
 
 export const dynamic = "force-dynamic";
@@ -332,6 +331,7 @@ async function AnalysisBreakdown({
           analysisId={analysis.id}
           feedback={feedback}
           skillKeysWithBlueprint={skillKeysWithBlueprint}
+          skills={coachingData.skills}
         />
       ) : (
         <ErrorState
@@ -340,11 +340,8 @@ async function AnalysisBreakdown({
         />
       )}
 
-      {/* STRAIGHT UNDER THE FILM AND ITS RELIABILITY NOTE. The chart answers
-          "how did I play" in one glance, which is the question somebody has
-          the moment they stop watching. It used to be near the bottom, under
-          everything that answers slower. */}
-      <SkillRatingsPanel skills={coachingData.skills} />
+      {/* The ratings chart lives INSIDE the workspace now, beside the key
+          takeaways -- see Overview in AnalysisWorkspace. */}
 
       {/* THE PRO MATCH, HIGH UP, because it is the thing people actually want
           to know and it was several screens below the film. It reads as a
@@ -380,13 +377,36 @@ async function AnalysisBreakdown({
           blueprint answers "how do I get good at dinking over six weeks". The
           blueprints are also opt-in (someone has to press Build), so most
           analyses have none and this is the only plan on the page. */}
+      {/* OFFERED, NOT IMPOSED.
+          Four blocks, fifty-two minutes, every drill written out in full --
+          setup, technique, and a stop-when condition. All of it useful, and
+          all of it was landing on someone who had come to find out how they
+          played, as roughly two screens of instructions they had not asked
+          for. It is a different job on a different day: you read the analysis
+          on the sofa and you read the drills at the court.
+
+          Closed by default and one tap from open. The summary carries the
+          block and minute counts, so the offer is specific -- "see the drills"
+          with no idea whether that means two minutes or an hour is not an
+          offer anyone can take. */}
       {practice && practice.blocks.length > 0 ? (
         <section className="stack g4">
-          <PracticeSessionPanel
-            plan={practice.plan}
-            blocks={practice.blocks}
-            drillNames={drillNames}
-          />
+          <details className="card">
+            <summary className="sm" style={{ cursor: "pointer", fontWeight: 600 }}>
+              See the drills that fix what this analysis found
+              <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>
+                {" · "}{practice.blocks.length} block{practice.blocks.length === 1 ? "" : "s"}
+                {practiceMinutes(practice.blocks) ? `, ${practiceMinutes(practice.blocks)} min` : ""}
+              </span>
+            </summary>
+            <div style={{ marginTop: 16 }}>
+              <PracticeSessionPanel
+                plan={practice.plan}
+                blocks={practice.blocks}
+                drillNames={drillNames}
+              />
+            </div>
+          </details>
         </section>
       ) : coachingData.read ? (
         <EmptyState
@@ -667,4 +687,11 @@ function playstyleMatches(coachingJson: string | null): PlaystyleMatch[] {
 function prettyKind(kind: string): string {
   const s = kind.replace(/[_-]+/g, " ").trim();
   return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+/** Total minutes of a session, or 0 when any block is missing its own. */
+function practiceMinutes(blocks: Array<{ minutes: number | null }>): number {
+  return blocks.every((b) => typeof b.minutes === "number" && b.minutes > 0)
+    ? blocks.reduce((n, b) => n + (b.minutes ?? 0), 0)
+    : 0;
 }

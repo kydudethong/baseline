@@ -13,11 +13,10 @@ import { SKILLS } from "@/lib/coaching/types";
  * the model's impression of intent. A chart that puts a measurement and an
  * impression on neighbouring axes invites them to be read as equally solid.
  */
-const GROUP_ORDER = ["Kitchen", "Movement", "Serve & return", "Offense", "Defense"];
+const GROUP_ORDER = ["Kitchen", "Movement", "Offense", "Defense"];
 const GROUP_COLOR: Record<string, string> = {
   Kitchen: "#8B5CF6",
   Movement: "#06B6D4",
-  "Serve & return": "#EC4899",
   Offense: "#F97316",
   Decisions: "#EAB308",
   Defense: "#3B82F6",
@@ -49,7 +48,7 @@ function groupScores(skills: CoachingSkillRatingRow[]): GroupScore[] {
 }
 
 /**
- * A pentagon radar of the five skill groups (see SKILLS in coaching/types.ts)
+ * A four-axis radar of the skill groups (see SKILLS in coaching/types.ts)
  * plus a headline "single game" number — the shape of read Ky asked to
  * match from another pickleball app's skill-rating screen, adapted so the
  * chart still means something: each vertex's radius is the actual 1-5

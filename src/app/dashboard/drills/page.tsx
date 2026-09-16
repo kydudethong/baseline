@@ -8,7 +8,11 @@ import { Paddle } from "@/components/motifs/Motifs";
 export const metadata: Metadata = { title: "Drills — Baseline" };
 export const dynamic = "force-dynamic";
 
-const GROUP_ORDER = ["Kitchen", "Movement", "Serve & return", "Offense", "Decisions", "Defense"];
+// "Serve & return" is gone as a group: serve and third shot are Offense now,
+// return is Defense. Decisions stays HERE even though it left the radar -- the
+// drill library should still have somewhere to put shot selection and court
+// IQ work, it just should not be an axis on a chart of measured play.
+const GROUP_ORDER = ["Kitchen", "Movement", "Offense", "Defense", "Decisions"];
 
 function skillName(key: string): string {
   return SKILLS.find((s) => s.key === key)?.name ?? key;

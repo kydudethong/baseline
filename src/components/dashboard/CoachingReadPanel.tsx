@@ -1,7 +1,6 @@
 import Link from "next/link";
 import type { CoachingObservationRow, CoachingReadRow } from "@/lib/db/types";
 import { type CoachingRead } from "@/lib/coaching/types";
-import { topPriorityObservation } from "@/lib/coaching/ranking";
 import { Check, Paddle } from "@/components/motifs/Motifs";
 
 /**
@@ -41,16 +40,14 @@ import { Check, Paddle } from "@/components/motifs/Motifs";
  * the tagging call produced no observations at all.
  */
 export function CoachingReadPanel({
-  read,
-  observations,
+  read, observations,
 }: {
   read: CoachingReadRow;
+  /** Only to decide whether the narrative fallback is the only coaching there is. */
   observations: CoachingObservationRow[];
 }) {
   const coaching = parseCoaching(read.coaching_json);
 
-  const hero = topPriorityObservation(observations);
-  const inWorkspace = observations.filter((o) => o.rally_idx !== null && o.id !== hero?.id).length;
   // The narrative blob is the ONLY coaching on the fallback path. Anywhere else
   // it is the observations reworded, so it is not rendered.
   const narrativeOnly = observations.length === 0;
@@ -176,17 +173,17 @@ export function CoachingReadPanel({
           way that matters, the fix is to surface them in the workspace rather
           than to put these sections back. */}
 
-      {inWorkspace > 0 ? (
-        <p className="xs measure">
-          {inWorkspace} more point{inWorkspace === 1 ? "" : "s"} {inWorkspace === 1 ? "is" : "are"} tied
-          to a specific rally. Pick that rally in the film room above and it appears next to the video,
-          so you can watch the thing being described.
-        </p>
-      ) : null}
+      {/* TWO PARAGRAPHS OF HOUSEKEEPING, DELETED.
+          The first explained the page's own navigation -- "7 more points are
+          tied to a specific rally, pick that rally above" -- which is a
+          product describing itself instead of working. If the coaching beside
+          the video is not discoverable, the fix is the layout, not a note.
 
-      {coaching?.data_gaps ? (
-        <p className="xs measure">What the footage couldn&apos;t show: {coaching.data_gaps}</p>
-      ) : null}
+          The second dumped data_gaps verbatim: bounding box IDs swapping
+          between player_9 and player_1, no per-shot biomechanical contact
+          measurements, no automated paddle tracking. Every word true, every
+          word ours. The reliability note above the film says the same thing in
+          the reader's language, and the rest belongs in the logs. */}
 
       {/* The skill ratings moved OUT of this panel and under the radar they
           explain -- see SkillRatingsPanel. A rating and the chart it is a

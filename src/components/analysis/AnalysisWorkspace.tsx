@@ -4,12 +4,13 @@ import { useMemo, useState } from "react";
 import Player from "@/components/breakdown/Player";
 import type { ReactNode } from "react";
 import type { AnalysisView, ViewRally, ViewShot } from "@/lib/db/analysis-view";
-import type { CoachingObservationRow } from "@/lib/db/types";
+import type { CoachingObservationRow, CoachingSkillRatingRow } from "@/lib/db/types";
 import type { Evidence } from "@/lib/db/evidence";
 import { RallyTimeline } from "./RallyTimeline";
 import { ShotSequence } from "./ShotSequence";
 import { CoachingInsight } from "./CoachingInsight";
 import { BuildBlueprintButton } from "@/components/dashboard/BuildBlueprintButton";
+import { SkillRatingsPanel } from "@/components/dashboard/SkillRatingsPanel";
 import { MetricCard } from "./MetricCard";
 import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { EmptyState } from "./EmptyState";
@@ -46,8 +47,10 @@ import { shotName } from "./ShotBadge";
  */
 export function AnalysisWorkspace({
   view, videoUrl, drillNames, heroObservationId = null, heading, evidence,
-  analysisId, feedback, skillKeysWithBlueprint,
+  analysisId, feedback, skillKeysWithBlueprint, skills,
 }: {
+  /** The ratings, drawn as a chart beside the takeaways. */
+  skills?: CoachingSkillRatingRow[];
   /**
    * THE CONTROLS CAME WITH THE COACHING. "Is this right?" and "build a
    * practice plan" used to live on the two sections below this workspace;
@@ -238,7 +241,9 @@ export function AnalysisWorkspace({
           </div>
 
           <div className="panel-body">
-            {tab === "overview" ? <Overview view={view} observations={observations} /> : null}
+            {tab === "overview"
+              ? <Overview view={view} observations={observations} skills={skills} />
+              : null}
 
             {tab === "rally" ? (
               rally ? (
@@ -344,7 +349,13 @@ export function AnalysisWorkspace({
  * deliberately no headline score above it: nothing in this pipeline computes
  * a composite rating, and a number in that slot would be invented.
  */
-function Overview({ view, observations }: { view: AnalysisView; observations: CoachingObservationRow[] }) {
+function Overview({
+  view, observations, skills = [],
+}: {
+  view: AnalysisView;
+  observations: CoachingObservationRow[];
+  skills?: CoachingSkillRatingRow[];
+}) {
   if (observations.length === 0) {
     return (
       <p className="sm">
@@ -355,7 +366,19 @@ function Overview({ view, observations }: { view: AnalysisView; observations: Co
   }
   const coverage = view.quality?.ball_coverage ?? null;
   return (
-    <>
+    <div className="overview-grid">
+      {/* THE CHART, LEFT OF THE WORDS. Both answer "how did I play", one as a
+          shape and one as a list, and they were several screens apart -- so
+          the shape got read without its reasons and the list got read without
+          its context. Side by side they are one answer. */}
+      {skills.length > 0 ? (
+        <div className="overview-chart">
+          <p className="eyebrow">Where those ratings sit against each other</p>
+          <SkillRatingsPanel skills={skills} bare />
+        </div>
+      ) : null}
+
+      <div className="overview-takes">
       <p className="eyebrow">Key takeaways</p>
       <div className="stack g4">
         {observations.slice(0, 6).map((o) => {
@@ -378,7 +401,8 @@ function Overview({ view, observations }: { view: AnalysisView; observations: Co
           frames. Everything above rests on that.
         </p>
       ) : null}
-    </>
+      </div>
+    </div>
   );
 }
 
