@@ -44,6 +44,8 @@ export interface IdentityGroup {
   trackIds: string[];
   /** How it told them apart, in its own words -- for the log and for trust. */
   description: string;
+  /** False for spectators, the next court over, and people waiting to play. */
+  playing: boolean;
 }
 
 const SCHEMA = {
@@ -56,6 +58,12 @@ const SCHEMA = {
       items: {
         type: "object",
         properties: {
+          playing: {
+            type: "boolean",
+            description:
+              "True if this person is one of the players in the game being filmed. False for "
+              + "spectators, people on a neighbouring court, and anyone waiting to play.",
+          },
           track_ids: {
             type: "array",
             items: { type: "string" },
@@ -68,7 +76,7 @@ const SCHEMA = {
               + "which side of the net they play. Enough that a reader could pick them out.",
           },
         },
-        required: ["track_ids", "description"],
+        required: ["track_ids", "description", "playing"],
       },
     },
   },
@@ -87,7 +95,11 @@ function prompt(ids: string[], expectedPlayers: number): string {
     `The ids you will see are: ${ids.join(", ")}.`,
     `This is a ${expectedPlayers}-player game, so there should be about ${expectedPlayers} real people.`,
     "",
-    "Group the ids by PERSON.",
+    "Group the ids by PERSON, and say whether each person is PLAYING.",
+    "",
+    "Not everyone with a box on them is in this game. Public courts come with spectators, people",
+    "waiting their turn, and a whole other match going on alongside. Mark those `playing: false`.",
+    "The players in THIS game are the ones on THIS court, hitting the ball over THIS net.",
     "",
     "How to tell them apart, in rough order of how much you should trust it:",
     "- WHERE AND WHEN. An id that ends and another that begins a moment later in the same part of",
@@ -137,7 +149,7 @@ export async function identifyPlayers(opts: {
   async function run(): Promise<IdentityGroup[]> {
    try {
     file = await uploadVideo(opts.clipBytes, opts.clipName, "video/mp4", opts.onLog);
-    const out = await generateJSON<{ people?: Array<{ track_ids?: string[]; description?: string }> }>({
+    const out = await generateJSON<{ people?: Array<{ track_ids?: string[]; description?: string; playing?: boolean }> }>({
       model,
       file,
       prompt: prompt(opts.trackIds, opts.expectedPlayers),
@@ -157,14 +169,20 @@ export async function identifyPlayers(opts: {
         // does.
         trackIds: [...new Set((p.track_ids ?? []).filter((id) => known.has(id)))],
         description: (p.description ?? "").trim(),
+        // Absent means playing. A model that forgets the field must not
+        // silently delete a player from their own analysis.
+        playing: p.playing !== false,
       }))
-      .filter((g) => g.trackIds.length > 1);
+      .filter((g) => g.trackIds.length > 0);
     opts.onLog?.(
       `identity: ${opts.trackIds.length} track(s) -> ${(out.people ?? []).length} person(s); `
       + `${groups.length} group(s) with something to merge`
     );
     for (const g of groups) {
-      opts.onLog?.(`  ${g.trackIds.join(" + ")} — ${g.description || "no description given"}`);
+      opts.onLog?.(
+        `  ${g.playing ? "player" : "NOT PLAYING"}: ${g.trackIds.join(" + ")}`
+        + ` — ${g.description || "no description given"}`
+      );
     }
     return groups;
    } finally {

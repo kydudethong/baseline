@@ -1,4 +1,4 @@
-import { estimatePoseViaPython } from "./cv-scripts";
+import { estimatePoseViaPython, type RawPoseResult } from "./cv-scripts";
 import type { BoundingBoxNorm, CocoKeypointName, PlayerPoseFrame, PlayerTrack } from "./phase2-types";
 
 function iou(a: BoundingBoxNorm, b: BoundingBoxNorm): number {
@@ -60,24 +60,22 @@ function nearestPoint(track: PlayerTrack, t: number, toleranceS: number) {
 /**
  * The most pose frames one run will pay for.
  *
- * THIS CAP IS NEW BECAUSE THE STAGE IS NEW. Pose has been in the pipeline for
- * weeks and has not actually RUN on the server for any of them: an ultralytics
- * warning on stdout made the caller's JSON.parse throw, the whole pass returned
- * nothing, and it did so instantly. Fixing that turned a stage that cost
- * nothing into a stage that does the real work -- and the real work on a
- * 13.7-minute clip is 4,121 frames of CPU inference on a box with no
- * accelerator, which is somewhere between seven and thirty minutes.
+ * ZERO -- NO CAP -- and the reason it can be zero is that this pass is now the
+ * only model pass over these frames. It used to be the second of two: a
+ * detector ran over every frame, then pose ran again over the same ones. The
+ * cap existed to stop that second pass adding half an hour to a long clip.
  *
- * So: a bound, and an honest one. Past this many frames the clip is SAMPLED --
- * an even spread end to end rather than the first N, so a long game gets
- * skeletons throughout rather than for its first four minutes and nothing
- * after. The overlay's skeletons get sparser on a long clip, and that is the
- * trade: a sparse figure on a run that finishes beats a dense one on a run
- * that dies at minute twelve.
+ * Pose IS the detector now, so capping it would thin out TRACKING, not just
+ * skeletons -- a player sampled twice a second instead of five times is a
+ * player the tracker loses at every occlusion, which is the problem this whole
+ * evening has been about.
  *
- * POSE_MAX_FRAMES tunes it. 0 means no cap, for a box that can afford it.
+ * The honest lever is VISION_FPS, which already decides how many frames every
+ * stage sees and is the one number that means "how hard is this run". Set
+ * POSE_MAX_FRAMES if a box genuinely cannot finish, and know that it costs
+ * tracking quality rather than just skeleton density.
  */
-export const POSE_MAX_FRAMES = 1800;
+export const POSE_MAX_FRAMES = 0;
 
 export function poseMaxFrames(): number {
   const v = Number(process.env.POSE_MAX_FRAMES);
@@ -104,7 +102,9 @@ export async function estimatePosesForFrames(
    * tolerance or every pose in a burst is silently dropped.
    */
   matchToleranceS = DEFAULT_MATCH_TOLERANCE_S,
-  onLog?: (line: string) => void
+  onLog?: (line: string) => void,
+  /** Results already in hand from the detection pass, so the model runs once. */
+  opts?: { people?: Map<string, RawPoseResult["people"]> }
 ): Promise<PlayerPoseFrame[]> {
   if (frames.length === 0) return [];
 
@@ -121,9 +121,13 @@ export async function estimatePosesForFrames(
   }
   frames = toRead;
 
-  const results = await estimatePoseViaPython(frames.map((f) => f.path));
-
-  const results_by_path = new Map(results.map((r) => [r.imagePath, r]));
+  // Re-use the pass the detector already made, when there was one. Pose IS the
+  // detector now, so running the model a second time over the same frames
+  // would be paying twice for one answer -- which is the exact waste that
+  // deleting the separate player detector removed.
+  const results_by_path: Map<string, RawPoseResult> = opts?.people
+    ? new Map([...opts.people].map(([path, people]) => [path, { imagePath: path, people }]))
+    : new Map((await estimatePoseViaPython(frames.map((f) => f.path))).map((r) => [r.imagePath, r]));
   const output: PlayerPoseFrame[] = [];
 
   // COUNTERS, because "no skeletons in the overlay" had three possible causes

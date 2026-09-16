@@ -313,6 +313,30 @@ export async function estimatePoseViaPython(imagePaths: string[]): Promise<RawPo
   return jsonLines.map((line) => JSON.parse(line) as RawPoseResult);
 }
 
+/**
+ * People and their joints, in ONE model pass.
+ *
+ * WHY THIS REPLACES THE PLAYER DETECTOR. The pipeline ran two neural networks
+ * over the same frames: yolov8n.pt for player boxes, then yolov8n-pose.pt for
+ * skeletons. But a pose model detects people itself -- it returns a person box
+ * with every skeleton, because that is how it finds the body to put joints on.
+ * The separate detector was doing a job that was already being done, on a
+ * machine where CPU inference is the entire bottleneck.
+ *
+ * One pass now. Half the model time, and boxes and skeletons that came from
+ * the same look at the same pixels, so they can never disagree about where a
+ * person is -- which the two-model version could, and did, whenever the IoU
+ * match between them failed.
+ */
+export async function detectPeopleWithPose(
+  frames: Array<{ path: string; timestampSeconds: number }>
+): Promise<Map<string, RawPoseResult["people"]>> {
+  const raw = await estimatePoseViaPython(frames.map((f) => f.path));
+  const out = new Map<string, RawPoseResult["people"]>();
+  for (const r of raw) out.set(r.imagePath, r.error ? [] : r.people);
+  return out;
+}
+
 export interface RawBallDetections {
   fps: number;
   sourceFps: number;

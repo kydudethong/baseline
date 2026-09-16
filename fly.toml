@@ -62,7 +62,12 @@ primary_region = "sjc"
   # instantly. Now it does the real work -- and a 13.7-minute clip is 4,121
   # frames of CPU inference on a machine with no accelerator. Past this many,
   # the clip is sampled evenly end to end rather than read in full.
-  POSE_MAX_FRAMES = "1800"
+  # No cap. This pass used to be the SECOND model over these frames -- a
+  # detector ran first, then pose ran again -- and the cap stopped that second
+  # pass adding half an hour to a long clip. The separate detector is gone now
+  # and pose returns the boxes too, so capping this would thin out tracking
+  # rather than just skeletons. VISION_FPS is the lever for a heavy run.
+  POSE_MAX_FRAMES = "0"
 
   # The overlay is rendered at 720p whatever the source is. 1080p buys nothing:
   # the coaching model resizes every frame it is given to roughly a 768px tile

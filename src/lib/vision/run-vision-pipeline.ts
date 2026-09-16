@@ -19,6 +19,7 @@ import {
   type PlayerPositions, type PlayerPositioning, type PartnerGapResult,
 } from "./positioning";
 import { describeError } from "@/lib/analysis/describe-error";
+import type { RawPoseResult } from "./cv-scripts";
 import {
   matchTracksToSetup,
   type PreAnalysisSetup,
@@ -28,7 +29,6 @@ import type {
   BoundingBoxNorm,
   CourtCalibration,
   FrameDetectionSet,
-  PlayerDetection,
   PlayerMovementMetrics,
   PlayerPoseFrame,
   PlayerTrack,
@@ -256,36 +256,49 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // (not Promise.all) on purpose — a free-tier hosted API can rate-limit
   // bursts, and this keeps VISION_FPS the actual throttle on call volume.
   const perFrameDetections: FrameDetectionSet[] = [];
+  // The pose model's raw output, kept so the skeleton step does not run it
+  // again. Empty when the hosted detector was used instead.
+  let posePeople: Map<string, RawPoseResult["people"]> = new Map();
   const localPlayers = playerDetectionIsLocal() && typeof (provider as {
     detectPlayersBatch?: unknown }).detectPlayersBatch === "function";
 
   stage("players", "finding the players");
 
   if (localPlayers) {
-    // One local process for the whole clip. The hosted alternative spent a
-    // Roboflow credit per sampled frame on a public COCO model -- ~500 per
-    // 100-second clip at 5 fps -- which exhausted a free tier in a handful of
-    // runs and then failed the analysis outright with a 402.
-    log(`detecting players locally (${input.frames.length} frames, one pass)…`);
-    let batch: Map<string, PlayerDetection[]>;
+    // ONE MODEL PASS, NOT TWO.
+    //
+    // This used to run yolov8n.pt for boxes here and yolov8n-pose.pt for
+    // skeletons later -- two neural networks over the same frames on a machine
+    // with no accelerator, where CPU inference is the entire bottleneck. A
+    // pose model detects people itself: it returns a person box with every
+    // skeleton, because that is how it finds the body to put joints on. The
+    // separate detector was doing a job that was already being done.
+    //
+    // Half the model time, and boxes and skeletons that came from one look at
+    // one set of pixels, so they can never disagree about where somebody is --
+    // which the two-model version could, and did, whenever the overlap match
+    // between them failed and a skeleton was dropped for belonging to nobody.
+    log(`finding players and their joints (${input.frames.length} frames, one pass)…`);
     try {
-      batch = await (provider as unknown as {
-        detectPlayersBatch: (f: typeof input.frames) => Promise<Map<string, PlayerDetection[]>>
-      }).detectPlayersBatch(input.frames);
+      const { detectPeopleWithPose } = await import("./cv-scripts");
+      posePeople = await detectPeopleWithPose(input.frames);
     } catch (err) {
-      // Do NOT silently fall back to the hosted API here. Falling back is how
-      // a local-only setup quietly starts spending credits again, which is the
-      // exact failure this replaced. Say what is missing instead.
       throw new Error(
         `Local player detection failed: ${describeError(err)}. `
         + "Set PLAYER_DETECTION=roboflow to use the hosted API instead (it costs credits)."
       );
     }
     for (const frame of input.frames) {
+      const people = posePeople.get(frame.path) ?? [];
       perFrameDetections.push({
         timestampSeconds: frame.timestampSeconds,
         framePath: frame.path,
-        players: batch.get(frame.path) ?? [],
+        players: people.map((p) => ({
+          boxImageNorm: p.boxImageNorm,
+          confidence: p.detectionConfidence ?? 0.5,
+          timestampSeconds: frame.timestampSeconds,
+          appearanceSignature: null,
+        })),
       });
     }
   } else {
@@ -487,13 +500,39 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
           onLog: (l) => log(`  ${l}`),
         });
         if (groups.length > 0) {
+          const before = tracks.length;
           const result = mergeTrackGroups(tracks, groups.map((g) => g.trackIds));
           for (const r of result.rejected) {
             log(`identity: refused ${r.kept} + ${r.dropped} — ${r.reason}`);
           }
-          const before = tracks.length;
+
+          // NOT EVERYONE WITH A BOX ON THEM IS IN THIS GAME. Public courts come
+          // with spectators, people waiting their turn and a whole other match
+          // alongside. The court gate drops most of them geometrically, and the
+          // ones it cannot -- somebody standing just inside the line, a player
+          // on the next court at the same image height as the far baseline --
+          // are obvious to anything that has watched the clip.
+          //
+          // A merged group is dropped only if EVERY id in it was called a
+          // non-player. One uncertain id must not delete a real player, and
+          // the count is logged either way so an over-eager exclusion is
+          // visible rather than silent.
+          const notPlaying = new Set(
+            groups.filter((g) => !g.playing).flatMap((g) => g.trackIds)
+          );
+          const kept = result.tracks.filter((t) => !notPlaying.has(t.playerId));
+          const dropped = result.tracks.length - kept.length;
+
           tracks.length = 0;
-          tracks.push(...result.tracks);
+          // Never end up with nobody: if the model called everyone a spectator
+          // it has misread the clip, and an analysis of four people beats an
+          // analysis of none.
+          tracks.push(...(kept.length > 0 ? kept : result.tracks));
+          if (dropped > 0 && kept.length > 0) {
+            log(`identity: ${dropped} track(s) were spectators or another court, not players`);
+          } else if (dropped > 0) {
+            log(`identity: the model called every track a non-player — keeping them all`);
+          }
           log(`identity: ${before} track(s) -> ${tracks.length} player(s)`);
         }
       }
@@ -514,7 +553,10 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   stage("pose", "estimating pose…");
   try {
     const { estimatePosesForFrames } = await import("./pose");
-    poses = await estimatePosesForFrames(input.frames, tracks, undefined, log);
+    poses = await estimatePosesForFrames(
+      input.frames, tracks, undefined, log,
+      posePeople.size > 0 ? { people: posePeople } : undefined
+    );
   } catch (err) {
     knownLimitations.push(`Pose estimation failed: ${describeError(err)}`);
     log(`pose: FAILED — ${describeError(err)}`);

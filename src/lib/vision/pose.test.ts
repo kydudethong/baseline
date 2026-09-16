@@ -21,9 +21,11 @@ test("the frame budget is overridable, and 0 means no cap", () => {
   }
 });
 
-test("the budget is large enough to cover a normal clip untouched", () => {
-  // The failure this guards against is capping something that did not need it:
-  // a 5-minute clip at VISION_FPS=5 is 1,500 frames, and those should all be
-  // read. The cap is for the 14-minute case that was dying.
-  assert.ok(POSE_MAX_FRAMES >= 1500, "a five-minute clip should not be sampled");
+test("there is no cap by default, because pose is the detector now", () => {
+  // Capping this pass used to thin out skeletons on a long clip, which was a
+  // fair trade. It would now thin out TRACKING -- a player sampled twice a
+  // second instead of five times is a player the tracker loses at every
+  // occlusion. The lever for a run that is too heavy is VISION_FPS.
+  assert.equal(POSE_MAX_FRAMES, 0);
+  assert.equal(poseMaxFrames(), 0);
 });
