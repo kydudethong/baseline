@@ -15,6 +15,7 @@
  */
 
 import { isAbandoned, type BatchJob } from "./gemini-batch";
+import type { AnalystOutput } from "./analyst";
 
 export type CollectDecision =
   | { action: "wait"; reason: string }
@@ -112,3 +113,23 @@ export const COLLECT_EVERY_MS = 5 * 60 * 1000;
  * Oldest first, so a backlog drains in the order people are waiting.
  */
 export const COLLECT_BATCH_SIZE = 25;
+
+/**
+ * A segment's JSON, or nothing.
+ *
+ * A SEGMENT THAT WILL NOT PARSE IS DROPPED, NOT THROWN. One malformed answer
+ * out of five should cost a fifth of the analysis, not all of it -- after an
+ * overnight wait, the difference between four segments and starting again is
+ * another day.
+ */
+export function parseSegments(texts: string[], onLog?: (l: string) => void): AnalystOutput[] {
+  const out: AnalystOutput[] = [];
+  texts.forEach((t, i) => {
+    try {
+      out.push(JSON.parse(t) as AnalystOutput);
+    } catch (err) {
+      onLog?.(`segment ${i + 1} was not JSON and has been dropped: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  });
+  return out;
+}

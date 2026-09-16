@@ -34,6 +34,9 @@ import type {
 import { buildCoachingFacts } from "./facts";
 import { buildAnalystInput } from "./analyst-facts";
 import { runAnalyst, releaseAnalystFile, analystFps, analystMediaResolution } from "./analyst";
+import { analystModel } from "./gemini";
+import type { AnalystInput, AnalystOutput } from "./analyst";
+import type { UploadedFile } from "./gemini";
 import { buildPracticePlan } from "./practice-plan";
 import { matchPlaystyles } from "./pro-playstyles";
 import { shotRowsFromAnalyst } from "./shot-rows";
@@ -119,7 +122,55 @@ export async function coachingProgress(
   }
 }
 
-export async function runCoachingPipeline(supabase: Client, userId: string, analysisId: string): Promise<void> {
+/**
+ * The analysis row as this pipeline needs it: with the video attached.
+ *
+ * Named because two functions take it now. The width and height are not
+ * incidental -- the approach-time pass re-derives court positions from the raw
+ * tracks, and that projection is in pixels before it is in feet.
+ */
+export type AnalysisWithVideo = AnalysisRow & {
+  video: {
+    duration_seconds: number | null; storage_path: string | null;
+    width: number | null; height: number | null;
+  } | null;
+};
+
+/**
+ * Everything the analyst needs about a clip, loaded from the database.
+ *
+ * PULLED OUT FOR THE OVERNIGHT PATH, which finishes a run hours later in a
+ * process holding nothing but an analysis id. It rebuilds these inputs rather
+ * than unpacking a snapshot taken at submit time: a snapshot is a copy of the
+ * pipeline's inputs that can go stale, arrive partial, or have been written by
+ * a version of the code that no longer exists. The rows are the truth, and
+ * reading them again costs a few queries.
+ *
+ * The live path calls it too, so there is one definition of "what the analyst
+ * was told" instead of two that can drift.
+ */
+export interface AnalystContext {
+  analysis: AnalysisWithVideo;
+  analystInput: AnalystInput;
+  allDrills: CoachingDrillRow[];
+  shots: AnalysisShotRow[];
+  model: string;
+  /** Kept for the live path, which still needs the raw tracks for the gate. */
+  tracksRes: { data: Array<{ points: unknown }> | null };
+  profile: { skill_level: string | null } | null;
+}
+
+export async function rebuildAnalystContext(
+  supabase: Client,
+  /**
+   * BY ID ALONE, deliberately. This used to filter on user_id too, which the
+   * collector cannot supply -- it is a scheduler acting on a row it found, not
+   * a person. Ownership is now checked by the caller that HAS a user, one line
+   * after this returns, so the check did not move out of the live path; it
+   * moved to where the user actually is.
+   */
+  analysisId: string
+): Promise<AnalystContext> {
   const { data: analysisData, error: analysisError } = await supabase
     .from("analyses")
     // The video row comes too: the analyst needs the clip's real length to
@@ -127,7 +178,6 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     // rally lands after the end of the footage.
     .select("*, video:videos(*)")
     .eq("id", analysisId)
-    .eq("user_id", userId)
     .maybeSingle();
   if (analysisError) throw analysisError;
   const analysis = analysisData as (AnalysisRow & {
@@ -156,7 +206,9 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   const { data: profileData, error: profileError } = await supabase
     .from("profiles")
     .select("*")
-    .eq("id", userId)
+    // From the ANALYSIS's owner, not from a caller-supplied id: the collector
+    // acts on a row it found and has no user of its own.
+    .eq("id", analysis.user_id)
     .maybeSingle();
   if (profileError) throw profileError;
   const profile = profileData as ProfileRow | null;
@@ -204,12 +256,6 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   // A destructive step belongs next to the write it makes room for, where the
   // replacement is already in hand and the gap between delete and insert is
   // one statement rather than the entire expensive half of the pipeline.
-  const pruneStale = async () => {
-    for (const table of ["coaching_rallies", "coaching_skill_ratings"] as const) {
-      const { error } = await supabase.from(table).delete().eq("analysis_id", analysisId);
-      if (error) throw new Error(`clearing ${table}: ${describeError(error)}`);
-    }
-  };
 
   // NO RALLY GATE HERE ANY MORE, and its removal is the point of the change.
   //
@@ -231,7 +277,6 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   // which stopped being the rally signal long before this.
 
   const allDrills: CoachingDrillRow[] = await getAllDrills(supabase);
-  const validSlugs = new Set(allDrills.map((d: CoachingDrillRow) => d.slug));
 
   // ONE call, over the overlay video plus what was measured.
   //
@@ -253,6 +298,21 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     drillCatalogue: allDrills.map((d: CoachingDrillRow) => ({ slug: d.slug, name: d.name, skill: d.skill_key })),
     knownLimitations: facts.known_limitations,
   });
+
+  return {
+    analysis, analystInput, allDrills,
+    shots: (shotsRes.data ?? []) as AnalysisShotRow[],
+    model: analystModel(),
+    tracksRes,
+    profile: profile ?? null,
+  };
+}
+
+export async function runCoachingPipeline(supabase: Client, userId: string, analysisId: string): Promise<void> {
+  const ctx = await rebuildAnalystContext(supabase, analysisId);
+  const { analysis, analystInput, allDrills, shots, tracksRes } = ctx;
+  if (analysis.user_id !== userId) throw new CoachingPipelineError("Analysis not found");
+
 
   let analyst;
   try {
@@ -349,10 +409,69 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     throw err;
   }
 
-  const out = analyst.output;
-  const model = analyst.model;
-  if (analyst.problems.length) {
-    console.error(`[coaching] ${analyst.problems.length} grounding problem(s) in the analyst's answer`);
+  await persistCoachingOutput({
+    supabase, analysisId,
+    analysis,
+    out: analyst.output,
+    model: analyst.model,
+    problems: analyst.problems,
+    analystInput,
+    allDrills,
+    shots,
+    file: analyst.file,
+  });
+}
+
+/**
+ * Everything that happens once the model has answered.
+ *
+ * SPLIT OUT SO A RUN CAN BE FINISHED BY A DIFFERENT PROCESS THAN THE ONE THAT
+ * STARTED IT. The live path calls this straight after runAnalyst, exactly as
+ * before. The overnight path cannot: it submits a batch job and exits, and
+ * hours later some other process -- after a deploy, after the machine has
+ * slept -- finds the finished job and needs to do all of this with an answer
+ * it did not ask for.
+ *
+ * The alternative was a second copy of this for the batch path, and a second
+ * copy is how two paths quietly start producing different analyses from the
+ * same footage. There is one writer.
+ *
+ * It takes what it needs rather than re-reading it: the caller has already
+ * loaded the analysis, the drills and the facts to get this far, and a
+ * re-fetch here would be a second set of rows that can disagree with the first.
+ */
+export async function persistCoachingOutput(opts: {
+  supabase: Client;
+  analysisId: string;
+  analysis: AnalysisWithVideo;
+  out: AnalystOutput;
+  model: string;
+  /** Grounding problems the audit found. Stored as the read's quality issues. */
+  problems: string[];
+  analystInput: AnalystInput;
+  allDrills: CoachingDrillRow[];
+  /** The clip's shot rows, already loaded by the caller. */
+  shots: AnalysisShotRow[];
+  /** The uploaded video, when this caller owns it. The batch path may not. */
+  file?: UploadedFile | null;
+}): Promise<void> {
+  const {
+    supabase, analysisId, analysis, out, model, problems, analystInput, allDrills, shots, file,
+  } = opts;
+  const validSlugs = new Set(allDrills.map((d: CoachingDrillRow) => d.slug));
+
+  // Moved in here with the write it makes room for. It used to sit at the top
+  // of the run, which is how re-tagging a player once deleted a clip's rallies
+  // and put nothing back: the delete happened, the expensive half failed, and
+  // the analysis reported "no rallies were found" over footage full of them.
+  const pruneStale = async () => {
+    for (const table of ["coaching_rallies", "coaching_skill_ratings"] as const) {
+      const { error } = await supabase.from(table).delete().eq("analysis_id", analysisId);
+      if (error) throw new Error(`clearing ${table}: ${describeError(error)}`);
+    }
+  };
+  if (problems.length) {
+    console.error(`[coaching] ${problems.length} grounding problem(s) in the analyst's answer`);
   }
 
 
@@ -377,7 +496,7 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   // still carries its moment. If that breakdown is wanted back, the honest
   // place for it is the scan's own output -- it is watching those frames at
   // the right resolution already -- rather than a second call.
-  await releaseAnalystFile(analyst.file);
+  if (file) await releaseAnalystFile(file);
 
   await coachingProgress(supabase, analysisId, "Measuring where you stood…");
 
@@ -515,7 +634,7 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
         headline: out.coaching.headline,
         summary: out.coaching.summary,
         quality: {
-          usable: analyst.problems.length === 0,
+          usable: problems.length === 0,
           // ONLY the grounding problems. knownLimitations used to be
           // concatenated in here, and that was a category error with a visible
           // cost: they are prompt text written FOR THE MODEL ("the key is
@@ -530,7 +649,7 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
           // see, means part of this read is about nothing. That is worth
           // interrupting someone for. A description of how the pipeline works
           // is not.
-          issues: analyst.problems,
+          issues: problems,
           // Kept, because they are genuinely useful when debugging a read that
           // looks wrong — just not in the user's face. facts_json below holds
           // the full input; this is the short version.
@@ -576,7 +695,7 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   // row. Matched within a tenth of a second, and dropped rather than guessed
   // when nothing is that close -- an observation pinned to the wrong shot
   // shows the user the wrong moment, which is worse than showing none.
-  const shotRows = (shotsRes.data ?? []) as AnalysisShotRow[];
+  const shotRows = shots;
   const shotIdxAt = (t: number | null): number | null => {
     if (t === null || !Number.isFinite(t)) return null;
     let best: AnalysisShotRow | null = null;
