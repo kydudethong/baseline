@@ -25,7 +25,6 @@ import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
 import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
 import { PracticeSessionPanel } from "@/components/dashboard/PracticeSessionPanel";
 import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel";
-import { PositioningPanel } from "@/components/dashboard/PositioningPanel";
 import type { PlaystyleMatch } from "@/lib/coaching/pro-playstyles";
 import { ShotsPanel } from "@/components/dashboard/ShotsPanel";
 import { AnalysisWorkspace } from "@/components/analysis/AnalysisWorkspace";
@@ -34,7 +33,7 @@ import { ErrorState } from "@/components/analysis/ErrorState";
 import { getAnalysisView, type ViewRally } from "@/lib/db/analysis-view";
 import { getAllDrills } from "@/lib/coaching/drills";
 import { topPriorityObservation } from "@/lib/coaching/ranking";
-import { SkillRadar } from "@/components/breakdown/SkillRadar";
+import { SkillRatingsPanel } from "@/components/dashboard/SkillRatingsPanel";
 import type { AnalysisFrameRow, PlayerTrackRow } from "@/lib/db/types";
 
 export const dynamic = "force-dynamic";
@@ -330,6 +329,9 @@ async function AnalysisBreakdown({
           heroObservationId={hero?.id ?? null}
           heading={heading}
           evidence={evidence}
+          analysisId={analysis.id}
+          feedback={feedback}
+          skillKeysWithBlueprint={skillKeysWithBlueprint}
         />
       ) : (
         <ErrorState
@@ -338,17 +340,26 @@ async function AnalysisBreakdown({
         />
       )}
 
+      {/* STRAIGHT UNDER THE FILM AND ITS RELIABILITY NOTE. The chart answers
+          "how did I play" in one glance, which is the question somebody has
+          the moment they stop watching. It used to be near the bottom, under
+          everything that answers slower. */}
+      <SkillRatingsPanel skills={coachingData.skills} />
+
+      {/* THE PRO MATCH, HIGH UP, because it is the thing people actually want
+          to know and it was several screens below the film. It reads as a
+          shape, so it belongs beside the chart that IS that shape. */}
+      <PlaystyleMatchPanel
+        matches={playstyleMatches(coachingData.read?.coaching_json ?? null)}
+        hasRead={hasRead}
+      />
+
+
       {coachingData.read ? (
         <section className="stack g4">
           <CoachingReadPanel
             read={coachingData.read}
             observations={coachingData.observations}
-            skills={coachingData.skills}
-            analysisId={analysis.id}
-            skillKeysWithBlueprint={skillKeysWithBlueprint}
-            drillNames={drillNames}
-            feedback={feedback}
-            evidence={evidence}
           />
         </section>
       ) : (
@@ -358,35 +369,10 @@ async function AnalysisBreakdown({
         />
       )}
 
-      {/* Where they stood. Above the pro comparison because it is a fact about
-          this clip rather than an interpretation of it, and because kitchen
-          time is the number most likely to change what someone does at their
-          next session. */}
-      <PositioningPanel movement={phase2.movement} selfLabels={selfLabels} />
 
-      {/* Directly after the skill radar, and that placement is the argument:
-          the match IS the radar, read as a shape. Somebody who has just looked
-          at their own profile can see why a particular pro came back, which is
-          what stops "you play like X" from being a horoscope. */}
-      <PlaystyleMatchPanel
-        matches={playstyleMatches(coachingData.read?.coaching_json ?? null)}
-        hasRead={hasRead}
-      />
 
-      {coachingData.skills.length > 0 ? (
-        <section className="stack g4">
-          <h2 className="eyebrow">Where those ratings sit against each other</h2>
-          <div className="card">
-            <SkillRadar skills={coachingData.skills} />
-          </div>
-          <p className="note">
-            The numbers themselves are in the breakdown above. This is the shape they make.{" "}
-            <Link href="/dashboard/practice" className="crumb" style={{ color: "var(--blue)" }}>
-              See how each skill is trending across your games →
-            </Link>
-          </p>
-        </section>
-      ) : null}
+
+
 
       {/* The session plan, written by every run that produces a coaching read.
           It goes ABOVE the per-skill blueprints because it answers the more

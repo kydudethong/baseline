@@ -9,6 +9,7 @@ import type { Evidence } from "@/lib/db/evidence";
 import { RallyTimeline } from "./RallyTimeline";
 import { ShotSequence } from "./ShotSequence";
 import { CoachingInsight } from "./CoachingInsight";
+import { BuildBlueprintButton } from "@/components/dashboard/BuildBlueprintButton";
 import { MetricCard } from "./MetricCard";
 import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { EmptyState } from "./EmptyState";
@@ -45,7 +46,17 @@ import { shotName } from "./ShotBadge";
  */
 export function AnalysisWorkspace({
   view, videoUrl, drillNames, heroObservationId = null, heading, evidence,
+  analysisId, feedback, skillKeysWithBlueprint,
 }: {
+  /**
+   * THE CONTROLS CAME WITH THE COACHING. "Is this right?" and "build a
+   * practice plan" used to live on the two sections below this workspace;
+   * those sections are gone, so without this the page kept the criticisms and
+   * silently lost every way to respond to one.
+   */
+  analysisId?: string;
+  feedback?: Map<string, "right" | "wrong" | "unsure">;
+  skillKeysWithBlueprint?: Set<string>;
   view: AnalysisView;
   videoUrl: string;
   /**
@@ -261,6 +272,14 @@ export function AnalysisWorkspace({
                           windowEndSeconds={evidence?.get(o.id)?.windowEndSeconds ?? null}
                           technique={evidence?.get(o.id)?.technique ?? null}
                           drillName={o.drill_slug ? drillNames[o.drill_slug] : null}
+                          analysisId={analysisId}
+                          initialVerdict={feedback?.get(o.id) ?? null}
+                          action={
+                            analysisId && o.valence === "weakness"
+                            && !skillKeysWithBlueprint?.has(o.skill_key)
+                              ? <BuildBlueprintButton analysisId={analysisId} observationId={o.id} />
+                              : null
+                          }
                         />
                       ))}
                     </>

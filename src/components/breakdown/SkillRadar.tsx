@@ -3,7 +3,17 @@
 import type { CoachingSkillRatingRow } from "@/lib/db/types";
 import { SKILLS } from "@/lib/coaching/types";
 
-const GROUP_ORDER = ["Kitchen", "Movement", "Serve & return", "Offense", "Decisions", "Defense"];
+/**
+ * The five groups on the radar.
+ *
+ * "Decisions" was the sixth and is gone. Its three skills -- shot selection,
+ * court IQ, consistency -- are the ones this pipeline measures least directly:
+ * everything else on this chart is anchored to something visible (where you
+ * stood, what you hit, how you moved), while a rating for decision-making is
+ * the model's impression of intent. A chart that puts a measurement and an
+ * impression on neighbouring axes invites them to be read as equally solid.
+ */
+const GROUP_ORDER = ["Kitchen", "Movement", "Serve & return", "Offense", "Defense"];
 const GROUP_COLOR: Record<string, string> = {
   Kitchen: "#8B5CF6",
   Movement: "#06B6D4",
@@ -39,7 +49,7 @@ function groupScores(skills: CoachingSkillRatingRow[]): GroupScore[] {
 }
 
 /**
- * A hexagon radar of the six skill groups (see SKILLS in coaching/types.ts)
+ * A pentagon radar of the five skill groups (see SKILLS in coaching/types.ts)
  * plus a headline "single game" number — the shape of read Ky asked to
  * match from another pickleball app's skill-rating screen, adapted so the
  * chart still means something: each vertex's radius is the actual 1-5

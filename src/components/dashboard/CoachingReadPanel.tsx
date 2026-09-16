@@ -1,12 +1,8 @@
 import Link from "next/link";
-import type { CoachingObservationRow, CoachingReadRow, CoachingSkillRatingRow } from "@/lib/db/types";
-import { skillName, type CoachingRead } from "@/lib/coaching/types";
-import { rankObservations, topPriorityObservation } from "@/lib/coaching/ranking";
-import { SkillMeter } from "@/components/breakdown/SkillMeter";
+import type { CoachingObservationRow, CoachingReadRow } from "@/lib/db/types";
+import { type CoachingRead } from "@/lib/coaching/types";
+import { topPriorityObservation } from "@/lib/coaching/ranking";
 import { Check, Paddle } from "@/components/motifs/Motifs";
-import { CoachingInsight } from "@/components/analysis/CoachingInsight";
-import type { Evidence } from "@/lib/db/evidence";
-import { BuildBlueprintButton } from "./BuildBlueprintButton";
 
 /**
  * The coaching read, with every point said ONCE.
@@ -37,41 +33,23 @@ import { BuildBlueprintButton } from "./BuildBlueprintButton";
  * where the tagging call produced no observations at all — there, the blob is
  * the only coaching that exists, and showing it is not a repeat of anything.
  */
+/**
+ * MUCH SMALLER THAN IT WAS. This used to own the headline paragraph, the top
+ * priority fix, the clip-wide observations and the skill ratings -- all of
+ * which have either moved to where they belong or been deleted for being
+ * restatement. What is left is the narrative fallback, which renders only when
+ * the tagging call produced no observations at all.
+ */
 export function CoachingReadPanel({
   read,
   observations,
-  skills,
-  analysisId,
-  skillKeysWithBlueprint,
-  drillNames = {},
-  feedback,
-  evidence,
 }: {
   read: CoachingReadRow;
   observations: CoachingObservationRow[];
-  skills: CoachingSkillRatingRow[];
-  analysisId: string;
-  /** skill_keys that already have a practice plan for this analysis — hide the build button rather than invite a duplicate. */
-  skillKeysWithBlueprint: Set<string>;
-  /** slug → human name, so an insight can name its drill. */
-  drillNames?: Record<string, string>;
-  /** observation id → this user's existing verdict, so the control is not blank. */
-  feedback?: Map<string, "right" | "wrong" | "unsure">;
-  /**
-   * observation id → the clip that shows it and the technique read at that
-   * moment. Resolved on the server, because a clip URL may be a signed one
-   * with an expiry and that is not a thing to mint in the browser.
-   */
-  evidence?: Map<string, Evidence>;
 }) {
   const coaching = parseCoaching(read.coaching_json);
 
   const hero = topPriorityObservation(observations);
-  // Everything the workspace above cannot show, because it has no rally to be
-  // selected under. Ranked, so the order matches the priority order.
-  const clipWide = rankObservations(observations).filter(
-    (o) => o.rally_idx === null && o.id !== hero?.id
-  );
   const inWorkspace = observations.filter((o) => o.rally_idx !== null && o.id !== hero?.id).length;
   // The narrative blob is the ONLY coaching on the fallback path. Anywhere else
   // it is the observations reworded, so it is not rendered.
@@ -79,11 +57,11 @@ export function CoachingReadPanel({
 
   return (
     <div className="stack g6">
-      <div className="read-head">
-        <span className="eyebrow" style={{ color: "var(--blue)" }}>Your coaching read</span>
-        <h2 className="d2 measure">{read.headline ?? "Coaching read"}</h2>
-        {read.summary ? <p className="body measure">{read.summary}</p> : null}
-      </div>
+      {/* THE HEADLINE PARAGRAPH IS GONE.
+          "Dominant Kitchen Offense Balanced by Smarter Baseline Margins" --
+          a sentence no player would write, restating in praise-shaped prose
+          what the sections below say with evidence attached. It read as a
+          school report, and it was the first thing on the page. */}
 
       {/* THE SELF-DOUBT BANNER IS GONE.
           It was well-intentioned and it read terribly: the first thing a
@@ -185,66 +163,18 @@ export function CoachingReadPanel({
         </>
       ) : null}
 
-      {/* One point, once. The priority leads here; rally-tagged points live
-          beside the video above; points with no rally follow below. */}
-      {hero ? (
-        <section className="sec">
-          <div className="sec-head">
-            <h3 className="h2">The one thing to work on</h3>
-            <span className="xs">Start here</span>
-          </div>
-          <CoachingInsight
-            analysisId={analysisId}
-            initialVerdict={feedback?.get(hero.id) ?? null}
-            clipUrl={evidence?.get(hero.id)?.clipUrl ?? null}
-            fallbackUrl={evidence?.get(hero.id)?.fallbackUrl ?? null}
-            startSeconds={evidence?.get(hero.id)?.startSeconds ?? null}
-            windowStartSeconds={evidence?.get(hero.id)?.windowStartSeconds ?? null}
-            windowEndSeconds={evidence?.get(hero.id)?.windowEndSeconds ?? null}
-            technique={evidence?.get(hero.id)?.technique ?? null}
-            observation={hero}
-            drillName={hero.drill_slug ? drillNames[hero.drill_slug] : null}
-            hero
-            eyebrow="Top priority"
-            action={
-              !skillKeysWithBlueprint.has(hero.skill_key)
-                ? <BuildBlueprintButton analysisId={analysisId} observationId={hero.id} />
-                : null
-            }
-          />
-        </section>
-      ) : null}
+      {/* "THE ONE THING TO WORK ON" AND "ACROSS THE WHOLE CLIP" ARE GONE.
+          Both rendered a full coaching card with its evidence clip, and
+          between them they made this the longest thing on the page. The
+          rally-tagged points already live beside the video, where a player can
+          watch the rally they are about -- which is the only place a criticism
+          has its context.
 
-      {clipWide.length > 0 ? (
-        <section className="sec">
-          <div className="sec-head">
-            <h3 className="h2">Across the whole clip</h3>
-            <span className="xs">Not tied to one rally</span>
-          </div>
-          <div className="stack g4">
-            {clipWide.map((o) => (
-              <CoachingInsight
-                analysisId={analysisId}
-                initialVerdict={feedback?.get(o.id) ?? null}
-                clipUrl={evidence?.get(o.id)?.clipUrl ?? null}
-                fallbackUrl={evidence?.get(o.id)?.fallbackUrl ?? null}
-                startSeconds={evidence?.get(o.id)?.startSeconds ?? null}
-                windowStartSeconds={evidence?.get(o.id)?.windowStartSeconds ?? null}
-                windowEndSeconds={evidence?.get(o.id)?.windowEndSeconds ?? null}
-                technique={evidence?.get(o.id)?.technique ?? null}
-                key={o.id}
-                observation={o}
-                drillName={o.drill_slug ? drillNames[o.drill_slug] : null}
-                action={
-                  o.valence === "weakness" && !skillKeysWithBlueprint.has(o.skill_key)
-                    ? <BuildBlueprintButton analysisId={analysisId} observationId={o.id} />
-                    : null
-                }
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
+          Known cost, stated rather than buried: an observation tied to NO
+          rally now has nowhere to appear. The workspace can only show points
+          attached to a rally it can select. If those start going missing in a
+          way that matters, the fix is to surface them in the workspace rather
+          than to put these sections back. */}
 
       {inWorkspace > 0 ? (
         <p className="xs measure">
@@ -258,18 +188,11 @@ export function CoachingReadPanel({
         <p className="xs measure">What the footage couldn&apos;t show: {coaching.data_gaps}</p>
       ) : null}
 
-      {skills.length > 0 ? (
-        <section className="sec">
-          <h3 className="h2">Skill ratings from this game</h3>
-          <div className="grid2">
-            {skills.map((s) => (
-              <div key={s.id} className="card">
-                <SkillMeter name={skillName(s.skill_key)} raw={s.raw} basis={s.basis} />
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
+      {/* The skill ratings moved OUT of this panel and under the radar they
+          explain -- see SkillRatingsPanel. A rating and the chart it is a
+          point on were several screens apart, which made the chart
+          unquestionable: there was nowhere to go from an axis you disagreed
+          with. */}
 
     </div>
   );
