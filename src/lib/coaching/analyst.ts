@@ -84,16 +84,21 @@ export function analystOutputBudget(segmentSeconds: number): number {
  * subject's own shots. Paying high rates across a whole match to read fifteen
  * swings meant most of the bill went on footage nothing was being judged in.
  *
- * SET TO HIGH by choice, September 2026, overriding the reasoning above.
- * Low was the right default for a scan whose only job was where/when/who, and
- * it is the right default again the moment cost matters more than detail. It
- * is a four-times-the-bill setting and nothing else here moves the number as
- * far, so it is one env var away in both directions:
- * ANALYST_MEDIA_RESOLUTION=low restores the cheap scan.
+ * It was set to HIGH for a while, on the ball alone -- a dozen pixels is the
+ * one thing in this footage the coarse tier genuinely loses. That cost about
+ * $3.75 a twenty-minute game and it is back to LOW, with the ball paid for in
+ * the overlay instead: a drawn ring (OVERLAY_BALL_RING) survives the downscale
+ * that the ball itself does not.
+ *
+ * "medium" IS "low" HERE, and not because of this function. For video Gemini
+ * treats the two tiers identically -- about 70 tokens a frame either way,
+ * against 280 for high. It is accepted as a value because the API accepts it
+ * and because someone reading a config will try it, but it buys nothing: there
+ * is no half-price detail setting for video to reach for.
  */
 export function analystMediaResolution(): "low" | "medium" | "high" {
-  const v = (process.env.ANALYST_MEDIA_RESOLUTION ?? "high").toLowerCase();
-  return v === "low" ? "low" : v === "medium" ? "medium" : "high";
+  const v = (process.env.ANALYST_MEDIA_RESOLUTION ?? "low").toLowerCase();
+  return v === "high" ? "high" : v === "medium" ? "medium" : "low";
 }
 
 const SHOT_TYPES = [
@@ -322,6 +327,32 @@ camera with 0 at the near baseline, 22 at the net, 44 at the far baseline. The
 kitchen lines are at y=15 and y=29. Body measurements are in the player's own
 shoulder widths, so a shot at the far baseline compares directly with one near
 the camera; knee angle is degrees, where 180 is a straight leg.
+
+THE BODY MEASUREMENTS ARE MEASURED, NOT ESTIMATED. They come from a pose model
+that located seventeen joints per player per frame. Where one is present, USE
+THE NUMBER and say it — "your shoulders were 12 degrees from square at contact"
+is worth more to a player than "your preparation looked late", and it is the
+difference between a claim they can check and one they can dismiss. Where a
+field is absent the joint was not visible: say nothing about it rather than
+filling the gap from the video, because a sentence that sounds measured and is
+not is worse than no sentence.
+
+What they mean:
+  shoulderTurnDeg             0 = shoulders facing the net, 90 = fully side-on.
+  hipShoulderSeparationDeg    shoulders minus hips: the coil. Big is a loaded
+                              drive; near zero is a player turning as one block.
+  rotationLeadSeconds         how long before contact the turn started. This is
+                              what "late preparation" actually means.
+  contactHeightRatio          hip = 0, shoulder = 1. Negative is below the hip.
+  contactAheadShoulderWidths  how far in front of the LEAD FOOT contact was.
+                              Negative means the ball was struck behind them.
+  paddleElbowDeg              180 is a straight, reaching arm; ~90 is a block.
+  stanceWidthRatio            ankle spread in shoulder widths. ~1.5 is athletic.
+  driftTowardNetTorsosPerSec  positive is moving in, negative is backing off.
+  readyPaddleHeightRatio      resting paddle height between shots, same scale.
+  readyKneeFlexionDeg         knee angle while waiting. 180 is standing upright.
+  resetSeconds                how long they took to get back to their own ready
+                              position. Absent means they had not by the next ball.
 
 The assistant did NOT decide which rally a contact belongs to, or what kind of
 shot it was, and the overlay does not show rallies or net crossings. Those are

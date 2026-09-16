@@ -1012,37 +1012,45 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
    it; a reader who does not believe it should find everything in one place the
    moment they ask.
    --------------------------------------------------------------------------- */
-/* .why-block, not .why: `.read-hero .why` already exists and means the read's
-   headline paragraph. Reusing the name drew a border through it. */
-.why-block{margin-top:var(--a3);border-top:1px solid var(--line);padding-top:var(--a3)}
-.why-sum{
-  cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px;
-  font-size:13px;color:var(--ink-2);
-  /* Underlined rather than button-shaped: it is a question the page invites,
-     not an action competing with the drill and the feedback controls beside it. */
-  text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--line)
-}
-.why-sum::-webkit-details-marker{display:none}
-.why-sum::before{content:"?";display:grid;place-items:center;width:16px;height:16px;border-radius:50%;
-  background:var(--line);color:var(--ink-2);font-size:10px;font-weight:700;flex:none}
-.why-sum:hover{color:var(--ink)}
-.why-block[open] > .why-sum{margin-bottom:var(--a3)}
-.why-body{display:flex;flex-direction:column;gap:var(--a3)}
-.why-lead{margin:0;font-size:14px;color:var(--ink-2)}
-.why-clip{margin:0;display:flex;flex-direction:column;gap:6px}
-/* Capped rather than full-bleed: three seconds of a rally is a detail inside a
-   coaching point, and a video the width of the column reads as the subject of
-   the page rather than the support for a sentence. */
-.why-clip video{width:100%;max-width:520px;border-radius:var(--r3);background:#0b0f14;display:block}
-.why-noclip{margin:0;color:var(--ink-3)}
-.why-before{display:flex;flex-direction:column;gap:6px}
-.why-grid{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
-.why-row{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:var(--r3);
-  background:var(--card);border:1px solid var(--line)}
-.why-row dt{font-family:var(--data);font-size:10px;font-weight:600;letter-spacing:.1em;
+/* ---------------------------------------------------------------------------
+   THE EVIDENCE COLUMN.
+   This replaced a <details> disclosure. A collapsed section is a section that
+   does not exist: the claim got read, the proof got skipped, and the product
+   was back to asserting things at people. The footage now sits beside the
+   sentence it supports, playing where it is.
+   --------------------------------------------------------------------------- */
+/* 1fr for the words, a fixed-ish track for the film. The clip does not grow
+   with the column -- three seconds of a rally is the SUPPORT for a coaching
+   point, and a video as wide as the text reads as the subject of the page. */
+.insight-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,300px);
+  gap:var(--a4);align-items:start;margin-top:var(--a3)}
+.insight-main{display:flex;flex-direction:column;gap:var(--a3);min-width:0}
+.evidence{display:flex;flex-direction:column;gap:10px;min-width:0}
+.evidence-fig{margin:0;display:flex;flex-direction:column;gap:6px}
+/* aspect-ratio + object-fit so a row of these lines up even while the videos
+   are still only metadata and have no intrinsic size yet. Without it the page
+   reflows as each one loads. */
+.evidence-video{width:100%;max-width:100%;aspect-ratio:16/9;object-fit:cover;
+  border-radius:var(--r3);background:#0b0f14;display:block;border:1px solid var(--line)}
+.evidence-cap{font-size:11px;line-height:1.45;color:var(--ink-3)}
+.evidence-cap strong{color:var(--ink-2);font-weight:600}
+.evidence-full{color:var(--ink-3);opacity:.8}
+.evidence-before{display:flex;flex-direction:column;gap:6px}
+.evidence-grid{margin:0;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.evidence-row{display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-radius:var(--r3);
+  background:var(--card);border:1px solid var(--line);min-width:0}
+.evidence-row dt{font-family:var(--data);font-size:9px;font-weight:600;letter-spacing:.09em;
   text-transform:uppercase;color:var(--ink-3)}
-.why-row dd{margin:0;font-size:13px;color:var(--ink)}
-.why-conf{margin:0;color:var(--ink-3)}
+.evidence-row dd{margin:0;font-size:12px;line-height:1.35;color:var(--ink);overflow-wrap:anywhere}
+
+/* A narrow column makes the clip too small to read a skeleton in, so below
+   this the film goes UNDER the words at full width rather than beside them at
+   quarter size. Still visible, still nothing to open. */
+@media (max-width:860px){
+  .insight-grid{grid-template-columns:minmax(0,1fr)}
+  .evidence-video{aspect-ratio:16/9}
+  .evidence-grid{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+}
 
 /* ===========================================================================
    PHONE
@@ -1082,14 +1090,13 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
      finger -- and the ones that matter most here are the setup controls,
      where a mis-tap adds a player or drops a corner. */
   .btn-sm{min-height:36px}
-  .why-sum{min-height:36px}
 
   /* The evidence clip earns the full width on a phone: it is small, it is the
-     whole point of opening the disclosure, and there is no column beside it to
-     balance against. */
-  .why-clip video{max-width:none}
+     thing the claim rests on, and there is no column beside it to balance
+     against. */
+  .evidence-video{max-width:none}
   /* One fact per row rather than two cramped ones. */
-  .why-grid{grid-template-columns:1fr}
+  .evidence-grid{grid-template-columns:1fr}
 
   /* The read headline is set in vw units that stay large on a narrow screen. */
   .read-hero .issue{font-size:20px}

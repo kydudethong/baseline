@@ -211,7 +211,11 @@ async function AnalysisBreakdown({
   const hero = topPriorityObservation(coachingData.observations);
   // The footage behind each claim. After the parallel fetch above because it
   // needs the observations it is evidence for.
-  const evidence = await evidenceForObservations(supabase, analysis.id, coachingData.observations);
+  // The analysis row goes in so a criticism whose clip was never cut can still
+  // play the overlay seeked to its moment, rather than apologise in prose.
+  const evidence = await evidenceForObservations(
+    supabase, analysis.id, coachingData.observations, analysis
+  );
 
   const video = analysis.video;
   let videoUrl: string | null = null;
@@ -324,6 +328,7 @@ async function AnalysisBreakdown({
           drillNames={drillNames}
           heroObservationId={hero?.id ?? null}
           heading={heading}
+          evidence={evidence}
         />
       ) : (
         <ErrorState

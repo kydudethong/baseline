@@ -5,7 +5,7 @@ import { rankObservations, topPriorityObservation } from "@/lib/coaching/ranking
 import { SkillMeter } from "@/components/breakdown/SkillMeter";
 import { Check, Paddle } from "@/components/motifs/Motifs";
 import { CoachingInsight } from "@/components/analysis/CoachingInsight";
-import type { CoachingShotTechniqueRow } from "@/lib/db/types";
+import type { Evidence } from "@/lib/db/evidence";
 import { BuildBlueprintButton } from "./BuildBlueprintButton";
 
 /**
@@ -62,7 +62,7 @@ export function CoachingReadPanel({
    * moment. Resolved on the server, because a clip URL may be a signed one
    * with an expiry and that is not a thing to mint in the browser.
    */
-  evidence?: Map<string, { clipUrl: string | null; technique: CoachingShotTechniqueRow | null }>;
+  evidence?: Map<string, Evidence>;
 }) {
   const coaching = parseCoaching(read.coaching_json);
   const quality = read.quality as { usable: boolean; issues: string[] } | null;
@@ -209,6 +209,8 @@ export function CoachingReadPanel({
             analysisId={analysisId}
             initialVerdict={feedback?.get(hero.id) ?? null}
             clipUrl={evidence?.get(hero.id)?.clipUrl ?? null}
+            fallbackUrl={evidence?.get(hero.id)?.fallbackUrl ?? null}
+            startSeconds={evidence?.get(hero.id)?.startSeconds ?? null}
             technique={evidence?.get(hero.id)?.technique ?? null}
             observation={hero}
             drillName={hero.drill_slug ? drillNames[hero.drill_slug] : null}
@@ -235,6 +237,8 @@ export function CoachingReadPanel({
                 analysisId={analysisId}
                 initialVerdict={feedback?.get(o.id) ?? null}
                 clipUrl={evidence?.get(o.id)?.clipUrl ?? null}
+                fallbackUrl={evidence?.get(o.id)?.fallbackUrl ?? null}
+                startSeconds={evidence?.get(o.id)?.startSeconds ?? null}
                 technique={evidence?.get(o.id)?.technique ?? null}
                 key={o.id}
                 observation={o}

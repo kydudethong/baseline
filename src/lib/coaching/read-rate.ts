@@ -19,16 +19,22 @@
 /**
  * Frames per second for the SCAN.
  *
- * Fifteen, and the reason is the BALL rather than the swing. Ten was already
- * enough to see a stroke. Ten is not enough for a ball travelling thirty miles
- * an hour: it crosses much of the court between samples, and the frames it
- * does appear in are as often as not the ones where it is a streak rather than
- * a dot.
+ * TEN. It was fifteen for a while and the reason was the BALL rather than the
+ * swing: ten is plenty to see a stroke, but a ball travelling thirty miles an
+ * hour crosses much of the court between samples, and half the frames it does
+ * land in show a streak rather than a dot.
  *
- * It costs half again as much, linearly, and it shortens how much video fits
- * in one call to about two and a half minutes.
+ * Fifteen fixed that by paying for it -- half again the bill, linearly, on top
+ * of a high-resolution read. September 2026 that trade was judged not worth
+ * $3.75 a game, so the ball problem moved to where it is free: the overlay now
+ * DRAWS a ring around the ball (OVERLAY_BALL_RING), and a drawn ring does not
+ * blur into a streak at ten samples a second the way the ball does.
+ *
+ * The ordering matters if detection ever gets worse. Make the ring bigger
+ * first; it costs nothing. Raise this back to 15 second. Go back to high
+ * resolution last, because it is the four-times-the-bill knob.
  */
-export const ANALYST_FPS = 15;
+export const ANALYST_FPS = 10;
 
 /** The rate in force, from ANALYST_FPS, clamped to what is worth paying for. */
 export function analystFps(): number {

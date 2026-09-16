@@ -23,19 +23,36 @@ primary_region = "sjc"
   BALL_FPS_CAP = "8"
 
   # How the coaching scan reads the overlay: ten frames a second, each frame
-  # read at full detail, and as much of the clip as will fit in ONE call.
+  # read at the cheap tier, and as much of the clip as will fit in ONE call.
   #
   # These three are the whole cost of an analysis and they are set here, in one
-  # place, because they are a CHOICE rather than a finding -- detail over
-  # cheapness, continuity over round trips. The code defaults match them; these
-  # lines exist so changing your mind is one file and one deploy.
-  ANALYST_FPS = "15"
-  ANALYST_MEDIA_RESOLUTION = "high"
+  # place, because they are a CHOICE rather than a finding. September 2026 the
+  # choice was reversed: detail over cheapness became cheapness over detail,
+  # because 15fps at high was running about $3.75 for a twenty-minute game and
+  # nothing else in the system moves the number as far. 10fps at low is closer
+  # to $0.63 -- six times less for the same video.
+  #
+  # MEDIUM IS NOT A MIDDLE GROUND. For video Gemini treats low and medium
+  # identically (~70 tokens a frame); only high is different (~280). There is
+  # no half-price detail setting to reach for, so do not set "medium" expecting
+  # one -- it is the same bill and the same pixels as "low".
+  #
+  # What low costs us is the BALL, which is a dozen pixels and was the reason
+  # high was chosen in the first place. That is paid for in the overlay instead:
+  # OVERLAY_BALL_RING draws a ring around the ball large enough to survive the
+  # downscale to Gemini's ~768px tile. A drawn marker survives what the ball
+  # itself does not. If shot detection degrades, that ring is the first thing
+  # to make bigger -- raise ANALYST_MEDIA_RESOLUTION back to "high" only after
+  # the ring has been tried, because the ring is free and high is 4x.
+  ANALYST_FPS = "10"
+  ANALYST_MEDIA_RESOLUTION = "low"
   # Raised from the 120s default so the CONTEXT WINDOW is the only thing that
-  # splits a clip. At 15fps and high resolution a second of video costs ~3,870
-  # tokens, so one call holds about 155 seconds — roughly 2 minutes 35. Clips
-  # under that are genuinely one pass; longer ones still split, and no setting
-  # here can change that, because it is the size of the window.
+  # splits a clip. At 10fps and low resolution a second of video costs ~700
+  # tokens, so one call holds roughly 14 minutes — which means this 15-minute
+  # cap and the window now bind at about the same place, and most clips are
+  # genuinely one pass. At the old 15fps/high the same window held 155 seconds.
+  # Longer clips still split, and no setting here can change that, because it
+  # is the size of the window.
   #
   # The cost: past about two minutes in a single call the model has been
   # measured losing track of the clock and reporting rallies past the end of

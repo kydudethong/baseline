@@ -42,12 +42,21 @@ export const TRAIL_S = 1.5;
 /**
  * How many clips one analysis will cut.
  *
- * Twelve, because that is more observations than a read produces on a normal
- * clip, and because the cost is bounded work on a box that has other things to
- * do. If a read ever returns thirty, the twelve most severe are the ones worth
- * watching anyway.
+ * TWENTY-FOUR, raised from twelve when every criticism started showing its
+ * footage. Twelve was chosen as "more than a read produces", which was true of
+ * the observations that named a moment and false once the ones that borrow
+ * their rally's midpoint joined them. A cap that silently drops the thirteenth
+ * observation's evidence turns a guarantee into a usually.
+ *
+ * The cost is bounded and small: a cut is an ffmpeg trim of a few seconds out
+ * of a file already on local disk, measured in fractions of a second, and it
+ * happens once per analysis after the read is already written. Twenty-four of
+ * them is still under the time the overlay render takes.
+ *
+ * The severity sort stays. If a read ever returns fifty, the ones that get cut
+ * should be the ones worth watching.
  */
-export const MAX_CLIPS = 12;
+export const MAX_CLIPS = 24;
 
 export interface ClipRequest {
   /** The observation row this clip belongs to. */

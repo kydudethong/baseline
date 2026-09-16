@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analystFps, overlayFps } from "./read-rate";
+import { ANALYST_FPS, analystFps, overlayFps } from "./read-rate";
 
 test("the overlay is never written slower than the model reads it", () => {
   // The bug: ANALYST_FPS went to 15 while the overlay stayed at 10. You cannot
@@ -36,10 +36,17 @@ test("the overlay never drops below 10fps, whatever the read rate", () => {
 test("an out-of-range rate falls back rather than being obeyed", () => {
   const before = process.env.ANALYST_FPS;
   try {
+    // Against the CONSTANT, not against a number typed into the test. This
+    // asserted 15 and broke the day the default became 10 -- which told us
+    // nothing about the clamp, only that someone had changed their mind about
+    // the default. The behaviour worth protecting is "out of range falls back
+    // to the default", whatever the default happens to be.
     process.env.ANALYST_FPS = "60";
-    assert.equal(analystFps(), 15);
+    assert.equal(analystFps(), ANALYST_FPS);
     process.env.ANALYST_FPS = "0";
-    assert.equal(analystFps(), 15);
+    assert.equal(analystFps(), ANALYST_FPS);
+    process.env.ANALYST_FPS = "not a number";
+    assert.equal(analystFps(), ANALYST_FPS);
   } finally {
     if (before === undefined) delete process.env.ANALYST_FPS;
     else process.env.ANALYST_FPS = before;

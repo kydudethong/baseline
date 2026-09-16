@@ -624,12 +624,39 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     return best ? best.shot_idx : null;
   };
 
+  // EVERY CRITICISM GETS FOOTAGE, so every observation needs a moment.
+  //
+  // The model names one when it is talking about a shot. It does not when the
+  // point is about a rally as a whole ("you stayed back through the whole
+  // exchange"), and that used to mean the page fell back to the sentence this
+  // whole feature exists to delete: "what happened at several points in the
+  // clip". Several points is not evidence.
+  //
+  // So an observation with no moment borrows the MIDDLE OF ITS RALLY. Not the
+  // start, which is a serve and looks the same in every rally, and not the
+  // end, which is the point already being over. The middle is the exchange.
+  //
+  // Flagged as approximate, because it is: the page captions it as the rally
+  // rather than as a cited instant, and that distinction is the difference
+  // between showing your working and inventing it.
+  const rallyMid = (idx: number | null): number | null => {
+    if (idx === null) return null;
+    const r = out.rallies.find((x) => x.idx === idx);
+    if (!r || !Number.isFinite(r.start_s) || !Number.isFinite(r.end_s)) return null;
+    const mid = (Number(r.start_s) + Number(r.end_s)) / 2;
+    return Number.isFinite(mid) ? mid : null;
+  };
+
   if (out.observations.length > 0) {
-    const obsRows = out.observations.map((o) => ({
+    const obsRows = out.observations.map((o) => {
+      const named = Number.isFinite(Number(o.shot_t)) ? Number(o.shot_t) : null;
+      const borrowed = named === null ? rallyMid(o.rally_idx) : null;
+      return {
       analysis_id: analysisId,
       read_id: readId,
       rally_idx: o.rally_idx,
-      t_s: o.shot_t ?? null,
+      t_s: named ?? borrowed,
+      t_is_approx: named === null && borrowed !== null,
       skill_key: o.skill_key,
       coaching_dimension: o.coaching_dimension,
       valence: o.valence,
@@ -644,7 +671,8 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       // player at a drill that does not exist. Drop it rather than fail.
       drill_slug: o.drill_slug && validSlugs.has(o.drill_slug) ? o.drill_slug : null,
       shot_idx: shotIdxAt(o.shot_t),
-    }));
+      };
+    });
     const { data: inserted, error: insertObsError } = await supabase
       .from("coaching_observations").insert(obsRows).select("id, t_s, severity");
     if (insertObsError) throw insertObsError;

@@ -47,11 +47,28 @@ export function toFeet(p: { x: number; y: number } | null | undefined):
   };
 }
 
-/** Only the mechanics a coach can act on; the rest is our own bookkeeping. */
+/**
+ * Only the mechanics a coach can act on; the rest is our own bookkeeping.
+ *
+ * THE SECOND GROUP IS WHY THIS LIST MATTERS. Every field in it is a number the
+ * pose pass has been able to compute all along, and the coaching model was
+ * being asked to estimate by eye instead -- "shoulders still square", "hitting
+ * the ball behind you", "you never reset" were all impressions of a video. A
+ * field that is not in this set does not reach the model, so leaving one out
+ * is choosing to have it guessed.
+ */
 const COACHABLE_MECHANICS = new Set([
   "hand", "kneeAngleAtContactDeg", "kneeAngleMinDeg", "contactHeightTorsos",
   "contactReachShoulders", "backswingShoulders", "wristSpeedIntoContact",
   "followThroughShoulders", "shoulderRotationDeg",
+  // Preparation and rotation.
+  "shoulderTurnDeg", "hipShoulderSeparationDeg", "rotationLeadSeconds",
+  // Contact point.
+  "contactHeightRatio", "contactAheadShoulderWidths", "paddleElbowDeg",
+  // Stance and balance.
+  "stanceWidthRatio", "driftTowardNetTorsosPerSecond",
+  // Ready position between shots.
+  "readyPaddleHeightRatio", "readyKneeFlexionDeg", "resetSeconds",
 ]);
 
 export function contactsFromShots(shots: AnalysisShotRow[]): MeasuredContact[] {

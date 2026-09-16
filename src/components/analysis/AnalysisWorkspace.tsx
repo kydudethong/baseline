@@ -5,6 +5,7 @@ import Player from "@/components/breakdown/Player";
 import type { ReactNode } from "react";
 import type { AnalysisView, ViewRally, ViewShot } from "@/lib/db/analysis-view";
 import type { CoachingObservationRow } from "@/lib/db/types";
+import type { Evidence } from "@/lib/db/evidence";
 import { RallyTimeline } from "./RallyTimeline";
 import { ShotSequence } from "./ShotSequence";
 import { CoachingInsight } from "./CoachingInsight";
@@ -43,10 +44,19 @@ import { shotName } from "./ShotBadge";
  * different column.
  */
 export function AnalysisWorkspace({
-  view, videoUrl, drillNames, heroObservationId = null, heading,
+  view, videoUrl, drillNames, heroObservationId = null, heading, evidence,
 }: {
   view: AnalysisView;
   videoUrl: string;
+  /**
+   * The footage behind each claim, by observation id.
+   *
+   * Passed here as well as to the read below, because a criticism shown beside
+   * the video is still a criticism and the rule is that every one of them
+   * shows its evidence. These were the ones that did not, which made the
+   * guarantee depend on which part of the page you happened to be reading.
+   */
+  evidence?: Map<string, Evidence>;
   /** slug → human name, so an insight can name its drill. */
   drillNames: Record<string, string>;
   /**
@@ -244,6 +254,10 @@ export function AnalysisWorkspace({
                         <CoachingInsight
                           key={o.id}
                           observation={o}
+                          clipUrl={evidence?.get(o.id)?.clipUrl ?? null}
+                          fallbackUrl={evidence?.get(o.id)?.fallbackUrl ?? null}
+                          startSeconds={evidence?.get(o.id)?.startSeconds ?? null}
+                          technique={evidence?.get(o.id)?.technique ?? null}
                           drillName={o.drill_slug ? drillNames[o.drill_slug] : null}
                         />
                       ))}

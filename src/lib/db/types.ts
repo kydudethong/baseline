@@ -698,12 +698,29 @@ export type CoachingObservationRow = {
   clip_path: string | null;
   /** Which bucket clip_path is in, mirroring analyses.debug_video_bucket. */
   clip_bucket: string | null;
+  /**
+   * True when t_s is the middle of rally_idx rather than a moment the model
+   * named.
+   *
+   * Every criticism shows footage, which means an observation with no moment
+   * of its own borrows the rally's. That footage is real and worth showing;
+   * it is just not a cited instant, and the caption has to say which it is.
+   * Presenting a timestamp we chose ourselves as "the moment the coach saw"
+   * would be the system manufacturing its own evidence.
+   */
+  t_is_approx: boolean;
 };
 export type CoachingObservationInsert =
   Omit<CoachingObservationRow, "id" | "dismissed"
        | "why_it_matters" | "what_to_change" | "drill_slug" | "shot_idx"
-       | "clip_path" | "clip_bucket">
+       | "clip_path" | "clip_bucket" | "t_is_approx">
   & {
+    /**
+     * Omitted means "the model named this moment" -- the column defaults to
+     * false. Written explicitly only when the timestamp was borrowed from the
+     * rally, which is the case the page has to caption differently.
+     */
+    t_is_approx?: boolean;
     id?: string;
     dismissed?: boolean;
     // Optional on insert: an observation without them is written without the

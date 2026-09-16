@@ -31,7 +31,6 @@ import { CornerGuide } from "./CornerGuide";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import CourtPresetBar from "./CourtPresetBar";
 
 import { computeHomography, applyHomography } from "@/lib/vision/homography";
 import { courtSegments, type CourtLineRole } from "@/lib/vision/court-model";
@@ -1023,7 +1022,26 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
 
   const courtDone = corners.length === 4;
   const selfChosen = players.some((p) => p.isSelf);
-  const ready = courtDone && selfChosen;
+  /**
+   * ONE REQUIREMENT: say which player is you.
+   *
+   * Setup used to ask for two things, and the second -- clicking the four
+   * corners of the court -- was the one people gave up on. It is fiddly on a
+   * phone, it has to be redone for every clip, and a player who just wants to
+   * know why their third shot keeps popping up is being asked to do surveying
+   * first.
+   *
+   * The court has NOT gone away; it moved out of the person's hands. Detection
+   * finds it in the pipeline like it always did, and the geometry behind the
+   * kitchen and positioning coaching is unchanged. What changed is that a
+   * corner it gets slightly wrong is now a small error in one measurement
+   * instead of a wall between a user and their analysis.
+   *
+   * The corner tools are still here, one button away, for the clip shot from
+   * an angle detection cannot read. They are a repair, which is what they
+   * always should have been.
+   */
+  const ready = selfChosen;
 
   /* ---------------------------------------------------------------------
    * The correction path.
@@ -1203,95 +1221,62 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             <span className="eyebrow">Set up this clip</span>
             <span className={`pill ${ready ? "p-good" : "p-warn"}`}>
               <span className="dot" />
-              {ready ? "Ready to analyse" : `${(courtDone ? 1 : 0) + (selfChosen ? 1 : 0)} of 2 done`}
+              {ready ? "Ready to analyse" : "Tap yourself to start"}
             </span>
           </div>
 
           {/*
-            TWO STEPS AS TILES, not four paragraphs of grey prose.
-            Setup has exactly two requirements and the old panel expressed them
-            as explanation -- a reader had to parse three sentences at 0.65
-            opacity to work out what was being asked, and the tools for the
-            NORMAL path sat behind a button labelled "Something's wrong", which
-            made marking a court feel like error recovery. State, instruction
-            and the action that satisfies it now live together in one tile
-            each, colour-carried so the eye lands on whichever is unfinished.
-          */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: "var(--a3)" }}>
-            {([
-              {
-                done: selfChosen,
-                n: "1",
-                title: "Which player is you",
-                body: selfChosen
-                  ? "Tagged. Everything in the coaching read is about this player."
-                  : players.length === 0
-                    ? "Click yourself on the frame above, at your feet."
-                    : `Click yourself on the frame above — ${players.length} player${players.length === 1 ? "" : "s"} found. You turn yellow.`,
-                action: selfChosen ? "Change who is you" : null,
-                onAction: () => { setFixing(true); setStage("players"); },
-              },
-              {
-                done: courtDone,
-                n: "2",
-                title: "The court",
-                body: courtDone
-                  ? "Marked. Drag any corner to nudge it — the kitchen, centre lines and net follow."
-                  : corners.length === 0
-                    ? "Click the four corners of the court, starting at the near-left."
-                    : `${4 - corners.length} corner${4 - corners.length === 1 ? "" : "s"} to go.`,
-                action: courtDone ? "Adjust corners" : "Mark the corners",
-                onAction: () => { setFixing(true); setStage("court"); },
-              },
-            ]).map((step) => (
-              <div
-                key={step.n}
-                className="stack g2"
-                style={{
-                  padding: "var(--a4)",
-                  borderRadius: "var(--r3)",
-                  // Colour carries the state so it reads before the words do:
-                  // finished recedes, unfinished is where the eye goes.
-                  background: step.done ? "var(--good-wash)" : "var(--warn-wash)",
-                  border: `1px solid ${step.done ? "var(--good)" : "var(--warn)"}`,
-                }}
-              >
-                <div className="row g2" style={{ alignItems: "center" }}>
-                  <span style={{
-                    width: 22, height: 22, borderRadius: "50%", display: "grid", placeItems: "center",
-                    background: step.done ? "var(--good)" : "var(--warn)", color: "#fff",
-                    fontSize: 12, fontWeight: 700, flex: "none",
-                  }}>
-                    {step.done ? "✓" : step.n}
-                  </span>
-                  <strong style={{ fontSize: 15 }}>{step.title}</strong>
-                </div>
-                <p className="sm" style={{ margin: 0, color: step.done ? "var(--good)" : "var(--warn)" }}>
-                  {step.body}
-                </p>
-                {step.action ? (
-                  <div>
-                    <button type="button" className="btn btn-sm btn-soft" onClick={step.onAction}>
-                      {step.action}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
+            ONE TILE, because there is one thing to do.
 
-          <CourtPresetBar
-            corners={corners}
-            lineColorHex={lineColor}
-            matchMode={matchMode}
-            readFrameSize={() => {
-              const v = videoRef.current;
-              return v && v.videoWidth > 0 && v.videoHeight > 0
-                ? { width: v.videoWidth, height: v.videoHeight }
-                : null;
+            This was two tiles and a court-preset bar, which is three things
+            competing for attention on a screen whose entire job is "tap the
+            player who is you". The court moved into the pipeline; what is left
+            is the only decision the software genuinely cannot make, which is
+            which of these people the coaching should be about.
+          */}
+          <div
+            className="stack g2"
+            style={{
+              padding: "var(--a4)",
+              borderRadius: "var(--r3)",
+              background: selfChosen ? "var(--good-wash)" : "var(--warn-wash)",
+              border: `1px solid ${selfChosen ? "var(--good)" : "var(--warn)"}`,
             }}
-            onApply={(next) => { setCorners(next); setFixing(true); setStage("court"); }}
-          />
+          >
+            <div className="row g2" style={{ alignItems: "center" }}>
+              <span style={{
+                width: 22, height: 22, borderRadius: "50%", display: "grid", placeItems: "center",
+                background: selfChosen ? "var(--good)" : "var(--warn)", color: "#fff",
+                fontSize: 12, fontWeight: 700, flex: "none",
+              }}>
+                {selfChosen ? "\u2713" : "1"}
+              </span>
+              <strong style={{ fontSize: 15 }}>Which player is you</strong>
+            </div>
+            <p className="sm" style={{ margin: 0, color: selfChosen ? "var(--good)" : "var(--warn)" }}>
+              {selfChosen
+                ? "Tagged. Everything in the coaching read is about this player."
+                : players.length === 0
+                  ? "No players found on this frame yet \u2014 scrub to a moment where everyone is on court, then tap yourself."
+                  : `Tap yourself on the frame above. ${players.length} player${players.length === 1 ? "" : "s"} found; the one you pick turns yellow.`}
+            </p>
+            <div className="row g2" style={{ flexWrap: "wrap" }}>
+              {selfChosen ? (
+                <button type="button" className="btn btn-sm btn-soft"
+                        onClick={() => { setFixing(true); setStage("players"); }}>
+                  Change who is you
+                </button>
+              ) : null}
+              {/* The repair door. Deliberately quiet and deliberately last:
+                  most clips never need it, and a prominent "fix the court"
+                  control is what made ordinary setup feel like error
+                  recovery. */}
+              <button type="button" className="btn btn-sm btn-ghost"
+                      onClick={() => { setFixing(true); setStage(courtDone ? "players" : "court"); }}>
+                {courtDone ? "Players or court look wrong?" : "Court not detected \u2014 mark it by hand"}
+              </button>
+            </div>
+          </div>
 
           <div className="row g2" style={{ alignItems: "center", flexWrap: "wrap" }}>
             <button

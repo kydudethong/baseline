@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { CoachingObservationRow } from "@/lib/db/types";
 import { FeedbackButtons } from "./FeedbackButtons";
-import { WhyThis } from "./WhyThis";
+import { EvidenceClip } from "./EvidenceClip";
 import type { CoachingShotTechniqueRow } from "@/lib/db/types";
 
 /**
@@ -19,7 +19,7 @@ import type { CoachingShotTechniqueRow } from "@/lib/db/types";
  */
 export function CoachingInsight({
   observation, drillName, hero = false, action, eyebrow, analysisId, initialVerdict,
-  clipUrl, technique,
+  clipUrl, fallbackUrl, startSeconds, technique,
 }: {
   observation: CoachingObservationRow;
   /** Resolved from the drill catalogue; the row only stores a slug. */
@@ -35,11 +35,24 @@ export function CoachingInsight({
   initialVerdict?: "right" | "wrong" | "unsure" | null;
   /** The clip cut around this observation's moment, when one was cut. */
   clipUrl?: string | null;
+  /** The full overlay seeked to the moment, for when no clip was cut. */
+  fallbackUrl?: string | null;
+  /** Where the moment is, in seconds. */
+  startSeconds?: number | null;
   /** What the technique pass saw at that moment, when it was one of the shots read. */
   technique?: CoachingShotTechniqueRow | null;
 }) {
   const o = observation;
   const isStrength = o.valence === "strength";
+  const evidence = (
+    <EvidenceClip
+      observation={o}
+      clipUrl={clipUrl}
+      fallbackUrl={fallbackUrl}
+      startSeconds={startSeconds}
+      technique={technique}
+    />
+  );
   return (
     <article className={`insight${hero ? " insight-hero" : ""}`}>
       <div className="insight-top">
@@ -48,6 +61,14 @@ export function CoachingInsight({
           {eyebrow ?? (isStrength ? "Strength" : o.severity >= 4 ? "Priority" : "Worth fixing")}
         </span>
       </div>
+
+      {/* TWO COLUMNS: the claim, and the footage it rests on.
+          Side by side rather than one after the other, because reading the
+          criticism and watching the moment should be one action. On a phone
+          the grid collapses and the clip follows the text -- still visible,
+          still nothing to open. */}
+      <div className="insight-grid">
+        <div className="insight-main">
 
       <div className="insight-part">
         <span className="insight-lbl">What happened</span>
@@ -75,11 +96,14 @@ export function CoachingInsight({
         </div>
       ) : null}
 
-      {/* The evidence, above the "is this right?" control on purpose: somebody
-          about to disagree should have had the chance to look at what the
-          claim rests on first. That is the difference between a disagreement
-          and a dismissal. */}
-      <WhyThis observation={o} clipUrl={clipUrl} technique={technique} />
+        </div>
+
+        {/* The evidence, beside the claim and before the "is this right?"
+            control: somebody about to disagree should be looking at what the
+            claim rests on while they decide. That is the difference between a
+            disagreement and a dismissal. */}
+        {evidence}
+      </div>
 
       {/* The correction, on the thing being corrected.
           Per COACHING POINT rather than per page: "the read was wrong" is not
