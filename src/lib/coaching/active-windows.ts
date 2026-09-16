@@ -46,8 +46,20 @@ export interface Window {
 export const PAD_BEFORE_S = 2.5;
 export const PAD_AFTER_S = 1.5;
 
-/** Windows closer than this are merged rather than left as a sliver of a gap. */
-export const MERGE_GAP_S = 3;
+/**
+ * Windows closer than this are merged rather than left as a sliver of a gap.
+ *
+ * EIGHT, RAISED FROM THREE, AND THE REASON IS THE DINK. A kitchen exchange is
+ * four people planted at the line moving their hands: the paddle is busy and
+ * the body is not, so the motion signal goes quiet in the MIDDLE of a rally
+ * that is still very much being played. At three seconds a lull that long
+ * split one rally into two windows and dropped the quiet part between them --
+ * which is the single most likely way this file loses a real point, in the
+ * one phase of the sport where most points are decided.
+ *
+ * The cost of being wrong the other way is a few seconds of someone walking.
+ */
+export const MERGE_GAP_S = 8;
 
 /** A window shorter than this cannot contain a rally worth analysing. */
 export const MIN_WINDOW_S = 4;

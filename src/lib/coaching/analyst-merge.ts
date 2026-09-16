@@ -35,11 +35,15 @@ type Shot = AnalystOutput["shots"][number];
  * With a single segment (the common case) this is the identity function in
  * everything but name.
  */
-export function mergeAnalystOutputs(parts: AnalystOutput[], clipSeconds?: number): AnalystOutput {
+export function mergeAnalystOutputs(
+  parts: AnalystOutput[],
+  clipSeconds?: number,
+  onLog?: (line: string) => void
+): AnalystOutput {
   const usable = parts.filter(Boolean);
   if (usable.length === 0) throw new Error("nothing to merge");
 
-  const rallies = mergeRallies(usable, clipSeconds);
+  const rallies = mergeRallies(usable, clipSeconds, onLog);
   if (usable.length === 1) {
     // Still passed through mergeRallies, because a single segment can and does
     // hallucinate past the end of the clip -- one run returned seven rallies
@@ -96,14 +100,52 @@ export function mergeAnalystOutputs(parts: AnalystOutput[], clipSeconds?: number
  * Half a second of slack at the end, because a rally genuinely running to the
  * final frame can round past the duration by a hair.
  */
-function mergeRallies(parts: AnalystOutput[], clipSeconds?: number): Rally[] {
+function mergeRallies(
+  parts: AnalystOutput[],
+  clipSeconds?: number,
+  onLog?: (line: string) => void
+): Rally[] {
   const limit = Number.isFinite(clipSeconds) && (clipSeconds ?? 0) > 0
     ? (clipSeconds as number) + 0.5
     : Infinity;
-  return parts
-    .flatMap((p) => p.rallies ?? [])
-    .filter((r) => Number.isFinite(r.start_s) && Number.isFinite(r.end_s) && r.end_s > r.start_s)
-    .filter((r) => r.start_s >= -0.5 && r.end_s <= limit)
+
+  const all = parts.flatMap((p) => p.rallies ?? []);
+  const wellFormed = all.filter(
+    (r) => Number.isFinite(r.start_s) && Number.isFinite(r.end_s) && r.end_s > r.start_s
+  );
+  const inClip = wellFormed.filter((r) => r.start_s >= -0.5 && r.end_s <= limit);
+
+  // SAY WHAT WAS THROWN AWAY.
+  //
+  // "Why does it miss rallies" was unanswerable from the logs, because this
+  // function silently discarded some and reported neither the count nor the
+  // reason. The drops are deliberate -- a rally past the end of the clip is
+  // not a rally -- but a deliberate drop nobody can see is indistinguishable
+  // from a bug, and the honest failure mode of this guard is that a REAL
+  // rally whose timestamp drifted gets binned with the invented ones.
+  //
+  // Only logged when something was actually dropped: a line that prints on
+  // every healthy run is a line people learn to skim past.
+  const malformed = all.length - wellFormed.length;
+  const outOfClip = wellFormed.length - inClip.length;
+  if (malformed > 0 || outOfClip > 0) {
+    const bad = wellFormed
+      .filter((r) => !(r.start_s >= -0.5 && r.end_s <= limit))
+      .slice(0, 5)
+      .map((r) => `${r.start_s.toFixed(0)}-${r.end_s.toFixed(0)}s`)
+      .join(", ");
+    onLog?.(
+      `analyst: ${all.length} rallies returned, ${inClip.length} kept`
+      + (malformed > 0 ? ` — ${malformed} malformed` : "")
+      + (outOfClip > 0
+          ? ` — ${outOfClip} outside the ${(clipSeconds ?? 0).toFixed(0)}s clip (${bad})`
+          : "")
+    );
+  } else {
+    onLog?.(`analyst: ${inClip.length} rallies, all inside the clip`);
+  }
+
+  return inClip
     .sort((a, b) => a.start_s - b.start_s)
     .map((r, i) => ({ ...r, idx: i + 1 }));
 }

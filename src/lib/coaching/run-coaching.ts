@@ -277,14 +277,39 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       ),
       Number(analysis.video?.duration_seconds ?? 0)
     );
+    // THE GATE IS OFF WHEN THE PASS IS CHEAP.
+    //
+    // Motion gating was built against a real problem: at 15fps and high
+    // resolution a twenty-minute game cost about $5.80 to watch end to end,
+    // roughly half of it people walking to fetch a ball, and halving that
+    // mattered. At 10fps and low resolution the same game is about $1.00, so
+    // the gate now saves around fifty cents -- and what it risks buying that
+    // with is a missed rally.
+    //
+    // That is a bad trade in a way the cost figure understates. The gate reads
+    // PLAYER MOVEMENT, and the one phase of pickleball where nobody moves is
+    // the kitchen dink exchange, which is also where most points are decided.
+    // Its failure mode is not "loses a bit of dead time", it is "loses the
+    // rallies that matter most, silently".
+    //
+    // So it runs only when a pass is expensive enough to be worth the risk.
+    // ANALYST_GATE=on forces it back on, ANALYST_GATE=off forces it off.
+    const gateEnv = (process.env.ANALYST_GATE ?? "auto").toLowerCase();
+    const gateWorthIt = gateEnv === "on"
+      || (gateEnv !== "off" && analystMediaResolution() === "high");
+    const useGate = gate.gated && gateWorthIt;
+
     console.error(
-      gate.gated
-        ? `[coaching] watching ${Math.round(gate.coverage * 100)}% of the clip — `
-          + `${gate.windows.length} stretch(es) where players were actually moving`
-        : "[coaching] watching the whole clip — the tracks gave no clear split between play and dead time"
+      !gateWorthIt && gate.gated
+        ? `[coaching] watching the whole clip — gating would save little at `
+          + `${analystMediaResolution()} resolution and can cut a dink rally`
+        : useGate
+          ? `[coaching] watching ${Math.round(gate.coverage * 100)}% of the clip — `
+            + `${gate.windows.length} stretch(es) where players were actually moving`
+          : "[coaching] watching the whole clip — the tracks gave no clear split between play and dead time"
     );
 
-    await coachingProgress(supabase, analysisId, gate.gated
+    await coachingProgress(supabase, analysisId, useGate
       ? `Watching the ${gate.windows.length} stretches where you were playing…`
       : "Watching the clip…");
     const scanStartedAt = Date.now();
@@ -293,7 +318,7 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       videoName: `${analysisId}.mp4`,
       input: analystInput,
       legend: OVERLAY_LEGEND,
-      activeWindows: gate.gated ? gate.windows : undefined,
+      activeWindows: useGate ? gate.windows : undefined,
       onLog: (line) => console.error(`[coaching] ${line}`),
     });
     // The record. Config first, because it is what makes a later correction
@@ -306,9 +331,9 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       config: {
         fps: analystFps(),
         mediaResolution: analystMediaResolution(),
-        gated: gate.gated,
-        coverage: gate.coverage,
-        windows: gate.gated ? gate.windows : null,
+        gated: useGate,
+        coverage: useGate ? gate.coverage : 1,
+        windows: useGate ? gate.windows : null,
         clipSeconds: analystInput.clipSeconds,
       },
       output: analyst.output,

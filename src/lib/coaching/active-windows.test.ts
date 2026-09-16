@@ -87,3 +87,34 @@ test("constant motion throughout keeps the whole clip", () => {
   const covered = got.windows.reduce((s, w) => s + (w.endSeconds - w.startSeconds), 0);
   assert.ok(covered > 110, `only ${covered}s of 120s kept when everything was busy`);
 });
+
+test("a dink rally is not split in half by its own quiet middle", () => {
+  // THE FAILURE THIS PINS. A point where both pairs drive, then settle into a
+  // five-second kitchen exchange where nobody's FEET move, then a speed-up to
+  // finish. The exchange is the rally -- it is where the point is decided --
+  // and a gap threshold shorter than the lull cuts it out and leaves two
+  // windows with the important part missing between them.
+  const got = activeWindows([track(120, [[40, 46], [51, 57]])], 120);
+  for (const t of [41, 45, 48, 50, 53, 56]) {
+    assert.ok(
+      got.windows.some((w) => t >= w.startSeconds && t <= w.endSeconds),
+      `${t}s was dropped — the quiet middle of the rally was cut out`
+    );
+  }
+  const holding = got.windows.filter((w) => w.endSeconds > 40 && w.startSeconds < 57);
+  assert.equal(holding.length, 1, `the rally was split across ${holding.length} windows`);
+});
+
+test("real dead time is still skipped, so the merge gap did not disable gating", () => {
+  // The guard on the test above: a gap wide enough to keep a dink rally whole
+  // must not be so wide that a minute of standing about also survives.
+  //
+  // Enough play to clear MIN_COVERAGE, or the function refuses to gate at all
+  // and the assertion below passes for the wrong reason.
+  const got = activeWindows([track(200, [[10, 40], [60, 90], [150, 180]])], 200);
+  assert.ok(got.gated, "should still gate");
+  assert.ok(
+    got.windows.every((w) => !(w.startSeconds < 100 && w.endSeconds > 100)),
+    "the two-minute gap between points was not skipped"
+  );
+});

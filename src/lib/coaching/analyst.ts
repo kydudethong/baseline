@@ -622,7 +622,7 @@ export async function runAnalyst(opts: {
       return out;
     });
 
-    const output = mergeAnalystOutputs(parts, opts.input.clipSeconds);
+    const output = mergeAnalystOutputs(parts, opts.input.clipSeconds, opts.onLog);
     const problems = auditAnalysis(output, opts.input);
     for (const p of problems) opts.onLog?.(`analyst audit: ${p}`);
     // The upload handle goes back too, so the burst technique pass can point
