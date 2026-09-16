@@ -37,22 +37,27 @@ primary_region = "sjc"
   # no half-price detail setting to reach for, so do not set "medium" expecting
   # one -- it is the same bill and the same pixels as "low".
   #
-  # What low costs us is the BALL, which is a dozen pixels and was the reason
-  # high was chosen in the first place. That is paid for in the overlay instead:
-  # OVERLAY_BALL_RING draws a ring around the ball large enough to survive the
-  # downscale to Gemini's ~768px tile. A drawn marker survives what the ball
-  # itself does not. If shot detection degrades, that ring is the first thing
-  # to make bigger -- raise ANALYST_MEDIA_RESOLUTION back to "high" only after
-  # the ring has been tried, because the ring is free and high is 4x.
+  # BACK TO HIGH, and the reason the argument for low collapsed is worth
+  # recording. Low was chosen on the basis that the ball -- a dozen pixels, and
+  # the only thing the coarse tier genuinely loses -- would be paid for by a
+  # ring drawn around it in the overlay. That ring never drew a pixel: it hung
+  # off the ball-trail code, and ball tracking was removed from this pipeline
+  # long before the ring was written. So the cheap tier was never being
+  # compensated for anything; Gemini was finding the ball unaided the whole
+  # time.
+  #
+  # High is about 3.8x the bill -- roughly $4.69 against $1.23 for a
+  # twenty-minute game on 3.8-flash. That is the real trade, with no ring in
+  # it. ANALYST_MEDIA_RESOLUTION=low goes back the other way in one line.
   ANALYST_FPS = "10"
-  ANALYST_MEDIA_RESOLUTION = "low"
+  ANALYST_MEDIA_RESOLUTION = "high"
   # Raised from the 120s default so the CONTEXT WINDOW is the only thing that
-  # splits a clip. At 10fps and low resolution a second of video costs ~700
-  # tokens, so one call holds roughly 14 minutes — which means this 15-minute
-  # cap and the window now bind at about the same place, and most clips are
-  # genuinely one pass. At the old 15fps/high the same window held 155 seconds.
-  # Longer clips still split, and no setting here can change that, because it
-  # is the size of the window.
+  # splits a clip. At 10fps and HIGH resolution a second of video costs ~2,580
+  # tokens, so one call holds about 230 seconds — under four minutes. This
+  # 900s cap therefore does nothing at these settings: the window binds first,
+  # and a twenty-minute game is several segments rather than one pass. That is
+  # the hidden cost of high, alongside the money: more calls, and the segment
+  # sampling cap (MAX_SEGMENTS) comes back into play past ~30 minutes.
   #
   # The cost: past about two minutes in a single call the model has been
   # measured losing track of the clock and reporting rallies past the end of

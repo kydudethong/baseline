@@ -34,7 +34,6 @@ import type {
 import { buildCoachingFacts } from "./facts";
 import { buildAnalystInput } from "./analyst-facts";
 import { runAnalyst, releaseAnalystFile, analystFps, analystMediaResolution } from "./analyst";
-import { readTechnique } from "./technique-pass";
 import { buildPracticePlan } from "./practice-plan";
 import { matchPlaystyles } from "./pro-playstyles";
 import { shotRowsFromAnalyst } from "./shot-rows";
@@ -358,86 +357,27 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
 
 
 
-  // TECHNIQUE: a second pass, narrow and expensive, only where a swing is.
+  // THE TECHNIQUE PASS IS GONE. ONE PASS, AT 10FPS AND HIGH RESOLUTION.
   //
-  // The scan above runs at 5fps and LOW resolution -- plenty to see a ball
-  // change direction against a paddle, nowhere near enough to see the swing
-  // that did it. This re-watches the windows around the subject's own contacts
-  // at 10fps and high resolution.
+  // It existed to solve a problem the scan no longer has. The scan used to run
+  // at 5fps and LOW -- enough to see a ball change direction against a paddle,
+  // nowhere near enough to see the swing that did it -- so a second, narrow,
+  // expensive pass re-watched the windows around the subject's own contacts at
+  // 10fps and high. Splitting was right: it bought the detail for about a
+  // sixth of the price of reading the whole match closely.
   //
-  // WHY SPLIT AGAIN, having just merged them. One pass at 10fps high
-  // resolution over a whole match is ~3M tokens, and almost all of them buy
-  // nothing: the reader is judged on about fifteen swings, under two seconds
-  // each. Roughly 27 seconds of a 20-minute match is worth looking at closely;
-  // the rest was costing full price to establish, over and over, that nobody
-  // was mid-stroke. Same information, about a sixth of the bill.
+  // The scan is now 10fps and high over the whole clip, which is exactly what
+  // the burst pass was buying. Keeping it would mean uploading nothing new and
+  // re-reading eleven seconds of already-read frames at identical settings, to
+  // ask a question the first call was already in a position to answer.
   //
-  // It reuses the OVERLAY upload rather than uploading the source video again:
-  // the boxes cost some clarity on the body, and a second upload of a 500MB
-  // clip costs a minute of wall clock on every single run.
-  try {
-    const subjectLabels = new Set(
-      (analysis.self_player_label ?? "").split(",").map((l) => l.trim()).filter(Boolean)
-        .map((l) => l.toLowerCase().replace(/[^a-z0-9]/g, ""))
-    );
-    const mine = (out.shots ?? [])
-      .filter((sh) => Number.isFinite(sh.t))
-      .filter((sh) => subjectLabels.size === 0
-        || subjectLabels.has(String(sh.player ?? "").toLowerCase().replace(/[^a-z0-9]/g, "")))
-      .map((sh) => sh.t);
-
-    const techniqueStartedAt = Date.now();
-    const { technique, patterns } = analyst.file
-      ? await readTechnique({
-          model,
-          file: analyst.file,
-          shotTimes: mine,
-          durationSeconds: Number(analysis.video?.duration_seconds ?? 0),
-          playerLabel: analysis.self_player_label ?? null,
-          onLog: (l) => console.error(`[coaching] ${l}`),
-        })
-      : { technique: [], patterns: [] as string[] };
-
-    // Patterns are what a burst can say and a single shot cannot: "your first
-    // two drops cleared the net and the third clipped it". Logged rather than
-    // given a column while the open question is whether they are any good.
-    for (const pat of patterns) console.error(`[coaching] technique pattern: ${pat}`);
-
-    await recordCapture(supabase, {
-      analysisId,
-      pass: "technique",
-      model,
-      config: { fps: 10, mediaResolution: "high", shotTimes: mine },
-      output: { technique, patterns },
-      durationMs: Date.now() - techniqueStartedAt,
-    });
-
-    if (technique.length > 0) {
-      await supabase.from("coaching_shot_technique").delete().eq("analysis_id", analysisId);
-      const { error } = await supabase.from("coaching_shot_technique").insert(
-        technique.map((t) => ({
-          analysis_id: analysisId,
-          t_s: t.tSeconds,
-          striker_court: null,
-          stroke_visible: t.strokeVisible,
-          paddle_face: t.paddleFace,
-          contact_height: t.contactHeight,
-          shoulder_rotation: t.shoulderRotation,
-          foot_position: t.footPosition,
-          correction: t.correction,
-          confidence: t.confidence,
-          clip_start_s: t.clipStartSeconds,
-          clip_end_s: t.clipEndSeconds,
-        }))
-      );
-      if (error) throw error;
-    }
-  } catch (err) {
-    console.warn(`[coaching] technique skipped: ${describeError(err)}`);
-  } finally {
-    // The upload was kept alive across both passes; it is finished with now.
-    await releaseAnalystFile(analyst.file);
-  }
+  // WHAT THIS COSTS, said plainly: nothing writes coaching_shot_technique any
+  // more, so the paddle / shoulders / contact / feet breakdown beside each
+  // evidence clip is empty. The clip itself still plays and the criticism
+  // still carries its moment. If that breakdown is wanted back, the honest
+  // place for it is the scan's own output -- it is watching those frames at
+  // the right resolution already -- rather than a second call.
+  await releaseAnalystFile(analyst.file);
 
   await coachingProgress(supabase, analysisId, "Measuring where you stood…");
 

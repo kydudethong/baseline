@@ -33,16 +33,13 @@ import numpy as np
 C_COURT = (255, 210, 58)      # BGR-ish cyan/blue for the court
 C_NET = (200, 67, 255)        # magenta
 C_BALL = (60, 220, 255)       # amber
-# THE RING. Hot magenta, and the colour is a measurement rather than a taste:
-# it is the one hue that does not occur in this footage. Courts are blue and
-# green, lines and shoes are white, skin and clothing sit in the warm half.
-# A marker only helps if nothing else in the frame can be mistaken for it.
-C_BALL_RING = (200, 40, 255)
-# Drawn OUTSIDE the ring in near-black, because a bright ring alone disappears
-# against a white court line or a blown-out sky -- exactly the two places the
-# ball spends a rally. The dark edge is what makes the bright ring readable on
-# any background.
-C_BALL_RING_EDGE = (20, 20, 20)
+# A BALL RING USED TO BE DEFINED HERE, and it never drew a single pixel.
+# It hung off the ball-trail code, which only runs when there are ball points --
+# and ballTrack.points is initialised empty and never filled, because ball
+# tracking was removed from this pipeline before the ring was written. A marker
+# for a ball nothing detects.
+#
+# Gemini finds the ball with its own eyes, which is what it was doing all along.
 C_TRAIL = (60, 180, 255)
 C_PLAYER = (140, 224, 92)
 C_SELF = (58, 210, 255)
@@ -74,31 +71,6 @@ def main() -> int:
     # (measured at 19s for ~18MB) rather than on the render, since CRF barely
     # moves encode time at a fixed preset. OVERLAY_CRF tunes it.
     ap.add_argument("--crf", type=int, default=int(os.environ.get("OVERLAY_CRF", "20")))
-    # THE BALL RING, and the reason it exists is the media-resolution bill.
-    #
-    # Gemini resizes every frame to roughly a 768px tile before it looks at
-    # anything. On a 1280-wide overlay that is a 0.6x downscale, and a
-    # pickleball -- a dozen pixels at match distance, seven after the overlay's
-    # own downscale to 720p -- comes out of it as three or four grey pixels
-    # that the low-resolution tier then tokenizes away. That is what made the
-    # ball invisible, and what a high-resolution read was buying back at four
-    # times the price.
-    #
-    # A DRAWN RING DOES NOT HAVE THAT PROBLEM. It is as large as we choose to
-    # make it, so it can be sized to survive the downscale rather than hoping
-    # to. 22px at 720p leaves about 13px after the tile resize -- a circle with
-    # a visible hole in it, which is a shape a model can find, where a grey
-    # smudge is not. It costs nothing per frame and nothing per token.
-    #
-    # Raise this FIRST if shot detection degrades. It is free; media resolution
-    # is 4x.
-    ap.add_argument("--ball-ring", type=float,
-                    default=float(os.environ.get("OVERLAY_BALL_RING", "22")),
-                    help="radius in 720p-equivalent pixels of the ring drawn around "
-                         "the ball so it survives Gemini's downscale. 0 disables it.")
-    ap.add_argument("--ball-ring-weight", type=float,
-                    default=float(os.environ.get("OVERLAY_BALL_RING_WEIGHT", "3")),
-                    help="stroke width of the ball ring, same scale as --ball-ring.")
     ap.add_argument("--out-fps", type=float, default=10.0,
                     help="Frames per second to WRITE. The source is decoded in full and only "
                          "every Nth frame is drawn on and encoded. 0 keeps the source rate.")
@@ -477,17 +449,6 @@ def main() -> int:
             p = ball_sorted[hi - 1]
             cx, cy = int(p["x"] * w), int(p["y"] * h)
             r = int(7 * scale)
-            # The ring goes down FIRST so the ball itself sits on top of it and
-            # a human still reads the amber dot as the ball rather than as the
-            # middle of a target.
-            ring = int(args.ball_ring * scale)
-            if ring > 0:
-                rw = max(1, int(args.ball_ring_weight * scale))
-                # Dark edge outside, bright ring inside: two strokes, one
-                # marker that holds on a white line and on a dark shirt.
-                cv2.circle(img, (cx, cy), ring + rw, C_BALL_RING_EDGE,
-                           rw, cv2.LINE_AA)
-                cv2.circle(img, (cx, cy), ring, C_BALL_RING, rw, cv2.LINE_AA)
             cv2.circle(img, (cx, cy), r, C_BALL, -1 if not p.get("interpolated") else 1, cv2.LINE_AA)
 
         for tr in tracks:

@@ -25,14 +25,12 @@
  * land in show a streak rather than a dot.
  *
  * Fifteen fixed that by paying for it -- half again the bill, linearly, on top
- * of a high-resolution read. September 2026 that trade was judged not worth
- * $3.75 a game, so the ball problem moved to where it is free: the overlay now
- * DRAWS a ring around the ball (OVERLAY_BALL_RING), and a drawn ring does not
- * blur into a streak at ten samples a second the way the ball does.
+ * of a high-resolution read, and ten plus high resolution was judged the better
+ * of the two ways to spend that money: more detail per frame rather than more
+ * frames, on footage where the hard thing to see is small rather than fast.
  *
- * The ordering matters if detection ever gets worse. Make the ring bigger
- * first; it costs nothing. Raise this back to 15 second. Go back to high
- * resolution last, because it is the four-times-the-bill knob.
+ * If detection gets worse, this is the knob to try before anything else: it is
+ * linear, where resolution is a 4x step.
  */
 export const ANALYST_FPS = 10;
 

@@ -84,11 +84,14 @@ export function analystOutputBudget(segmentSeconds: number): number {
  * subject's own shots. Paying high rates across a whole match to read fifteen
  * swings meant most of the bill went on footage nothing was being judged in.
  *
- * It was set to HIGH for a while, on the ball alone -- a dozen pixels is the
- * one thing in this footage the coarse tier genuinely loses. That cost about
- * $3.75 a twenty-minute game and it is back to LOW, with the ball paid for in
- * the overlay instead: a drawn ring (OVERLAY_BALL_RING) survives the downscale
- * that the ball itself does not.
+ * HIGH, on the ball alone -- a dozen pixels is the one thing in this footage
+ * the coarse tier genuinely loses.
+ *
+ * It was briefly set to LOW on the theory that a ring drawn around the ball in
+ * the overlay would compensate. The ring never drew a pixel: it hung off the
+ * ball-trail code, and ball tracking had been removed from the pipeline before
+ * it was written. Recorded here because the reasoning was sound and the
+ * premise was never checked, which is the more expensive half of that mistake.
  *
  * "medium" IS "low" HERE, and not because of this function. For video Gemini
  * treats the two tiers identically -- about 70 tokens a frame either way,
@@ -97,8 +100,8 @@ export function analystOutputBudget(segmentSeconds: number): number {
  * is no half-price detail setting for video to reach for.
  */
 export function analystMediaResolution(): "low" | "medium" | "high" {
-  const v = (process.env.ANALYST_MEDIA_RESOLUTION ?? "low").toLowerCase();
-  return v === "high" ? "high" : v === "medium" ? "medium" : "low";
+  const v = (process.env.ANALYST_MEDIA_RESOLUTION ?? "high").toLowerCase();
+  return v === "low" ? "low" : v === "medium" ? "medium" : "high";
 }
 
 const SHOT_TYPES = [
