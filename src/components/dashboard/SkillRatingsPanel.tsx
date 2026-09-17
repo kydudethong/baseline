@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import type { CoachingSkillRatingRow } from "@/lib/db/types";
 import { SKILLS, skillName } from "@/lib/coaching/types";
@@ -50,7 +51,7 @@ export function SkillRatingsPanel({
       </div>
 
       {withReasons.length > 0 ? (
-        <details className="reveal">
+        <details className="reveal" style={{ "--reveal-accent": "var(--court)" } as CSSProperties}>
           <summary className="reveal-sum">
             <span className="reveal-ic" aria-hidden="true">≡</span>
             <span className="reveal-txt">

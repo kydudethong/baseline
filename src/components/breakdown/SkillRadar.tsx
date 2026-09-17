@@ -78,7 +78,7 @@ export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
    * sideways AND the side labels anchor away from the chart, which is also
    * what stops them sitting on top of the outer ring.
    */
-  const padX = 52;
+  const padX = 64;
   const viewW = size + padX * 2;
 
   const pointFor = (i: number, value: number) => {
@@ -166,18 +166,26 @@ export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
             const anchor = Math.abs(dx) < 8 ? "middle" : dx > 0 ? "start" : "end";
             const nudge = anchor === "middle" ? 0 : dx > 0 ? 6 : -6;
             return (
+              // IN THE AXIS'S OWN COLOUR, and bigger. They were 10.5px grey
+              // on grey -- the same weight as any caption on the page -- so
+              // the four words that say what the shape MEANS read as filler
+              // around it. Colouring each to match its own dot ties the label
+              // to the point it belongs to, which is work no legend has to do
+              // now, and the uppercase tracking makes them read as axes rather
+              // than as a sentence someone broke up.
               <text
                 key={g.group}
                 x={x + nudge}
                 y={y}
-                fontSize={10.5}
+                fontSize={11}
                 fontFamily="var(--ui)"
-                fontWeight={600}
-                fill="var(--ink-3)"
+                fontWeight={700}
+                letterSpacing="0.06em"
+                fill={GROUP_COLOR[g.group]}
                 textAnchor={anchor}
                 dominantBaseline="middle"
               >
-                {g.group}
+                {g.group.toUpperCase()}
               </text>
             );
           })}
@@ -194,9 +202,17 @@ export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
               border: `1px solid ${GROUP_COLOR[g.group]}33`,
               background: `${GROUP_COLOR[g.group]}0f`,
               padding: "var(--a3) var(--a4)",
+              // So the floating panel is not clipped by its own tile.
+              overflow: "visible",
             }}
           >
-            <p className="xs" style={{
+            {/* A DIV, NOT A <p>, and that was the bug rather than a style
+                choice. <details> is flow content and is not allowed inside a
+                paragraph, so the browser auto-closed the <p> before it -- which
+                is why the tile's own label ended up orphaned at the bottom and
+                the panel tore the grid apart. Valid markup fixed the layout
+                that no amount of CSS was going to. */}
+            <div className="xs" style={{
               color: GROUP_COLOR[g.group], fontWeight: 700,
               display: "flex", alignItems: "center", gap: 6,
             }}>
@@ -206,7 +222,7 @@ export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
                   thing that needs explaining is the axis the player is
                   actually looking at, not the parts it was built from. */}
               <SkillInfo group={g.group} />
-            </p>
+            </div>
             <p className="h2" style={{ marginTop: 2 }}>{g.avg !== null ? g.avg.toFixed(2) : "—"}</p>
           </div>
         ))}

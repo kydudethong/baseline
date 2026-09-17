@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -391,7 +392,7 @@ async function AnalysisBreakdown({
           offer anyone can take. */}
       {practice && practice.blocks.length > 0 ? (
         <section className="stack g4">
-          <details className="reveal">
+          <details className="reveal" style={{ "--reveal-accent": "var(--warn)" } as CSSProperties}>
             <summary className="reveal-sum">
               <span className="reveal-ic" aria-hidden="true">◎</span>
               <span className="reveal-txt">
@@ -431,7 +432,7 @@ async function AnalysisBreakdown({
 
       {/* Movement, the raw shot table and the tracker's own output. Collapsed
           because it is evidence for the read above, not the read itself. */}
-      <details className="reveal">
+      <details className="reveal" style={{ "--reveal-accent": "var(--ink-3)" } as CSSProperties}>
         <summary className="reveal-sum">
           <span className="reveal-ic" aria-hidden="true">⌗</span>
           <span className="reveal-txt">

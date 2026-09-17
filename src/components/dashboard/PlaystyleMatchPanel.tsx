@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { watchUrl } from "@/lib/coaching/pro-playstyles";
 import type { PlaystyleMatch } from "@/lib/coaching/pro-playstyles";
 import { skillName } from "@/lib/coaching/types";
@@ -58,7 +59,7 @@ export function PlaystyleMatchPanel({
           load-bearing thing here: nobody changes what they practise because
           of it. So it is offered rather than announced, and the summary does
           not spoil the answer. */}
-      <details className="reveal">
+      <details className="reveal" style={{ "--reveal-accent": "var(--court)" } as CSSProperties}>
         <summary className="reveal-sum">
           <span className="reveal-ic" aria-hidden="true">★</span>
           <span className="reveal-txt">

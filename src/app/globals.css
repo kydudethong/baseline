@@ -197,23 +197,47 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
    next to it -- but it is a real 20px target, because the people most likely
    to press it are on a phone at a court.
    --------------------------------------------------------------------------- */
-.skill-info{display:inline}
+/* THE PANEL FLOATS; IT DOES NOT INFLATE THE TILE.
+   First version made the body a normal block inside the group tile, which is
+   about 150px wide -- so four paragraphs wrapped to one or two words a line
+   and ran a thousand pixels down the page, shoving the tile's own label to the
+   bottom and tearing the grid apart. A disclosure that reflows the layout it
+   sits in is not a disclosure.
+   Absolutely positioned against the icon, at a readable width, over the top of
+   whatever is beneath it. */
+.skill-info{display:inline;position:relative}
 .skill-info-ic{
   list-style:none;cursor:pointer;display:inline-grid;place-items:center;
   width:18px;height:18px;border-radius:50%;
   border:1px solid var(--line);background:transparent;
   font-size:11px;font-weight:700;font-style:italic;color:var(--ink-3);
-  line-height:1;user-select:none;
+  line-height:1;user-select:none;vertical-align:middle;
 }
 .skill-info-ic::-webkit-details-marker{display:none}
 .skill-info-ic:hover{color:var(--ink);border-color:var(--ink-3)}
-.skill-info[open] > .skill-info-ic{background:var(--line);color:var(--ink)}
+.skill-info[open] > .skill-info-ic{background:var(--blue);color:#fff;border-color:var(--blue)}
+
 .skill-info-body{
+  position:absolute;
+  /* Anchored to the icon's left edge and pulled back, so a tile near the right
+     of the grid does not push the panel off the screen. */
+  top:calc(100% + 10px);
+  left:50%;
+  transform:translateX(-50%);
+  width:min(320px, calc(100vw - 32px));
+  max-height:min(420px, 60vh);
+  overflow-y:auto;
+  z-index:40;
   display:flex;flex-direction:column;gap:12px;
-  margin-top:10px;padding:14px;border-radius:var(--r3);
-  background:var(--card);border:1px solid var(--line);
+  padding:14px;border-radius:var(--r3);
+  background:var(--card);
+  border:1px solid var(--line);
+  box-shadow:0 12px 32px rgb(0 0 0 / .16);
+  /* Normal text, not the tile's centred-and-coloured label. */
+  text-align:left;font-weight:400;
+  cursor:default;
 }
-.skill-info-what{margin:0;font-size:13.5px;font-weight:600;color:var(--ink)}
+.skill-info-what{margin:0;font-size:13.5px;font-weight:600;color:var(--ink);line-height:1.45}
 .skill-info-row{display:flex;flex-direction:column;gap:3px}
 .skill-info-row p{margin:0;font-size:13px;line-height:1.5;color:var(--ink-2)}
 .skill-info-lbl{
@@ -224,10 +248,13 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .skill-info-lbl.warn{color:var(--warn)}
 
 @media (max-width:640px){
-  /* A finger needs more than eighteen pixels. The icon stays the same size;
-     the tappable area grows around it. */
   .skill-info-ic{width:22px;height:22px}
-  .skill-info-body{padding:12px}
+  /* On a phone the tile is nearly the screen, so centre the panel on the
+     viewport rather than on an icon that may be at either edge. */
+  .skill-info-body{
+    position:fixed;left:16px;right:16px;top:auto;bottom:16px;
+    transform:none;width:auto;max-height:70vh;
+  }
 }
 .meter-top .sc{margin-left:auto;font-family:var(--display);font-size:19px;font-weight:700;letter-spacing:-.02em}
 .meter-top .sc small{font-size:12px;font-weight:500;color:var(--ink-3);font-family:var(--ui)}
@@ -1301,64 +1328,87 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
    and a chevron that turns.
    --------------------------------------------------------------------------- */
 .reveal{
+  --reveal-accent:var(--blue);
+  position:relative;
   border:1px solid var(--line);
   border-radius:var(--r3);
   background:var(--card);
   overflow:hidden;
+  box-shadow:var(--lift);
   transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease;
 }
+/* A COLOURED SPINE. One flat line of colour down the left edge does more to
+   say "this is a control" than any amount of tinting, and it is what makes a
+   stack of these read as a row of doors rather than as more cards. */
+.reveal::before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
+  background:var(--reveal-accent);
+}
 .reveal:hover{
-  border-color:color-mix(in srgb, var(--blue) 45%, var(--line));
-  box-shadow:0 2px 14px color-mix(in srgb, var(--blue) 12%, transparent);
+  border-color:color-mix(in srgb, var(--reveal-accent) 55%, var(--line));
+  box-shadow:0 8px 24px color-mix(in srgb, var(--reveal-accent) 18%, transparent);
+  transform:translateY(-1px);
 }
-.reveal:has(> .reveal-sum:focus-visible){
-  outline:2px solid var(--blue);outline-offset:2px;
-}
+.reveal:has(> .reveal-sum:focus-visible){outline:2px solid var(--reveal-accent);outline-offset:2px}
 
 .reveal-sum{
   list-style:none;cursor:pointer;
   display:flex;align-items:center;gap:var(--a3);
-  padding:var(--a4);
-  /* A gradient wash toward the accent, so the row reads as a control rather
-     than as another card of text. Kept faint: four of these on one page at
-     full strength would be a fairground. */
+  padding:var(--a4) var(--a4) var(--a4) calc(var(--a4) + 4px);
   background:linear-gradient(
     100deg,
-    color-mix(in srgb, var(--blue) 7%, transparent),
-    transparent 62%
+    color-mix(in srgb, var(--reveal-accent) 10%, transparent),
+    transparent 58%
   );
 }
 .reveal-sum::-webkit-details-marker{display:none}
 
 .reveal-ic{
   flex:none;display:grid;place-items:center;
-  width:34px;height:34px;border-radius:10px;
-  background:color-mix(in srgb, var(--blue) 14%, transparent);
-  color:var(--blue);font-size:16px;line-height:1;
+  width:38px;height:38px;border-radius:11px;
+  background:color-mix(in srgb, var(--reveal-accent) 16%, transparent);
+  color:var(--reveal-accent);font-size:17px;line-height:1;
+  transition:transform .16s ease;
 }
-.reveal-txt{display:flex;flex-direction:column;gap:2px;min-width:0}
-.reveal-title{font-size:15px;font-weight:650;color:var(--ink);line-height:1.25}
+.reveal-sum:hover .reveal-ic{transform:scale(1.06)}
+
+.reveal-txt{display:flex;flex-direction:column;gap:3px;min-width:0}
+.reveal-title{font-size:15.5px;font-weight:650;color:var(--ink);line-height:1.25}
 .reveal-sub{font-size:12.5px;color:var(--ink-3);line-height:1.35}
 
+/* A PILL, NOT A CHEVRON ON ITS OWN. "Open" next to the arrow is the word that
+   tells somebody it is a control at all; an arrow alone is decoration until
+   you have already worked out what it does. */
 .reveal-chev{
-  flex:none;margin-left:auto;
-  font-size:20px;line-height:1;color:var(--ink-3);
-  transform:rotate(0deg);
-  transition:transform .18s ease, color .16s ease;
+  flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:5px;
+  padding:5px 11px;border-radius:999px;
+  background:color-mix(in srgb, var(--reveal-accent) 13%, transparent);
+  color:var(--reveal-accent);
+  font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  transition:background .16s ease;
 }
-.reveal[open] > .reveal-sum > .reveal-chev{transform:rotate(90deg);color:var(--blue)}
-.reveal-sum:hover .reveal-chev{color:var(--blue)}
+.reveal-chev::after{
+  content:"\203A";font-size:15px;line-height:1;
+  display:inline-block;transform:rotate(0deg);transition:transform .18s ease;
+}
+.reveal[open] > .reveal-sum > .reveal-chev::after{transform:rotate(90deg)}
+.reveal[open] > .reveal-sum > .reveal-chev{
+  background:color-mix(in srgb, var(--reveal-accent) 22%, transparent);
+}
+.reveal-sum:hover .reveal-chev{
+  background:color-mix(in srgb, var(--reveal-accent) 24%, transparent);
+}
 
-.reveal-body{
-  padding:var(--a4);
-  border-top:1px solid var(--line);
-}
+.reveal-body{padding:var(--a4);border-top:1px solid var(--line)}
 
 @media (prefers-reduced-motion: reduce){
   .reveal, .reveal-chev{transition:none}
 }
 @media (max-width:640px){
-  .reveal-sum{padding:var(--a3);gap:var(--a2)}
-  .reveal-ic{width:30px;height:30px}
+  .reveal-sum{padding:var(--a3) var(--a3) var(--a3) calc(var(--a3) + 4px);gap:var(--a2)}
+  .reveal-ic{width:32px;height:32px;font-size:15px}
   .reveal-title{font-size:14.5px}
+  /* The word costs more than it earns at this width; the arrow carries it. */
+  .reveal-chev{padding:5px 8px;font-size:0}
+  .reveal-chev::after{font-size:15px}
 }
