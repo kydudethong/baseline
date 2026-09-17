@@ -1,5 +1,3 @@
-import { skillGuide } from "@/lib/coaching/skill-guide";
-
 /**
  * Single-analysis skill meter — shows what one specific analysis measured:
  * a 1-5 rating as a filled bar, plus the model's stated basis for it. For
@@ -20,61 +18,21 @@ import { skillGuide } from "@/lib/coaching/skill-guide";
  * holding four paragraphs is not a tooltip.
  */
 export function SkillMeter({
-  name, raw, basis, skillKey,
+  name, raw, basis,
 }: {
   name: string;
   raw: number;
   basis: string | null;
-  /** Keys the guide. Omit and the meter renders exactly as it always did. */
-  skillKey?: string;
 }) {
   const pct = Math.max(0, Math.min(100, (raw / 5) * 100));
-  const guide = skillKey ? skillGuide(skillKey) : null;
 
   return (
     <div className="meter">
       <div className="meter-top">
-        <span className="nm">
-          {name}
-          {guide ? (
-            <details className="skill-info">
-              <summary
-                className="skill-info-ic"
-                aria-label={`What ${name} means and how to improve it`}
-                title={`What ${name} means and how to improve it`}
-              >
-                i
-              </summary>
-              <div className="skill-info-body">
-                <p className="skill-info-what">{guide.what}</p>
-
-                <div className="skill-info-row">
-                  <span className="skill-info-lbl good">When it is a strength</span>
-                  <p>{guide.strength}</p>
-                </div>
-                <div className="skill-info-row">
-                  <span className="skill-info-lbl warn">How it usually goes wrong</span>
-                  <p>{guide.weakness}</p>
-                </div>
-                <div className="skill-info-row">
-                  <span className="skill-info-lbl">How to improve it</span>
-                  <p>{guide.improve}</p>
-                </div>
-
-                {/* THIS GAME, kept visibly separate from the general advice
-                    above it. The three blocks are true of every player; this
-                    line is the only part that is about you, and blurring the
-                    two would make generic coaching look personalised. */}
-                {basis ? (
-                  <div className="skill-info-row">
-                    <span className="skill-info-lbl">Why this rating, in this game</span>
-                    <p>{basis}</p>
-                  </div>
-                ) : null}
-              </div>
-            </details>
-          ) : null}
-        </span>
+        {/* The info icon moved to the GROUP tiles on the radar, which are
+            what the chart actually shows. A meter listing one skill inside a
+            group does not need to re-explain the group. */}
+        <span className="nm">{name}</span>
         <span className="sc">
           {raw}
           <small>/5</small>

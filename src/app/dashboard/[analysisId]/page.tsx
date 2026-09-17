@@ -391,15 +391,20 @@ async function AnalysisBreakdown({
           offer anyone can take. */}
       {practice && practice.blocks.length > 0 ? (
         <section className="stack g4">
-          <details className="card">
-            <summary className="sm" style={{ cursor: "pointer", fontWeight: 600 }}>
-              See the drills that fix what this analysis found
-              <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>
-                {" · "}{practice.blocks.length} block{practice.blocks.length === 1 ? "" : "s"}
-                {practiceMinutes(practice.blocks) ? `, ${practiceMinutes(practice.blocks)} min` : ""}
+          <details className="reveal">
+            <summary className="reveal-sum">
+              <span className="reveal-ic" aria-hidden="true">◎</span>
+              <span className="reveal-txt">
+                <span className="reveal-title">See the drills that fix what this analysis found</span>
+                <span className="reveal-sub">
+                  {practice.blocks.length} block{practice.blocks.length === 1 ? "" : "s"}
+                  {practiceMinutes(practice.blocks) ? `, ${practiceMinutes(practice.blocks)} minutes` : ""}
+                  {" · warm-up, drills and a game to finish"}
+                </span>
               </span>
+              <span className="reveal-chev" aria-hidden="true">›</span>
             </summary>
-            <div style={{ marginTop: 16 }}>
+            <div className="reveal-body">
               <PracticeSessionPanel
                 plan={practice.plan}
                 blocks={practice.blocks}
@@ -426,11 +431,16 @@ async function AnalysisBreakdown({
 
       {/* Movement, the raw shot table and the tracker's own output. Collapsed
           because it is evidence for the read above, not the read itself. */}
-      <details className="card">
-        <summary className="sm" style={{ cursor: "pointer" }}>
-          The measurements behind this page
+      <details className="reveal">
+        <summary className="reveal-sum">
+          <span className="reveal-ic" aria-hidden="true">⌗</span>
+          <span className="reveal-txt">
+            <span className="reveal-title">The measurements behind this page</span>
+            <span className="reveal-sub">Movement, the raw shot table, and what the tracker saw</span>
+          </span>
+          <span className="reveal-chev" aria-hidden="true">›</span>
         </summary>
-        <div className="stack g5" style={{ marginTop: 16 }}>
+        <div className="reveal-body stack g5">
           <AnalysisResultPanel result={analysis.result!} />
           <MovementMetricsPanel calibration={phase2.calibration} movement={phase2.movement} selfLabels={selfLabels} />
           {phase2.shots.length > 0 ? (

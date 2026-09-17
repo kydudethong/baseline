@@ -51,6 +51,23 @@ export function PlaystyleMatchPanel({
 
   return (
     <section className="stack g4">
+      {/* BEHIND A DOOR, AND THE NAME STAYS BEHIND IT.
+          Putting "You play like <pro>" on the page as a heading answers the
+          question before anyone asks it, which is the one thing that makes it
+          worth nothing -- the fun is in the reveal. It is also the least
+          load-bearing thing here: nobody changes what they practise because
+          of it. So it is offered rather than announced, and the summary does
+          not spoil the answer. */}
+      <details className="reveal">
+        <summary className="reveal-sum">
+          <span className="reveal-ic" aria-hidden="true">★</span>
+          <span className="reveal-txt">
+            <span className="reveal-title">See which pro you play like</span>
+            <span className="reveal-sub">Matched on the shape of your ratings, not your level</span>
+          </span>
+          <span className="reveal-chev" aria-hidden="true">›</span>
+        </summary>
+        <div className="reveal-body">
       <div className="read-head">
         <span className="eyebrow" style={{ color: "var(--blue)" }}>Closest pro playstyle</span>
         <h2 className="d2 measure">You play like {top.name}</h2>
@@ -131,6 +148,8 @@ export function PlaystyleMatchPanel({
           would transfer to you fastest.
         </p>
       ) : null}
+        </div>
+      </details>
     </section>
   );
 }

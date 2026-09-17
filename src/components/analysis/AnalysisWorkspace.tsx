@@ -485,12 +485,20 @@ function QualityNote({ view }: { view: AnalysisView }) {
   const limitations = q.limitations ?? [];
   if (coverage === null && limitations.length === 0) return null;
   return (
-    <details className="card">
-      <summary className="sm" style={{ cursor: "pointer" }}>
-        How reliable is this analysis?
-        {coverage !== null ? ` · ball seen in ${Math.round(coverage * 100)}% of frames` : ""}
+    <details className="reveal">
+      <summary className="reveal-sum">
+        <span className="reveal-ic" aria-hidden="true">✓</span>
+        <span className="reveal-txt">
+          <span className="reveal-title">How reliable is this analysis?</span>
+          <span className="reveal-sub">
+            {coverage !== null
+              ? `Ball seen in ${Math.round(coverage * 100)}% of frames`
+              : "What this read could and could not measure"}
+          </span>
+        </span>
+        <span className="reveal-chev" aria-hidden="true">›</span>
       </summary>
-      <div className="stack g2" style={{ marginTop: 12 }}>
+      <div className="reveal-body stack g2">
         {limitations.map((l, i) => (
           <p key={i} className="xs" style={{ margin: 0 }}>· {l}</p>
         ))}

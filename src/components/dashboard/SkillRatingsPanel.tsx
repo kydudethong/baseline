@@ -50,18 +50,24 @@ export function SkillRatingsPanel({
       </div>
 
       {withReasons.length > 0 ? (
-        <details className="card">
-          <summary className="sm" style={{ cursor: "pointer" }}>
-            See why — the rating behind each point on the chart
+        <details className="reveal">
+          <summary className="reveal-sum">
+            <span className="reveal-ic" aria-hidden="true">≡</span>
+            <span className="reveal-txt">
+              <span className="reveal-title">See why each rating landed where it did</span>
+              <span className="reveal-sub">
+                {withReasons.length} skill{withReasons.length === 1 ? "" : "s"}, with what the coach saw in this game
+              </span>
+            </span>
+            <span className="reveal-chev" aria-hidden="true">›</span>
           </summary>
-          <div className="grid2" style={{ marginTop: 12 }}>
+          <div className="reveal-body grid2">
             {withReasons.map((s) => (
               <SkillMeter
                 key={s.id}
                 name={skillName(s.skill_key)}
                 raw={s.raw}
                 basis={s.basis}
-                skillKey={s.skill_key}
               />
             ))}
           </div>

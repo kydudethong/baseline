@@ -1289,3 +1289,76 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 /* The ratings chart lives in the film-room's left column now, under the
    reliability note, where there was a screen of empty space. It sizes itself
    to that column, so it needs no grid of its own. */
+
+
+/* ---------------------------------------------------------------------------
+   A DISCLOSURE THAT LOOKS WORTH OPENING.
+   Every "see more" on this page was a line of grey text with a triangle in
+   front of it -- the browser's default, which reads as a footnote rather than
+   as something on offer. Nobody clicks a footnote. These are the good bits
+   (the drills, the pro match, the reasoning behind a rating), so they get a
+   real target: a tinted panel, an icon, a subtitle saying what is behind it,
+   and a chevron that turns.
+   --------------------------------------------------------------------------- */
+.reveal{
+  border:1px solid var(--line);
+  border-radius:var(--r3);
+  background:var(--card);
+  overflow:hidden;
+  transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+.reveal:hover{
+  border-color:color-mix(in srgb, var(--blue) 45%, var(--line));
+  box-shadow:0 2px 14px color-mix(in srgb, var(--blue) 12%, transparent);
+}
+.reveal:has(> .reveal-sum:focus-visible){
+  outline:2px solid var(--blue);outline-offset:2px;
+}
+
+.reveal-sum{
+  list-style:none;cursor:pointer;
+  display:flex;align-items:center;gap:var(--a3);
+  padding:var(--a4);
+  /* A gradient wash toward the accent, so the row reads as a control rather
+     than as another card of text. Kept faint: four of these on one page at
+     full strength would be a fairground. */
+  background:linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--blue) 7%, transparent),
+    transparent 62%
+  );
+}
+.reveal-sum::-webkit-details-marker{display:none}
+
+.reveal-ic{
+  flex:none;display:grid;place-items:center;
+  width:34px;height:34px;border-radius:10px;
+  background:color-mix(in srgb, var(--blue) 14%, transparent);
+  color:var(--blue);font-size:16px;line-height:1;
+}
+.reveal-txt{display:flex;flex-direction:column;gap:2px;min-width:0}
+.reveal-title{font-size:15px;font-weight:650;color:var(--ink);line-height:1.25}
+.reveal-sub{font-size:12.5px;color:var(--ink-3);line-height:1.35}
+
+.reveal-chev{
+  flex:none;margin-left:auto;
+  font-size:20px;line-height:1;color:var(--ink-3);
+  transform:rotate(0deg);
+  transition:transform .18s ease, color .16s ease;
+}
+.reveal[open] > .reveal-sum > .reveal-chev{transform:rotate(90deg);color:var(--blue)}
+.reveal-sum:hover .reveal-chev{color:var(--blue)}
+
+.reveal-body{
+  padding:var(--a4);
+  border-top:1px solid var(--line);
+}
+
+@media (prefers-reduced-motion: reduce){
+  .reveal, .reveal-chev{transition:none}
+}
+@media (max-width:640px){
+  .reveal-sum{padding:var(--a3);gap:var(--a2)}
+  .reveal-ic{width:30px;height:30px}
+  .reveal-title{font-size:14.5px}
+}

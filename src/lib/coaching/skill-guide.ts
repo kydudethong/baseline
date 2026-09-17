@@ -171,3 +171,57 @@ export const SKILL_GUIDES: Record<string, SkillGuide> = {
 export function skillGuide(key: string): SkillGuide | null {
   return SKILL_GUIDES[key] ?? null;
 }
+
+/**
+ * The four groups on the radar, explained.
+ *
+ * SEPARATE FROM THE PER-SKILL GUIDES ABOVE, because an axis is not a skill. A
+ * player looking at "Offense 4.00" is looking at an average of their serve,
+ * their third shot and their attacking, and telling them how to improve "the
+ * serve" would be answering a question they did not ask. The group entry has
+ * to describe the group.
+ *
+ * These are the ones the chart shows, so these are the ones that get an icon.
+ */
+export const GROUP_GUIDES: Record<string, SkillGuide> = {
+  Kitchen: {
+    what: "Everything at the non-volley line: dinks, hands battles, volleys and the patience to stay there.",
+    strength:
+      "You get to the line early and hold it. Your dinks stay low and unattackable, and in a fast exchange your paddle is already up rather than catching up.",
+    weakness:
+      "Backing off the line, and floating dinks. Both hand the net to the other team — one immediately, one two shots later, which is why the dink rarely feels like the mistake.",
+    improve:
+      "Make holding the line the rule and stepping back the exception. Dink cross-court until you can clear the tape by inches on demand, and keep the paddle tip up between every shot.",
+  },
+  Movement: {
+    what: "Getting where you need to be: transition from the baseline, court coverage, and moving as a pair.",
+    strength:
+      "You advance behind shots that earn it, split-step before contact, and stay connected to your partner rather than drifting.",
+    weakness:
+      "Running through the transition zone, and gaps opening between partners. Being caught mid-court with the ball at your feet is the worst place to stand in this sport.",
+    improve:
+      "Advance only as far as your shot deserves, and split-step every time. Imagine a ten-foot rope to your partner: if it would have gone slack, one of you moved wrong.",
+  },
+  Offense: {
+    what: "Creating pressure and finishing points — the serve, the third shot, drives and speed-ups.",
+    strength:
+      "Deep serves that land, a third shot chosen to fit the return you got, and attacks you actually finish rather than restarting the rally.",
+    weakness:
+      "Speeding up balls below net height, and going long chasing serve depth. A serve fault is the only free point you can hand over without an opponent doing anything.",
+    improve:
+      "One rule for attacking: only speed up a ball you can contact at or above net height. For serves, aim three feet inside the baseline and add shape rather than pace.",
+  },
+  Defense: {
+    what: "Staying in points you are losing — the return, resets, blocks and absorbing pace.",
+    strength:
+      "Deep returns that buy you time to reach the net, and resets that land soft and low when you are under attack.",
+    weakness:
+      "Trying to escape with one big counter, and popping resets above net height. Both end the point in the other team's favour a shot earlier than necessary.",
+    improve:
+      "Decide before the point that your first answer to pressure is a reset, not a counter. Return high and deep, and follow it in every single time.",
+  },
+};
+
+export function groupGuide(group: string): SkillGuide | null {
+  return GROUP_GUIDES[group] ?? null;
+}

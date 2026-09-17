@@ -1,6 +1,7 @@
 "use client";
 
 import type { CoachingSkillRatingRow } from "@/lib/db/types";
+import { SkillInfo } from "./SkillInfo";
 import { SKILLS } from "@/lib/coaching/types";
 
 /**
@@ -116,11 +117,38 @@ export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
               .map((_, i) => pointFor(i, ring))
               .map(([x, y]) => `${x},${y}`)
               .join(" ");
-            return <polygon key={ring} points={pts} fill="none" stroke="var(--line)" strokeWidth={1} />;
+            // THE GRID WAS INVISIBLE, and a radar without one is a green blob:
+            // the rings are what turn "this shape" into "a 3 on one axis and a
+            // 4 on another". It was drawn on --line, which is tuned for
+            // borders against a card and measures 1.08:1 against the page --
+            // indistinguishable from nothing.
+            //
+            // THE NUMBERS ARE COMPUTED, NOT EYEBALLED. WCAG asks 3:1 for
+            // non-text graphics. A first attempt at 0.16 and 0.32 opacity
+            // looked like a fix and measured 1.40:1 and 2.02:1 -- still under
+            // the floor, and still faint. These give 2.64:1 inside and 3.84:1
+            // on the outer ring against the light ground, and more against the
+            // dark one. The inner rings sit deliberately below 3:1: they are
+            // subdivisions, and a grid as loud as its own outline competes
+            // with the shape it exists to measure.
+            const outer = ring === 5;
+            return (
+              <polygon
+                key={ring}
+                points={pts}
+                fill="none"
+                stroke="var(--ink)"
+                strokeOpacity={outer ? 0.55 : 0.42}
+                strokeWidth={outer ? 1.5 : 1}
+              />
+            );
           })}
           {groups.map((_, i) => {
             const [x, y] = pointFor(i, 5);
-            return <line key={i} x1={center} y1={center} x2={x} y2={y} stroke="var(--line)" strokeWidth={1} />;
+            return (
+              <line key={i} x1={center} y1={center} x2={x} y2={y}
+                    stroke="var(--ink)" strokeOpacity={0.42} strokeWidth={1} />
+            );
           })}
           <polygon points={polygonPoints} fill="var(--blue)" fillOpacity={0.22} stroke="var(--blue)" strokeWidth={2} />
           {groups.map((g, i) => {
@@ -168,7 +196,17 @@ export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
               padding: "var(--a3) var(--a4)",
             }}
           >
-            <p className="xs" style={{ color: GROUP_COLOR[g.group], fontWeight: 700 }}>{g.group}</p>
+            <p className="xs" style={{
+              color: GROUP_COLOR[g.group], fontWeight: 700,
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              {g.group}
+              {/* ON THE GROUP, NOT ON EACH SKILL. "Offense 4.00" is an average
+                  of the serve, the third shot and attacking play -- so the
+                  thing that needs explaining is the axis the player is
+                  actually looking at, not the parts it was built from. */}
+              <SkillInfo group={g.group} />
+            </p>
             <p className="h2" style={{ marginTop: 2 }}>{g.avg !== null ? g.avg.toFixed(2) : "—"}</p>
           </div>
         ))}
