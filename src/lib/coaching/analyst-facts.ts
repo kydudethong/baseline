@@ -104,6 +104,58 @@ export function contactsFromShots(shots: AnalysisShotRow[]): MeasuredContact[] {
     });
 }
 
+/**
+ * How many contacts are worth putting in front of the model.
+ *
+ * A twenty-minute game at four players produces several hundred wrist-speed
+ * peaks, each with up to twenty body measurements, and the whole list would be
+ * a large share of a prompt that is already paying for eight frames a second
+ * of video. It would also be mostly irrelevant: the read is addressed to ONE
+ * player, and an opponent's knee angle changes nothing anybody is told.
+ */
+const MAX_CONTACTS_IN_PROMPT = 240;
+
+/**
+ * The subject's contacts in full, everyone else's as bare timings.
+ *
+ * The opponents are not dropped outright, because the RHYTHM of an exchange is
+ * information the body measurements do not carry -- four contacts in two
+ * seconds is a hands battle and the same four spread over eight is a dink
+ * rally, and that context changes what a measurement means. What they do not
+ * need is twenty joint angles each.
+ *
+ * When even the subject's own contacts overflow the budget, the list is
+ * thinned EVENLY across the clip rather than truncated at the front. A
+ * truncated list would hand back a detailed read of the first four minutes and
+ * silence after it, which reads as "nothing happened later" rather than "we
+ * stopped looking".
+ */
+function trimContacts(contacts: MeasuredContact[], subjectPlayerId: string | null): MeasuredContact[] {
+  if (contacts.length <= MAX_CONTACTS_IN_PROMPT) return contacts;
+  const subjectLabels = new Set(
+    (subjectPlayerId ?? "").split(",").map((l) => l.trim()).filter(Boolean)
+  );
+  const isSubject = (c: MeasuredContact) => c.player !== null && subjectLabels.has(c.player);
+
+  const mine = contacts.filter(isSubject);
+  const theirs = contacts.filter((c) => !isSubject(c)).map((c) => ({ t: c.t, player: c.player }));
+
+  const kept = mine.length > MAX_CONTACTS_IN_PROMPT ? thinEvenly(mine, MAX_CONTACTS_IN_PROMPT) : mine;
+  const room = Math.max(0, MAX_CONTACTS_IN_PROMPT - kept.length);
+  const others = theirs.length > room ? thinEvenly(theirs, room) : theirs;
+  return [...kept, ...others].sort((a, b) => a.t - b.t);
+}
+
+/** Every nth item, so the survivors span the whole clip rather than its start. */
+function thinEvenly<T>(xs: T[], n: number): T[] {
+  if (n <= 0) return [];
+  if (xs.length <= n) return xs;
+  const step = xs.length / n;
+  const out: T[] = [];
+  for (let i = 0; i < n; i++) out.push(xs[Math.floor(i * step)]);
+  return out;
+}
+
 export function buildAnalystInput(opts: {
   clipSeconds: number;
   subjectPlayerId: string | null;
@@ -116,7 +168,7 @@ export function buildAnalystInput(opts: {
   drillCatalogue: Array<{ slug: string; name: string; skill: string }>;
   knownLimitations?: string[];
 }): AnalystInput {
-  const contacts = contactsFromShots(opts.shots);
+  const contacts = trimContacts(contactsFromShots(opts.shots), opts.subjectPlayerId);
   const limitations = [...(opts.knownLimitations ?? [])];
 
   // Said out loud rather than left for the model to infer from sparse data.

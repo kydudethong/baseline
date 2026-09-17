@@ -52,12 +52,28 @@ export function analystFps(): number {
 }
 
 /**
- * The rate the overlay must be WRITTEN at.
+ * The rate the overlay is WRITTEN at, which is the analyst rate exactly.
  *
- * Never below what the model reads, or the extra samples are duplicates. Never
- * below 10 either: the overlay is also something a person scrubs, and the
- * decimation from 30fps to 10 is what stopped this stage killing long runs.
+ * ONE RATE, NOT THREE. There used to be a floor of 10 here, so the overlay was
+ * rendered at 10fps while the model read it at 8 -- a fifth of every frame
+ * drawn for nobody. The floor was there because this stage once decimated from
+ * the source's 30fps and 10 was what stopped it killing long runs; 8 is fewer
+ * frames than 10, so it clears that bar by a wider margin than the floor did.
+ *
+ * Worth being exact about which rate is which, because there are two and they
+ * are easy to confuse from a progress badge:
+ *
+ *   VISION_FPS (5)   how often the LOCAL computer vision looks at the video --
+ *                    players and skeletons. Costs CPU time, no money. This is
+ *                    the "5 fps" the preparing-the-video line reports.
+ *   ANALYST_FPS (8)  how many frames a second of the finished overlay Gemini
+ *                    is given, and now also how many are drawn. This is the
+ *                    one with a price on it.
+ *
+ * Nothing is lost by drawing fewer than the source has: the overlay is a
+ * rendering of measurements taken at 5fps, so frames beyond that rate carry
+ * interpolation rather than observation either way.
  */
 export function overlayFps(): number {
-  return Math.max(10, analystFps());
+  return analystFps();
 }

@@ -86,6 +86,26 @@ export interface SwingMetrics {
 const MIN_KP_CONF = 0.3;
 /** How far either side of the contact counts as part of the swing. */
 export const SWING_WINDOW_S = 0.5;
+
+/**
+ * The same window, widened for pose sampled at VISION_FPS rather than in a
+ * burst around a known contact.
+ *
+ * WHY IT HAS TO BE WIDER. SWING_WINDOW_S is half a second because that is what
+ * a swing lasts, and it was written when the pipeline burst the pose model to
+ * 15fps around each ball-detected contact -- fifteen samples inside the
+ * window. There are no bursts now, and no ball to burst around: pose runs once
+ * over the whole clip at 5fps, so half a second either side is FIVE samples
+ * and a contact timestamp itself good only to about a tenth of a second.
+ * Several fields need frames before the windup and after the follow-through,
+ * and at the tight window they were landing outside it and coming back null --
+ * a measurement silently absent because of a constant, not because of the
+ * footage.
+ *
+ * 0.9s, not more: a fast exchange puts the next contact about a second later,
+ * and a window that reaches it measures two swings as one.
+ */
+export const SWING_SAMPLE_WINDOW_S = 0.9;
 const WINDUP_S = 0.3;
 const SPEED_WINDOW_S = 0.15;
 

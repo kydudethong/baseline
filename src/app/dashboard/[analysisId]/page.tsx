@@ -539,7 +539,18 @@ function initialFullCourtCorners(calibration: CourtCalibrationRow | null, width:
   };
 }
 
-const REFERENCE_FRAME_COUNT = 3;
+/**
+ * ONE frame, and it is the one where everybody is on screen.
+ *
+ * Three spread evenly through the clip was the old answer, from when the
+ * tracker minted dozens of identities and no single moment contained them all
+ * -- three chances to find yourself under three different colours. With the
+ * roster there are four players and the useful frame is whichever one shows
+ * all four at once. Three of those is the same picture three times, and a
+ * person scrolling past two redundant images to reach the buttons is a page
+ * that asks more of them than it needs to.
+ */
+const REFERENCE_FRAME_COUNT = 1;
 
 /** Player self-tagging — see PlayerTagPicker.tsx. Kept as its own section, and
  * in a dialog once a read exists, because it drives (re)generating the read
@@ -592,7 +603,18 @@ async function TagSection({
   const height = analysis.video?.height ?? 1080;
 
   const debugFrames = phase2Frames.filter((f) => f.debug_storage_path);
-  const sampleIndices = pickSpreadIndices(debugFrames.length, REFERENCE_FRAME_COUNT);
+  // THE FULLEST FRAME, not an arbitrary one. With a single frame to show, which
+  // frame it is stops being cosmetic: one where a player is behind their
+  // partner offers a chip with nothing to point at. Ranked by how many of the
+  // roster are visible, ties broken toward the middle of the clip, where a
+  // point is more likely to be in progress than at either end.
+  const middle = debugFrames.length > 0 ? (debugFrames.length - 1) / 2 : 0;
+  const ranked = debugFrames
+    .map((f, i) => ({ f, i, visible: boxesAtTimestamp(phase2Tracks, f.timestamp_s).length }))
+    .sort((a, b) => b.visible - a.visible || Math.abs(a.i - middle) - Math.abs(b.i - middle));
+  const sampleIndices = ranked.length > 0
+    ? ranked.slice(0, REFERENCE_FRAME_COUNT).map((r) => r.i).sort((a, b) => a - b)
+    : pickSpreadIndices(debugFrames.length, REFERENCE_FRAME_COUNT);
   const referenceFrames = await Promise.all(
     sampleIndices.map(async (i) => {
       const f = debugFrames[i];

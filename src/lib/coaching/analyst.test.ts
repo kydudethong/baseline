@@ -61,16 +61,35 @@ test("a rally outside the clip is caught", () => {
   assert.match(problems[0], /outside a 101.3s clip/);
 });
 
-test("a shot at a time nothing was measured is caught", () => {
+test("a shot nowhere near any measured contact is caught", () => {
   const out = structuredClone(clean);
   out.shots.push({ t: 55.5, rally_idx: 1, player: "player_2", type: "drive", confidence: 0.4 });
-  assert.ok(auditAnalysis(out, input()).some((p) => /not measured contacts/.test(p)));
+  assert.ok(auditAnalysis(out, input()).some((p) => /from any measured contact/.test(p)));
 });
 
-test("contacts left without a shot type are counted", () => {
+test("a shot a frame away from a measured contact is NOT caught", () => {
+  // THE TOLERANCE IS THE POINT. Contacts come from wrist-speed peaks in pose
+  // sampled at 5fps, so a contact between two samples is reported up to a
+  // tenth of a second out before anything else goes wrong, while the model
+  // reads the shot off the video. Demanding they agree to 10ms -- which the
+  // exact-equality version of this check did -- would flag nearly every
+  // correct shot, and an audit that cries wolf is worse than no audit.
+  const near = structuredClone(clean);
+  near.shots = [{ ...clean.shots[0], t: clean.shots[0].t + 0.12 }];
+  assert.deepEqual(
+    auditAnalysis(near, input()).filter((p) => /measured contact/.test(p)),
+    []
+  );
+});
+
+test("a contact the model gave no shot type is NOT a problem", () => {
+  // It used to be, and it was right to be when contacts came from a tracked
+  // ball: a contact with no shot against it meant the model skipped something
+  // it was shown. From wrist speed it usually means a hard fake, a practice
+  // swing between points, or one stroke sampled either side of its peak.
   const out = structuredClone(clean);
   out.shots = [out.shots[0]];
-  assert.ok(auditAnalysis(out, input()).some((p) => /1 measured contact\(s\) were given no shot type/.test(p)));
+  assert.deepEqual(auditAnalysis(out, input()).filter((p) => /no shot type/.test(p)), []);
 });
 
 test("a drill slug that does not exist is caught, in both places it can appear", () => {

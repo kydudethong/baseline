@@ -21,13 +21,53 @@
  * There are no track ids to fragment, so seventy-three is not a number this
  * can produce. The answer is always four.
  *
+ * IT USED TO NEED A COURT, AND THAT WAS A BUG WAITING FOR ITS CAUSE.
+ *
+ * The first version measured everything in court feet and returned NOTHING
+ * when the homography was unavailable, on the reasoning that without geometry
+ * it would be a worse tracker rather than a better one. Then court detection
+ * was removed from the product and corner-marking with it, so the homography
+ * became unavailable on EVERY run: `toCourtFeet` returned null for every box,
+ * the bail-out fired every time, and the caller fell back to the very tracker
+ * this module exists to replace. Seventy-four chips came back. The roster was
+ * shipped, deployed, and dead on arrival, and the log line that said so --
+ * "no court geometry, fell back to tracking" -- was the only evidence.
+ *
+ * The lesson is not "keep the court". It is that the court was never the load-
+ * bearing part. What the roster actually needs is three things:
+ *
+ *   - somewhere to put a player, so two frames can be compared,
+ *   - a length to divide by, so "far" means the same near and far,
+ *   - a line nobody crosses, so identities cannot swap across it.
+ *
+ * A court supplies all three exactly (feet, the foot, the net). An IMAGE
+ * supplies all three approximately, and approximately is enough for an
+ * assignment problem with two candidates per side. So the geometry lives
+ * behind a Plane now, with two implementations:
+ *
+ *   COURT PLANE  units are feet; the net is y = 22; off-court bodies are
+ *                dropped by the lines themselves. Unchanged, and still the
+ *                better one when a homography exists.
+ *
+ *   IMAGE PLANE  units are the player's own box height, so a stride at the far
+ *                baseline costs the same as a stride at the near one despite
+ *                being a third the pixels. The dividing line is LEARNED from
+ *                the clip (see splitAxis), because a camera behind a baseline
+ *                separates the sides in image y and a camera at the side
+ *                separates them in x, and which one is true is a fact about
+ *                the footage that can be measured rather than assumed.
+ *
+ * Neither returns empty. Four slots in, at most four tracks out, always.
+ *
  * THREE THINGS IT DOES, IN ORDER:
  *
- *   1. DROPS ANYONE NOT ON THE COURT. The court is known in feet, so a body
- *      whose feet land outside the lines is not in this game -- the pair
- *      waiting for the next court, somebody walking past with a paddle bag,
- *      the spectators along the fence. They were a large share of those
- *      seventy-three.
+ *   1. DROPS ANYONE NOT ON THE COURT, when the court is known. A body whose
+ *      feet land outside the lines is not in this game -- the pair waiting for
+ *      the next court, somebody walking past with a paddle bag, the spectators
+ *      along the fence. They were a large share of those seventy-three. On the
+ *      image plane there are no lines to test against, so this step does
+ *      nothing and step 3 does the work instead: a spectator has to out-bid a
+ *      real player for a slot, every frame, on motion and appearance both.
  *
  *   2. SPLITS BY SIDE OF THE NET. Nobody crosses the net during a point. A
  *      detection on the far side can never be the near-side player, whatever
@@ -35,7 +75,7 @@
  *      two players at the net are a few pixels apart on screen and twenty feet
  *      apart on the court, which is exactly the case that swaps identities.
  *
- *   3. ASSIGNS EACH FRAME TO FIXED SLOTS. Two slots per side, matched on court
+ *   3. ASSIGNS EACH FRAME TO FIXED SLOTS. Two slots per side, matched on
  *      distance first and appearance second. Appearance is the tiebreaker
  *      rather than the signal, because partners in similar kit are the normal
  *      case and geometry is not fooled by a shirt colour.
@@ -73,6 +113,49 @@ export const ON_COURT_MARGIN_FT = 6;
  */
 export const MAX_SLOT_JUMP_FT = 16;
 
+/**
+ * The same two limits on the image plane, in the player's own body heights.
+ *
+ * A pickleball player is about six feet of box, so sixteen feet is a touch
+ * under three bodies and the numbers below are the court ones restated in the
+ * unit the image can actually measure. They are not a second opinion; they are
+ * the same generosity expressed in the only ruler available when there is no
+ * homography.
+ */
+export const MAX_SLOT_JUMP_BODIES = 2.7;
+const MAX_PREDICT_BODIES = 1.4;
+
+/**
+ * How deep the valley between the two sides has to be before it is believed.
+ *
+ * THREE FIFTHS: the dip between the two humps must be at least 60% lower than
+ * the smaller hump is high. See otsuSplit for what the number measures.
+ *
+ * Chosen by measuring the two cases it has to separate rather than by taste.
+ * With the adaptive binning in otsuSplit, a uniformly scattered set of points
+ * -- no sides at all -- scores 0.20 to 0.27 across sample sizes from 240 to
+ * 4000, which is the noise floor; two clearly separated groups score 1.00; and
+ * the awkward middle cases (players roaming a shared band, four overlapping
+ * paths) score 0.44 to 0.52. Three fifths sits above every one of those and
+ * well below a real separation.
+ *
+ * It errs toward NOT splitting, deliberately. A line that is not there swaps
+ * identities between players on opposite sides of the court, which is a wrong
+ * answer; no line means one pool of four slots, which is a weaker answer. Four
+ * either way -- the count, which is what a user has to act on, never moves.
+ *
+ * THIS REPLACES A THRESHOLD THAT DID NOTHING. The first version scored the
+ * split with Otsu's own between-class variance ratio and demanded 0.35, on the
+ * reasoning that 1 is two points and 0 is a smear. The second half of that is
+ * false, and a test found it: a perfectly UNIFORM spread -- four players
+ * scattered evenly with no sides at all -- scores 0.75 on that ratio, because
+ * cutting any distribution at its middle separates its own two halves. The
+ * measure never goes below about 0.75 for real data, so a floor of 0.35
+ * accepted every clip and the "no usable net line" branch was unreachable. A
+ * check that cannot fail is not a check.
+ */
+export const MIN_SPLIT_QUALITY = 0.6;
+
 /** Court position in feet, plus which side of the net it is on. */
 export interface CourtPoint { x: number; y: number }
 export type Side = "near" | "far";
@@ -84,50 +167,260 @@ export interface RosterOptions {
    * Feet rather than box centre: a court position is where someone is
    * standing, and the centre of a box rises and falls as a player crouches
    * and jumps, which reads as movement they did not make.
+   *
+   * Returning null for everything is now a supported answer, not a failure --
+   * it selects the image plane instead.
    */
   toCourtFeet: (box: BoundingBoxNorm) => CourtPoint | null;
   /** 2 for doubles, 1 for singles. */
   slotsPerSide?: number;
   marginFeet?: number;
+  /**
+   * Frame width / height, so that a foot of sideways movement and a foot of
+   * movement up the screen cost the same on the image plane. Without it a 16:9
+   * frame makes horizontal movement look 1.78x cheaper than vertical, and the
+   * slot that should follow a player running the width of the court instead
+   * hands them to their partner.
+   */
+  imageAspect?: number;
 }
 
 export interface RosterResult {
   tracks: PlayerTrack[];
-  /** What was thrown away and why, for the log line that explains the count. */
+  /** Which geometry was available, for the log line that explains the count. */
+  plane: "court" | "image";
+  /** How the two sides were told apart on the image plane. */
+  split: { axis: "x" | "y"; at: number; quality: number } | null;
   detectionsSeen: number;
   droppedOffCourt: number;
   droppedNoCourt: number;
   droppedSurplus: number;
 }
 
+/**
+ * Somewhere to stand, a length to divide by, and a line nobody crosses.
+ *
+ * Everything the roster needs from geometry, and the only thing that differs
+ * between having a court and not having one.
+ */
+interface Plane {
+  kind: "court" | "image";
+  /** Where this detection is, in plane units, or null if it cannot be placed. */
+  pos(box: BoundingBoxNorm): CourtPoint | null;
+  /** One body length in plane units. Distances are divided by this. */
+  unit(box: BoundingBoxNorm): number;
+  /** False for a body that is not in this game at all. */
+  inPlay(p: CourtPoint): boolean;
+  /** Which group this position belongs to, or null when there is no line. */
+  side(p: CourtPoint): Side | null;
+  /** Both in body units, so they mean the same thing on either plane. */
+  maxJump: number;
+  maxPredict: number;
+}
+
 interface Slot {
   playerId: string;
-  side: Side;
+  group: string;
   points: PlayerTrackPoint[];
   last: CourtPoint | null;
   lastT: number | null;
+  /** Plane units per second. */
   velocity: CourtPoint | null;
+  /** A smoothed body length, so the cost scale survives a bad frame. */
+  unit: number | null;
   appearance: AppearanceSignature | null;
 }
 
 interface Cand {
   box: BoundingBoxNorm;
   confidence: number;
-  court: CourtPoint;
+  pos: CourtPoint;
+  unit: number;
   appearance: AppearanceSignature | null;
+}
+
+/** The court plane: feet, the lines, and the net at y = 22. */
+function courtPlane(
+  toCourtFeet: (box: BoundingBoxNorm) => CourtPoint | null,
+  margin: number,
+): Plane {
+  return {
+    kind: "court",
+    pos: (box) => {
+      const c = toCourtFeet(box);
+      return c && Number.isFinite(c.x) && Number.isFinite(c.y) ? c : null;
+    },
+    // One foot is one foot everywhere on a court, which is the entire point of
+    // having one. The limits below are therefore already in these units.
+    unit: () => 1,
+    inPlay: (p) =>
+      p.x >= -margin && p.x <= COURT_W_FT + margin
+      && p.y >= -margin && p.y <= COURT_L_FT + margin,
+    side: (p) => (p.y < NET_Y_FT ? "near" : "far"),
+    maxJump: MAX_SLOT_JUMP_FT,
+    maxPredict: 8,
+  };
+}
+
+/**
+ * The image plane: body heights, no lines, and a dividing line read off the
+ * clip's own histogram of where people stand.
+ */
+function imagePlane(
+  aspect: number,
+  split: { axis: "x" | "y"; at: number; quality: number } | null,
+): Plane {
+  return {
+    kind: "image",
+    // The feet, for the same reason the court plane uses them: the bottom edge
+    // of a box is where the player is standing, while its centre rises and
+    // falls as they crouch and jump.
+    pos: (box) => ({ x: (box.x + box.width / 2) * aspect, y: box.y + box.height }),
+    // BOX HEIGHT IS THE RULER. It is roughly proportional to 1/distance, which
+    // is exactly the correction perspective needs: the far player's box is a
+    // third the height and their strides cover a third the pixels, so dividing
+    // by it makes the two halves of the court comparable without ever knowing
+    // where the court is. Floored so a degenerate box cannot divide by zero
+    // and make every distance infinite.
+    unit: (box) => Math.max(0.02, box.height),
+    // There are no lines to be outside of. A spectator gets in only by winning
+    // a slot against a real player on motion and appearance, every frame.
+    inPlay: () => true,
+    side: (p) => {
+      if (!split) return null;
+      const v = split.axis === "y" ? p.y : p.x;
+      // Smaller is "far": higher in the frame for a camera behind a baseline,
+      // and an arbitrary but consistent naming for one at the side. Nothing
+      // downstream reads meaning into which group is which -- only that a
+      // detection in one can never be assigned to a slot in the other.
+      return v < split.at ? "far" : "near";
+    },
+    maxJump: MAX_SLOT_JUMP_BODIES,
+    maxPredict: MAX_PREDICT_BODIES,
+  };
+}
+
+/**
+ * Where the net is on one axis, and whether there is a net there at all.
+ *
+ * TWO DIFFERENT JOBS, and the mistake worth recording is that they were once
+ * done by the same number. Otsu's method answers the first well: every
+ * detection in the clip votes with its feet, and the threshold that best
+ * separates the votes is the net. It answers the second not at all -- its
+ * between-class variance ratio is 0.75 for a perfectly uniform spread, so
+ * "there are two groups here" and "there is one smear here" score 0.75 and 1.0
+ * and are not usefully distinguishable by any floor.
+ *
+ * So the threshold comes from Otsu and the CONFIDENCE comes from the shape of
+ * the histogram around it: how deep the valley is, as a fraction of the
+ * shorter of the two humps either side. Two separated groups leave the valley
+ * empty and score near 1; a smear has no valley and scores near 0. That is the
+ * question actually being asked -- does this footage show two groups of
+ * players, or one -- rather than a proxy for it.
+ */
+export function otsuSplit(values: number[]): { at: number; quality: number } | null {
+  if (values.length < 8) return null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (!(max > min)) return null;
+
+  const BINS = 64;
+  const hist = new Array(BINS).fill(0) as number[];
+  for (const v of values) {
+    const b = Math.min(BINS - 1, Math.floor(((v - min) / (max - min)) * BINS));
+    hist[b] += 1;
+  }
+  const n = values.length;
+  const mean = values.reduce((a, v) => a + v, 0) / n;
+  const total = values.reduce((a, v) => a + (v - mean) * (v - mean), 0) / n;
+  if (!(total > 0)) return null;
+
+  const binCentre = (b: number) => min + ((b + 0.5) / BINS) * (max - min);
+  let wB = 0;
+  let sumB = 0;
+  const sumAll = hist.reduce((a, c, b) => a + c * binCentre(b), 0);
+  let bestBetween = -1;
+  const ties: number[] = [];
+  for (let b = 0; b < BINS - 1; b++) {
+    wB += hist[b];
+    sumB += hist[b] * binCentre(b);
+    const wF = n - wB;
+    if (wB === 0 || wF === 0) continue;
+    const mB = sumB / wB;
+    const mF = (sumAll - sumB) / wF;
+    const between = (wB / n) * (wF / n) * (mB - mF) * (mB - mF);
+    if (between > bestBetween * (1 + 1e-9)) { bestBetween = between; ties.length = 0; ties.push(b); }
+    else if (between >= bestBetween * (1 - 1e-9)) ties.push(b);
+  }
+  if (ties.length === 0) return null;
+  // THE MIDDLE OF THE VALLEY, not its near edge. Every empty bin between two
+  // groups scores identically, so the maximum is a plateau and taking the
+  // first element of it puts the line hard against the left-hand group. That
+  // is wrong twice over: the net belongs in the middle of the gap, and a
+  // threshold pressed against one hump leaves no room to measure how deep the
+  // gap is, which read as "no separation" on the cleanest possible input.
+  const cutBin = ties[Math.floor((ties.length - 1) / 2)];
+  const best = { at: min + ((cutBin + 1) / BINS) * (max - min) };
+
+  // NEITHER SIDE MAY BE A SLIVER. Doubles puts roughly half the detections
+  // each side; even a badly occluded far court keeps more than a seventh of
+  // them. A "side" holding less than that is one player who wandered, or the
+  // tail of a single group, and splitting there would strand three players in
+  // two slots while one sat alone in the other two.
+  const below = values.filter((v) => v < best.at).length;
+  if (below < n * 0.15 || n - below < n * 0.15) return null;
+
+  // HOW DEEP IS THE VALLEY. Smoothed over three bins first, because with a few
+  // hundred samples across 64 bins a single empty bin is sampling noise and
+  // would read as a chasm between two halves of one hump.
+  // A COARSER HISTOGRAM FOR THE DENSITY, deliberately. The 64 bins above exist
+  // to place the threshold precisely; asking them how DENSE the data is at a
+  // point is asking a question they are too fine to answer, because a real
+  // hump of a few hundred samples spread over 64 bins has empty bins in it by
+  // chance and every one of them looks like a chasm. Two dozen bins is coarse
+  // enough that a gap has to be real to show up, and needs no smoothing --
+  // which is its own advantage, since a box filter smears a sharp group into
+  // the bin beside it and fills in the very valley being measured.
+  //
+  // AND THE COUNT ADAPTS TO THE SAMPLE SIZE, because "coarse enough" is a
+  // statement about samples per bin, not about bins. At roughly 25 per bin,
+  // Poisson noise is about a fifth of a bin's height, so the shallowest real
+  // valley still stands clear of it. A fixed 24 measured a genuinely uniform
+  // scatter of 240 points at quality 0.67 -- noise alone, read as a net.
+  const CBINS = Math.max(6, Math.min(24, Math.floor(n / 25)));
+  const coarse = new Array(CBINS).fill(0) as number[];
+  for (const v of values) {
+    const b = Math.min(CBINS - 1, Math.floor(((v - min) / (max - min)) * CBINS));
+    coarse[b] += 1;
+  }
+  const cut = Math.min(CBINS - 1, Math.max(0, Math.floor(((best.at - min) / (max - min)) * CBINS)));
+  let peakL = 0, peakLBin = 0;
+  for (let b = 0; b < cut; b++) if (coarse[b] > peakL) { peakL = coarse[b]; peakLBin = b; }
+  let peakR = 0, peakRBin = CBINS - 1;
+  for (let b = cut; b < CBINS; b++) if (coarse[b] > peakR) { peakR = coarse[b]; peakRBin = b; }
+  // The SHORTER hump sets the scale, so a tall near-court hump cannot make a
+  // shallow dip beside it look like a separation.
+  const shorter = Math.min(peakL, peakR);
+  if (shorter <= 0 || peakRBin - peakLBin < 2) return null;
+  let valley = Infinity;
+  for (let b = peakLBin + 1; b < peakRBin; b++) valley = Math.min(valley, coarse[b]);
+  if (!Number.isFinite(valley)) return null;
+  const quality = Math.max(0, Math.min(1, 1 - valley / shorter));
+  return { at: best.at, quality };
 }
 
 /**
  * Four tracks (or two, in singles), one per player, for the whole clip.
  *
- * Returns an EMPTY track list when the court is unknown for most detections.
- * Everything here is built on court geometry, and without it this would be a
- * worse version of the tracker rather than a better one -- so it says it
- * cannot help and the caller falls back.
+ * Never returns an empty list for want of geometry. When there is no court it
+ * measures in body heights on the image plane instead, which is less accurate
+ * and still bounded at four -- and four approximate players beat seventy-four
+ * exact fragments, because the number is the thing the user has to act on.
  */
 export function buildRoster(perFrame: FrameDetectionSet[], opts: RosterOptions): RosterResult {
   const slotsPerSide = Math.max(1, Math.round(opts.slotsPerSide ?? 2));
   const margin = opts.marginFeet ?? ON_COURT_MARGIN_FT;
+  const aspect = opts.imageAspect && opts.imageAspect > 0 ? opts.imageAspect : 16 / 9;
 
   const frames = [...perFrame].sort((a, b) => a.timestampSeconds - b.timestampSeconds);
   let detectionsSeen = 0;
@@ -135,74 +428,115 @@ export function buildRoster(perFrame: FrameDetectionSet[], opts: RosterOptions):
   let droppedNoCourt = 0;
   let droppedSurplus = 0;
 
-  // ---- 1 & 2: on the court, and which side of the net -------------------
-  const byFrame: Array<{ t: number; near: Cand[]; far: Cand[] }> = [];
+  // ---- which plane? ------------------------------------------------------
+  //
+  // A court is better when there is one, so ask first and settle for the image
+  // only when the homography cannot place most of the detections. Half is the
+  // threshold because a court that places some but not most of the bodies is a
+  // court fitted to the wrong frame, and a wrong homography is worse than none.
   for (const f of frames) {
-    const near: Cand[] = [];
-    const far: Cand[] = [];
     for (const d of f.players) {
       detectionsSeen += 1;
-      const court = opts.toCourtFeet(d.boxImageNorm);
-      if (!court || !Number.isFinite(court.x) || !Number.isFinite(court.y)) {
-        droppedNoCourt += 1;
-        continue;
+      const c = opts.toCourtFeet(d.boxImageNorm);
+      if (!c || !Number.isFinite(c.x) || !Number.isFinite(c.y)) droppedNoCourt += 1;
+    }
+  }
+  const haveCourt = detectionsSeen > 0 && detectionsSeen - droppedNoCourt >= detectionsSeen * 0.5;
+
+  let split: { axis: "x" | "y"; at: number; quality: number } | null = null;
+  if (!haveCourt) {
+    // Learn the dividing line before anything is assigned, from the whole clip
+    // rather than one frame: a single frame during a dead ball can have all
+    // four players standing at the net, where no line separates them.
+    droppedNoCourt = 0;
+    const probe = imagePlane(aspect, null);
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (const f of frames) {
+      for (const d of f.players) {
+        const p = probe.pos(d.boxImageNorm)!;
+        xs.push(p.x);
+        ys.push(p.y);
       }
-      if (court.x < -margin || court.x > COURT_W_FT + margin
-          || court.y < -margin || court.y > COURT_L_FT + margin) {
-        droppedOffCourt += 1;
-        continue;
-      }
+    }
+    const byY = otsuSplit(ys);
+    const byX = otsuSplit(xs);
+    const bestAxis = (byY?.quality ?? -1) >= (byX?.quality ?? -1)
+      ? (byY ? { axis: "y" as const, ...byY } : null)
+      : (byX ? { axis: "x" as const, ...byX } : null);
+    split = bestAxis && bestAxis.quality >= MIN_SPLIT_QUALITY ? bestAxis : null;
+  }
+  const plane = haveCourt ? courtPlane(opts.toCourtFeet, margin) : imagePlane(aspect, split);
+
+  // ---- 1 & 2: in play, and which side of the line ------------------------
+  //
+  // GROUPS, not sides, because there may be only one. With a usable dividing
+  // line the two groups are the two halves of the court and nobody crosses;
+  // without one there is a single pool of 2 x slotsPerSide slots, which is
+  // weaker (identities can swap between players who are nowhere near each
+  // other) and still cannot produce a fifth person.
+  const byFrame: Array<{ t: number; groups: Map<string, Cand[]> }> = [];
+  for (const f of frames) {
+    const groups = new Map<string, Cand[]>();
+    for (const d of f.players) {
+      const pos = plane.pos(d.boxImageNorm);
+      if (!pos) { droppedNoCourt += 1; continue; }
+      if (!plane.inPlay(pos)) { droppedOffCourt += 1; continue; }
       const cand: Cand = {
         box: d.boxImageNorm,
         confidence: d.confidence ?? 0,
-        court,
+        pos,
+        unit: plane.unit(d.boxImageNorm),
         appearance: d.appearanceSignature ?? null,
       };
-      (court.y < NET_Y_FT ? near : far).push(cand);
+      const key = plane.side(pos) ?? "all";
+      const list = groups.get(key);
+      if (list) list.push(cand);
+      else groups.set(key, [cand]);
     }
-    byFrame.push({ t: f.timestampSeconds, near, far });
+    byFrame.push({ t: f.timestampSeconds, groups });
   }
 
-  // Court geometry is the whole basis of this. Without it, say so.
-  const placed = detectionsSeen - droppedNoCourt;
-  if (detectionsSeen === 0 || placed < detectionsSeen * 0.5) {
-    return { tracks: [], detectionsSeen, droppedOffCourt, droppedNoCourt, droppedSurplus };
-  }
-
-  // ---- 3: fixed slots, assigned per frame -------------------------------
+  // ---- 3: fixed slots, assigned per frame --------------------------------
+  // A court always has two halves; the image plane has them only when the
+  // split was believed. The key "all" is the pool every detection lands in
+  // when there is no line, and matches what plane.side() returns as null.
+  const hasSides = plane.kind === "court" || split !== null;
+  const groupKeys: string[] = hasSides ? ["near", "far"] : ["all"];
+  const perGroup = hasSides ? slotsPerSide : slotsPerSide * 2;
   const slots: Slot[] = [];
   let n = 1;
-  for (const side of ["near", "far"] as const) {
-    for (let i = 0; i < slotsPerSide; i++) {
+  for (const group of groupKeys) {
+    for (let i = 0; i < perGroup; i++) {
       slots.push({
-        playerId: `player_${n++}`, side,
-        points: [], last: null, lastT: null, velocity: null, appearance: null,
+        playerId: `player_${n++}`, group,
+        points: [], last: null, lastT: null, velocity: null, unit: null, appearance: null,
       });
     }
   }
 
   for (const frame of byFrame) {
-    for (const side of ["near", "far"] as const) {
-      const mine = slots.filter((s) => s.side === side);
-      const cands = [...(side === "near" ? frame.near : frame.far)]
+    for (const group of groupKeys) {
+      const mine = slots.filter((s) => s.group === group);
+      const cands = [...(frame.groups.get(group) ?? [])]
         // Most confident first, so when there are more bodies than slots the
         // ones dropped are the marginal detections rather than arbitrary ones.
         .sort((a, b) => b.confidence - a.confidence);
       if (cands.length === 0) continue;
 
-      // Seed: the first frame with people on this side sets the slots, in
-      // court order left to right so the numbering is stable and meaningful
-      // rather than whatever order the detector happened to emit.
+      // Seed: the first frame with people in this group sets the slots, in
+      // left-to-right order so the numbering is stable and meaningful rather
+      // than whatever order the detector happened to emit.
       const unseeded = mine.filter((s) => s.last === null);
       if (unseeded.length === mine.length) {
-        const seeds = [...cands].slice(0, mine.length).sort((a, b) => a.court.x - b.court.x);
-        seeds.forEach((c, i) => place(mine[i], c, frame.t));
+        const seeds = [...cands].slice(0, mine.length).sort((a, b) => a.pos.x - b.pos.x);
+        seeds.forEach((c, i) => place(mine[i], c, frame.t, plane.kind));
         droppedSurplus += Math.max(0, cands.length - mine.length);
         continue;
       }
 
-      const taken = assign(mine, cands, frame.t);
-      for (const [slotIdx, candIdx] of taken) place(mine[slotIdx], cands[candIdx], frame.t);
+      const taken = assign(mine, cands, frame.t, plane);
+      for (const [slotIdx, candIdx] of taken) place(mine[slotIdx], cands[candIdx], frame.t, plane.kind);
       droppedSurplus += Math.max(0, cands.length - taken.length);
     }
   }
@@ -211,16 +545,23 @@ export function buildRoster(perFrame: FrameDetectionSet[], opts: RosterOptions):
     .filter((s) => s.points.length > 0)
     .map((s) => ({ playerId: s.playerId, points: s.points }));
 
-  return { tracks, detectionsSeen, droppedOffCourt, droppedNoCourt, droppedSurplus };
+  return {
+    tracks, plane: plane.kind, split,
+    detectionsSeen, droppedOffCourt, droppedNoCourt, droppedSurplus,
+  };
 }
 
-function place(slot: Slot, c: Cand, t: number): void {
+function place(slot: Slot, c: Cand, t: number, kind: "court" | "image"): void {
   if (slot.last !== null && slot.lastT !== null && t > slot.lastT) {
     const dt = t - slot.lastT;
-    slot.velocity = { x: (c.court.x - slot.last.x) / dt, y: (c.court.y - slot.last.y) / dt };
+    slot.velocity = { x: (c.pos.x - slot.last.x) / dt, y: (c.pos.y - slot.last.y) / dt };
   }
-  slot.last = c.court;
+  slot.last = c.pos;
   slot.lastT = t;
+  // A slow average on the ruler too, for the same reason as the appearance
+  // below: one frame where a player is half behind their partner halves their
+  // box height, and a halved ruler doubles every distance measured against it.
+  slot.unit = slot.unit === null ? c.unit : slot.unit * 0.8 + c.unit * 0.2;
   if (c.appearance) {
     // A slow average, so one frame where a player is half behind their partner
     // does not rewrite what they look like.
@@ -232,12 +573,15 @@ function place(slot: Slot, c: Cand, t: number): void {
     timestampSeconds: t,
     boxImageNorm: c.box,
     confidence: c.confidence,
-    courtPosition: { x: c.court.x, y: c.court.y },
+    // Only the court plane produces court coordinates. On the image plane
+    // these are body heights on a screen, which is not a place on a court, and
+    // handing them to anything that measures in feet would be a fabrication.
+    courtPosition: kind === "court" ? { x: c.pos.x, y: c.pos.y } : null,
   });
 }
 
 /**
- * The best pairing of slots to detections on one side of the net.
+ * The best pairing of slots to detections in one group.
  *
  * Brute force over permutations, which is fine and will stay fine: there are
  * at most two slots a side, so at most two orderings to compare. A greedy
@@ -245,7 +589,7 @@ function place(slot: Slot, c: Cand, t: number): void {
  * two players converging at the kitchen, where the greedy choice takes the
  * globally worse pairing and swaps their identities for the rest of the point.
  */
-function assign(slots: Slot[], cands: Cand[], t: number): Array<[number, number]> {
+function assign(slots: Slot[], cands: Cand[], t: number, plane: Plane): Array<[number, number]> {
   const k = Math.min(slots.length, cands.length);
   if (k === 0) return [];
 
@@ -262,7 +606,7 @@ function assign(slots: Slot[], cands: Cand[], t: number): Array<[number, number]
         const pairs: Array<[number, number]> = [];
         let ok = true;
         for (let i = 0; i < k; i++) {
-          const c = cost1(slots[slotCombo[i]], cands[perm[i]], t);
+          const c = cost1(slots[slotCombo[i]], cands[perm[i]], t, plane);
           if (c === null) { ok = false; break; }
           cost += c;
           pairs.push([slotCombo[i], perm[i]]);
@@ -291,45 +635,34 @@ function assign(slots: Slot[], cands: Cand[], t: number): Array<[number, number]
  */
 const MAX_PREDICT_S = 1.0;
 
-/**
- * How far extrapolation is allowed to move a slot, in feet.
- *
- * DEFENSIVE, NOT LOAD-BEARING, and the distinction is worth recording because
- * the first version of this comment claimed otherwise. A 1,500-frame
- * simulation of four jittering players with 25% dropout left the slots holding
- * 2, 1, 18 and 9 points, and the cause looked like runaway extrapolation: a
- * jittery velocity predicts a player somewhere they never were, nothing
- * matches, the slot is not updated, the gap grows, the prediction worsens.
- * Plausible, and wrong. Reverting this clamp and the feasibility rule below
- * changes that simulation by nothing at all; reverting the slot-subset fix in
- * assign() reproduces the whole failure. That bug was the cause.
- *
- * Kept anyway: a velocity measured over one 0.2s sample extrapolated across a
- * multi-second gap is not evidence, and eight feet is about as far as a
- * pickleball player travels in the time this is willing to predict over.
- */
-const MAX_PREDICT_FT = 8;
-
-function cost1(slot: Slot, c: Cand, t: number): number | null {
+function cost1(slot: Slot, c: Cand, t: number, plane: Plane): number | null {
   if (slot.last === null) return 50; // an unseeded slot takes anything, at a price
+  // EVERY DISTANCE BELOW IS IN BODY LENGTHS, which is what lets one set of
+  // limits govern both planes: on a court a body length is defined as one foot
+  // so the numbers are the old ones unchanged, and on the image it is the
+  // player's own box height so the far court is judged as generously as the
+  // near one despite being a third the pixels.
+  const unit = Math.max(1e-6, ((slot.unit ?? c.unit) + c.unit) / 2);
   const dt = slot.lastT === null ? 0 : Math.min(MAX_PREDICT_S, Math.max(0, t - slot.lastT));
   let predicted = slot.last;
   if (slot.velocity) {
     const dx = slot.velocity.x * dt, dy = slot.velocity.y * dt;
-    const mag = Math.hypot(dx, dy);
-    const k = mag > MAX_PREDICT_FT ? MAX_PREDICT_FT / mag : 1;
+    const mag = Math.hypot(dx, dy) / unit;
+    const k = mag > plane.maxPredict ? plane.maxPredict / mag : 1;
     predicted = { x: slot.last.x + dx * k, y: slot.last.y + dy * k };
   }
-  const d = Math.hypot(c.court.x - predicted.x, c.court.y - predicted.y);
+  const d = Math.hypot(c.pos.x - predicted.x, c.pos.y - predicted.y) / unit;
   // FEASIBILITY IS JUDGED AGAINST THE LAST KNOWN POSITION, ranking against the
   // prediction. A prediction is a guess and must never be able to rule a real
   // detection out; where the player actually was is a fact.
-  const fromLast = Math.hypot(c.court.x - slot.last.x, c.court.y - slot.last.y);
-  if (Math.min(d, fromLast) > MAX_SLOT_JUMP_FT) return null;
-  // Appearance is worth a couple of feet, no more. It breaks ties between two
-  // players standing close together; it never overrules where they are.
+  const fromLast = Math.hypot(c.pos.x - slot.last.x, c.pos.y - slot.last.y) / unit;
+  if (Math.min(d, fromLast) > plane.maxJump) return null;
+  // Appearance is worth a couple of body lengths, no more. It breaks ties
+  // between two players standing close together; it never overrules where they
+  // are. Half a body on the image plane, where the same weight in court feet
+  // would be three whole players' width.
   const look = slot.appearance && c.appearance
-    ? appearanceDistance(slot.appearance, c.appearance) * 3
+    ? appearanceDistance(slot.appearance, c.appearance) * (plane.kind === "court" ? 3 : 0.5)
     : 0;
   return d + look;
 }

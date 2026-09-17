@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildRoster, appearanceDistance, COURT_W_FT, COURT_L_FT } from "./roster";
+import { buildRoster, appearanceDistance, otsuSplit, COURT_W_FT, COURT_L_FT, MIN_SPLIT_QUALITY } from "./roster";
 import type { BoundingBoxNorm, FrameDetectionSet } from "./phase2-types";
 
 /**
@@ -164,10 +164,307 @@ test("a fifth body on one side does not become a fifth player", () => {
   assert.ok(got.droppedSurplus > 0, "the extra body was not reported as surplus");
 });
 
-test("no court means no roster, rather than a worse tracker", () => {
-  const rows = [{ t: 0, people: [at(5, 14), at(15, 14)] }, { t: 0.2, people: [at(5, 14)] }];
-  const got = buildRoster(frames(rows), { toCourtFeet: () => null });
-  assert.deepEqual(got.tracks, [], "should refuse rather than guess without court geometry");
+/* ---------------------------------------------------------------------- *
+ * NO COURT AT ALL.
+ *
+ * These are the regression tests for the bug that made the whole module
+ * pointless in production. buildRoster used to return an empty list when the
+ * homography could not place the detections, and the caller fell back to the
+ * tracker. Court detection was then removed from the product, so that branch
+ * fired on EVERY run: the roster shipped, deployed, and the tag page still
+ * offered seventy-four chips. The unit tests all passed, because every one of
+ * them supplied a court.
+ *
+ * So: the same scenarios, with toCourtFeet returning null exactly as it does
+ * in production now.
+ * ---------------------------------------------------------------------- */
+
+/** A reproducible pseudo-random source, so a failure is the same failure twice. */
+function lcg(seed: number): () => number {
+  let x = seed;
+  return () => { x = (x * 1103515245 + 12345) % 2147483648; return x / 2147483648; };
+}
+
+const noCourt = () => null;
+
+/** Foot position in the image, which is what the image plane tracks. */
+const footOf = (p: { boxImageNorm: BoundingBoxNorm }) => ({
+  x: p.boxImageNorm.x + p.boxImageNorm.width / 2,
+  y: p.boxImageNorm.y + p.boxImageNorm.height,
+});
+
+test("no court still produces exactly four players", () => {
+  const rows = [];
+  for (let i = 0; i < 20; i++) {
+    const t = i * 0.2;
+    rows.push({ t, people: [
+      at(5 + Math.sin(i) * 0.5, 14), at(15 + Math.cos(i) * 0.5, 14),
+      at(5 + Math.cos(i) * 0.5, 30), at(15 + Math.sin(i) * 0.5, 30),
+    ]});
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet: noCourt });
+  assert.equal(got.plane, "image");
+  assert.equal(got.tracks.length, 4, `got ${got.tracks.length} tracks without a court`);
+  for (const tr of got.tracks) assert.equal(tr.points.length, 20, `${tr.playerId} has gaps`);
+});
+
+test("no court, and an occlusion still does not mint a fifth identity", () => {
+  // THE SEVENTY-FOUR CASE, in the configuration production actually runs.
+  const rows = [];
+  for (let i = 0; i < 30; i++) {
+    const people = [at(5, 14), at(15, 14), at(15, 30)];
+    if (i < 10 || i >= 20) people.push(at(5, 30));
+    rows.push({ t: i * 0.2, people });
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet: noCourt });
+  assert.equal(got.tracks.length, 4, `got ${got.tracks.length} tracks after an occlusion`);
+  const rejoined = got.tracks.find((tr) => tr.points.length === 20);
+  assert.ok(rejoined, "the player who left and came back did not rejoin their own slot");
+});
+
+test("no court, and the dividing line is still not crossed", () => {
+  // FOUR STATIC POINTS WOULD PROVE NOTHING, and the first version of this test
+  // used them: players parked at (4,12) (16,12) (4,32) (16,32) are exactly as
+  // bimodal across the image as they are down it, so which axis wins is a
+  // coin toss and the assertion was testing the rounding in Otsu's histogram.
+  // It duly failed, which is how the binning bug in otsuSplit was found.
+  //
+  // Real footage does not look like that. Players ROAM their half from
+  // sideline to sideline, so from behind a baseline the x positions smear into
+  // one broad band while y stays in two tight ones -- and that asymmetry, not
+  // a tie, is what tells the two halves apart.
+  const rnd = lcg(7);
+  const rows = [];
+  for (let i = 0; i < 60; i++) {
+    // Continuous positions, not twenty evenly-spaced ones. Discrete sweeps
+    // leave empty bins between the values they land on, and an empty bin reads
+    // as a valley -- the second version of this test "passed" the x axis at
+    // quality 1.0 on a distribution that was uniform by construction.
+    rows.push({ t: i * 0.2, people: [
+      at(3 + rnd() * 14, 11 + rnd() * 4), at(3 + rnd() * 14, 11 + rnd() * 4),
+      at(3 + rnd() * 14, 29 + rnd() * 4), at(3 + rnd() * 14, 29 + rnd() * 4),
+    ]});
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet: noCourt });
+  assert.ok(got.split, "no dividing line was found in obviously two-sided footage");
+  assert.equal(got.split!.axis, "y", `split on ${got.split!.axis}, but this camera is behind a baseline`);
+  for (const tr of got.tracks) {
+    const sides = new Set(tr.points.map((p) => (footOf(p).y < got.split!.at ? "a" : "b")));
+    assert.equal(sides.size, 1, `${tr.playerId} was tracked across the dividing line`);
+  }
+});
+
+test("no court, and two crossing players still do not swap", () => {
+  const rows = [];
+  for (let i = 0; i < 21; i++) {
+    const f = i / 20;
+    const left = at(4 + f * 12, 14);
+    const right = at(16 - f * 12, 14);
+    // Shuffled, for the same reason as the court version: with a stable order
+    // the first pairing tried is the right one and a greedy assignment passes.
+    const near = i % 2 === 0 ? [left, right] : [right, left];
+    rows.push({ t: i * 0.2, people: [...near, at(5, 30), at(15, 30)] });
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet: noCourt });
+  assert.equal(got.tracks.length, 4);
+  const crossing = got.tracks.filter((tr) => Math.abs(
+    footOf(tr.points[tr.points.length - 1]).x - footOf(tr.points[0]).x
+  ) > 0.2);
+  assert.equal(crossing.length, 2, "the two players who crossed did not both arrive on the far side");
+  for (const tr of crossing) {
+    for (let i = 1; i < tr.points.length; i++) {
+      const jump = Math.abs(footOf(tr.points[i]).x - footOf(tr.points[i - 1]).x);
+      assert.ok(jump < 0.15,
+        `${tr.playerId} jumped ${jump.toFixed(3)} of a frame width between frames — identities swapped`);
+    }
+  }
+});
+
+test("a camera at the side splits on x, not on y", () => {
+  // The same four players, filmed from the sideline: the net now runs up the
+  // image rather than across it. Nothing may assume which axis it is.
+  const sideOn = (xFt: number, yFt: number) => at(yFt * (COURT_W_FT / COURT_L_FT), xFt * (COURT_L_FT / COURT_W_FT));
+  const rnd = lcg(11);
+  const rows = [];
+  for (let i = 0; i < 60; i++) {
+    rows.push({ t: i * 0.2, people: [
+      sideOn(3 + rnd() * 14, 11 + rnd() * 4), sideOn(3 + rnd() * 14, 11 + rnd() * 4),
+      sideOn(3 + rnd() * 14, 29 + rnd() * 4), sideOn(3 + rnd() * 14, 29 + rnd() * 4),
+    ]});
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet: noCourt });
+  assert.ok(got.split, "no dividing line found in side-on footage");
+  assert.equal(got.split!.axis, "x", "a side-on camera separates the halves across the image, not down it");
+  assert.equal(got.tracks.length, 4);
+});
+
+test("when the two sides cannot be told apart, four slots — never five", () => {
+  // A camera down at court level, where the far players are hidden behind the
+  // near ones: everybody occupies the same band of the image and their paths
+  // overlap on BOTH axes, so neither histogram has a valley in it. Four static
+  // points would not do -- four distinct x values are perfectly bimodal and
+  // Otsu would rightly find a line between them. The failure this guards is
+  // inventing a net where the footage genuinely has no separation.
+  const rnd = lcg(3);
+  const rows = [];
+  for (let i = 0; i < 60; i++) {
+    rows.push({ t: i * 0.2, people: [0, 1, 2, 3].map(() => at(3 + rnd() * 14, 18 + rnd() * 8)) });
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet: noCourt });
+  assert.equal(got.split, null, "a line was invented where the histogram has no valley");
+  assert.ok(got.tracks.length <= 4, `got ${got.tracks.length} tracks from one undivided pool`);
+  assert.ok(got.tracks.length >= 1, "the undivided pool produced nothing at all");
+});
+
+test("otsu finds the valley between two groups, and reports a smear as one", () => {
+  const twoGroups = [...Array(30)].map((_, i) => 0.2 + (i % 5) * 0.01)
+    .concat([...Array(30)].map((_, i) => 0.8 + (i % 5) * 0.01));
+  const split = otsuSplit(twoGroups);
+  assert.ok(split, "no split found in two obviously separated groups");
+  assert.ok(split!.at > 0.24 && split!.at <= 0.8, `threshold ${split!.at} is not between the groups`);
+  assert.ok(split!.quality > MIN_SPLIT_QUALITY, `quality ${split!.quality} too low for two clear groups`);
+
+  // THE CASE THE FIRST SCORING MISSED ENTIRELY. Otsu's between-class variance
+  // ratio is 0.75 for a uniform spread, not 0 -- so the original floor of 0.35
+  // accepted a net line in footage that has no sides in it at all, and the
+  // fallback branch could never run. This assertion is the one that failed.
+  const smear = [...Array(240)].map((_, i) => i / 240);
+  const flat = otsuSplit(smear);
+  assert.ok(flat === null || flat.quality < MIN_SPLIT_QUALITY,
+    `a uniform spread reported quality ${flat?.quality} — it would invent a net line`);
+
+  // And a hump with a shallow dent in it is still one hump.
+  const dented = [...Array(200)].map((_, i) => {
+    const x = i / 200;
+    return 0.5 + Math.sin(x * Math.PI * 2) * 0.05 + x * 0.3;
+  });
+  const d = otsuSplit(dented);
+  assert.ok(d === null || d.quality < MIN_SPLIT_QUALITY,
+    `a single dented hump reported quality ${d?.quality}`);
+});
+
+test("distances scale with the player, so the far court is judged as fairly as the near", () => {
+  // Two players at the SAME image position-ish but very different sizes: one
+  // close to the camera, one far away. The far player's box is a third the
+  // height, so their strides cover a third the pixels. Measured in pixels the
+  // far player looks stationary and the near one looks frantic; measured in
+  // body heights they are doing the same thing, which is the only reading that
+  // lets one jump limit govern both halves of the court.
+  const person = (x: number, y: number, h: number) => ({
+    boxImageNorm: { x, y: y - h, width: h * 0.45, height: h },
+    confidence: 0.9,
+    appearanceSignature: null,
+  });
+  const rows = [];
+  for (let i = 0; i < 16; i++) {
+    const near = person(0.2 + i * 0.02, 0.9, 0.3);   // big box, big strides
+    const far = person(0.45 + i * 0.0067, 0.35, 0.1); // small box, small strides
+    rows.push({ t: i * 0.2, people: [near, far, person(0.7, 0.88, 0.3), person(0.6, 0.34, 0.1)] });
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet: noCourt });
+  assert.equal(got.tracks.length, 4);
+  for (const tr of got.tracks) {
+    assert.equal(tr.points.length, 16, `${tr.playerId} lost frames — a size difference broke the match`);
+  }
+});
+
+test("a near player's stride is not judged by a far player's ruler", () => {
+  // WHAT THE BODY-HEIGHT UNIT IS FOR, stated as a thing that breaks without
+  // it. A player close to the camera fills a third of the frame and covers a
+  // tenth of its width in a lunge; a player at the far baseline fills a
+  // twelfth and covers a fiftieth doing the same thing. One jump limit has to
+  // govern both, so distances are measured in the player's OWN box heights.
+  // Hardcode the ruler to the far player's size and the near player's ordinary
+  // lunge becomes a teleport, and their slot drops them mid-rally.
+  const person = (x: number, y: number, h: number) => ({
+    boxImageNorm: { x, y: y - h, width: h * 0.4, height: h },
+    confidence: 0.9,
+    appearanceSignature: null,
+  });
+  const rows = [];
+  for (let i = 0; i < 16; i++) {
+    const lunge = (i % 2) * 0.1;                  // 10% of frame width, every other frame
+    rows.push({ t: i * 0.2, people: [
+      person(0.15 + lunge, 0.95, 0.4), person(0.6 + lunge, 0.95, 0.4),  // near, big boxes
+      person(0.3, 0.32, 0.08), person(0.55, 0.32, 0.08),                // far, small boxes
+    ]});
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet: noCourt });
+  assert.equal(got.tracks.length, 4);
+  for (const tr of got.tracks) {
+    assert.equal(tr.points.length, 16,
+      `${tr.playerId} kept only ${tr.points.length} of 16 frames — a stride was measured against the wrong ruler`);
+  }
+});
+
+test("geometry outranks a shirt colour, at the scale the bodies actually are", () => {
+  // Appearance is added to the cost unscaled while distance is divided by the
+  // body height, so the ruler sets the BALANCE between them as well as the
+  // reach. Too large a ruler shrinks every distance toward zero and colour
+  // starts deciding who is who -- which is the one thing the comment in
+  // cost1() promises it will never do.
+  //
+  // Two players a body apart at the net, in clearly different kit. On one
+  // frame the appearance readings swap (a turn, a shadow, a flare off a white
+  // shirt). Geometry must hold them in place.
+  const kit = (h: number) => ({ h, s: 0.9, v: 0.6 });
+  const person = (x: number, look: { h: number; s: number; v: number }) => ({
+    boxImageNorm: { x, y: 0.75, width: 0.06, height: 0.15 },
+    confidence: 0.9,
+    appearanceSignature: look,
+  });
+  // 0.15 apart in raw x is about one body height once the frame's aspect is
+  // applied -- close enough that a mis-scaled cost flips the pairing.
+  const rows = [];
+  for (let i = 0; i < 14; i++) {
+    const flicker = i === 7;
+    rows.push({ t: i * 0.2, people: [
+      person(0.40, kit(flicker ? 220 : 0)), person(0.55, kit(flicker ? 0 : 220)),
+      person(0.30, kit(90)), person(0.60, kit(300)),
+    ].map((p, k) => ({ ...p, boxImageNorm: { ...p.boxImageNorm, y: k < 2 ? 0.75 : 0.25 } })) });
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet: noCourt });
+  const lower = got.tracks.filter((tr) => tr.points[0].boxImageNorm.y > 0.5);
+  assert.equal(lower.length, 2);
+  for (const tr of lower) {
+    const xs = tr.points.map((p) => p.boxImageNorm.x);
+    assert.equal(new Set(xs).size, 1,
+      `${tr.playerId} moved between x=${[...new Set(xs)].join(" and ")} — a colour flicker swapped two stationary players`);
+  }
+});
+
+test("a sideways jump too far to be real is refused, in the frame's own proportions", () => {
+  // A 16:9 frame is nearly twice as wide as it is tall, so a tenth of the
+  // WIDTH is a much bigger step than a tenth of the HEIGHT. Without correcting
+  // for that, horizontal movement costs 1.78x too little and a slot reaches
+  // across the court for somebody who is not its player. Here the lone
+  // detection is four feet from the left-hand slot: three body heights once
+  // the aspect is applied, which is past the limit, and a comfortable 1.7
+  // without it, which is not.
+  const rows = [];
+  for (let i = 0; i < 8; i++) {
+    rows.push({ t: i * 0.2, people: [at(3, 14), at(17, 14), at(5, 30), at(15, 30)] });
+  }
+  // Then only one body on the near side, four feet from where the left slot
+  // last saw its player and nowhere near the right one.
+  rows.push({ t: 1.6, people: [at(7, 14), at(5, 30), at(15, 30)] });
+  const got = buildRoster(frames(rows), { toCourtFeet: noCourt });
+  const leftSlot = got.tracks.find((tr) => Math.abs(tr.points[0].boxImageNorm.x - (3 / COURT_W_FT - 0.03)) < 1e-9);
+  assert.ok(leftSlot, "the left-hand near slot was never seeded");
+  assert.equal(leftSlot!.points.length, 8,
+    "the left slot followed a body four feet away — the jump limit is being measured in the wrong proportions");
+  assert.ok(got.droppedSurplus > 0, "the unmatched body was not reported as surplus");
+});
+
+test("an image-plane track carries no court position", () => {
+  // Body heights on a screen are not a place on a court. Handing them to
+  // anything that measures in feet would be a fabrication with units on it.
+  const rows = [];
+  for (let i = 0; i < 12; i++) rows.push({ t: i * 0.2, people: [at(5, 14), at(15, 14), at(5, 30), at(15, 30)] });
+  const got = buildRoster(frames(rows), { toCourtFeet: noCourt });
+  for (const tr of got.tracks) {
+    for (const p of tr.points) assert.equal(p.courtPosition, null);
+  }
 });
 
 test("appearance breaks ties but hue is ignored on black kit", () => {

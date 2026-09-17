@@ -324,7 +324,7 @@ WHAT THE MEASUREMENTS ARE
 
 ${contacts === 0
   ? "NO contacts were measured for this clip, and that is the normal case: nothing in this pipeline\ntracks the ball. Every contact in your answer comes from you watching the footage. Do not treat\nthe empty list as evidence that nothing was hit."
-  : `${contacts} contacts, ${withBody} of them with body measurements. A contact is a moment the\nball visibly changed direction against a player — a timed observation, not a guess.`}
+  : `${contacts} contacts, ${withBody} of them with body measurements. A contact is a moment a\nplayer's hand accelerated sharply — a paddle swing seen in their own arm, not in the ball, which\nnothing here tracks. The TIME is approximate (to about a tenth of a second) and a hard fake or a\npractice swing between points can appear in the list. The BODY MEASUREMENTS at each one are exact.\nUse the list for the angles; use the footage for what the shot actually was.`}
 Positions are in court FEET: x runs 0-20 across, y runs away from the
 camera with 0 at the near baseline, 22 at the net, 44 at the far baseline. The
 kitchen lines are at y=15 and y=29. Body measurements are in the player's own
@@ -461,6 +461,20 @@ const NOT_OUTSIDE_TECHNIQUE = [
  * What a program can check. Not "is the coaching good" — that needs a person —
  * but "is it talking about this clip". Returns problems, empty when clean.
  */
+/**
+ * How far a shot the model read off the video may sit from the nearest
+ * measured contact before it counts as unsupported.
+ *
+ * A QUARTER OF A SECOND, and every part of that number is a sampling fact
+ * rather than a preference. Pose runs at VISION_FPS, so wrist speed is sampled
+ * every 200ms and the peak can only ever land on one of those samples -- a
+ * contact halfway between two is reported up to 100ms early or late before any
+ * other error. The model reading the video has its own tenth of a second of
+ * slack. Tighter than this and correct shots are flagged; looser and a genuine
+ * invention half a second from anything real slips through.
+ */
+const SHOT_CONTACT_TOLERANCE_S = 0.25;
+
 export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[] {
   const problems: string[] = [];
 
@@ -472,27 +486,41 @@ export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[]
     }
   }
 
-  // Shots must land on measured contacts -- ONLY when there are measured
-  // contacts to land on.
+  // Shots should land NEAR a measured contact -- and "near" is doing the work.
   //
-  // This check was written when the ball detector found contacts and the model
-  // only had to label them: a shot at a time nothing observed was invented.
-  // With ball tracking removed there are no measured contacts at all, so the
-  // check inverted itself -- every shot the model correctly FOUND was flagged
-  // as invented, and the "contacts given no shot type" count became the size
-  // of an empty set. Auditing a claim against evidence that no longer exists
-  // does not make the claim wrong; it makes the audit meaningless, and a
-  // grounding report full of false alarms is worse than none because it
-  // trains you to ignore real ones.
-  const times = new Set(input.contacts.map((c) => Math.round(c.t * 100)));
-  if (times.size > 0) {
-    const invented = (out.shots ?? []).filter((s) => !times.has(Math.round(s.t * 100)));
+  // THE HISTORY MATTERS, because this check has now been wrong in both
+  // directions. It was written when the ball detector found contacts and the
+  // model only had to label them: a shot at a time nothing observed was
+  // invented, and exact equality to 10ms was the right test because both sides
+  // were the same timestamps. Then ball tracking was removed, there were no
+  // contacts at all, and the check inverted -- every shot the model correctly
+  // FOUND was flagged as invented and the "contacts given no shot type" count
+  // became the size of an empty set.
+  //
+  // Contacts exist again, from wrist-speed peaks in the pose stream, and
+  // restoring the old test verbatim would have been the third wrong version.
+  // The two sides are no longer the same timestamps: the model reads a shot
+  // off the video, while a wrist peak is sampled at VISION_FPS and is good to
+  // roughly a tenth of a second. Exact equality would flag almost every real
+  // shot. So the test is proximity, at a tolerance that matches what the
+  // measurement can actually resolve.
+  //
+  // AND THE SECOND CHECK IS GONE FOR GOOD. A contact with no shot against it
+  // used to mean the model skipped a ball it was shown. From wrist speed it
+  // usually means a hard fake, a practice swing between points, or one stroke
+  // sampled either side of its peak -- all expected, none a fault of the
+  // model's. Reporting them as problems would train a reader to ignore this
+  // list, which is the one thing a grounding report must never do.
+  const contactTimes = input.contacts.map((c) => c.t).sort((a, b) => a - b);
+  if (contactTimes.length > 0) {
+    const invented = (out.shots ?? []).filter(
+      (s) => !contactTimes.some((t) => Math.abs(t - s.t) <= SHOT_CONTACT_TOLERANCE_S)
+    );
     if (invented.length) {
-      problems.push(`${invented.length} shot(s) at times that are not measured contacts (e.g. ${invented[0].t}s)`);
-    }
-    const labelled = (out.shots ?? []).length - invented.length;
-    if (labelled < times.size) {
-      problems.push(`${times.size - labelled} measured contact(s) were given no shot type`);
+      problems.push(
+        `${invented.length} shot(s) more than ${SHOT_CONTACT_TOLERANCE_S}s from any measured `
+        + `contact (e.g. ${invented[0].t}s)`
+      );
     }
   }
 

@@ -3,12 +3,15 @@ import { analyzeMovementWithCalibration } from "./provider-v2";
 import { detectFootworkFoundation } from "./events";
 import { computeAppearanceSignaturesViaPython } from "./cv-scripts";
 import type { BallDetection, BallTrackPoint, BallTrackStats } from "./ball";
-import { courtFrameFor, sideOf as courtSideOf, type Shot } from "./shots";
+import { courtFrameFor, type Shot } from "./shots";
+import { detectSwingEvents, swingsToUnknownShotEvents } from "./swing-events";
+import { measureSwing, SWING_SAMPLE_WINDOW_S } from "./swing";
+import { overlayFps } from "@/lib/coaching/read-rate";
 import type { AnalysisStage } from "@/lib/db/types";
 import { StageTimer } from "@/lib/analysis/stage-timer";
 import { calibrationFromSetup, isPlausibleCourtQuad, playerGatePolygonPx, pointInPolygon, transformToCourtCoordinates } from "./court";
 import { buildRoster } from "./roster";
-import type { ClusteredRally } from "./rallies";
+import { clusterRalliesFromHits, type ClusteredRally } from "./rallies";
 import { netBandImagePx, netLineImagePx, type NetCrossing } from "./rallies-net";
 import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
 import { smoothPoseFrames } from "./pose-smooth";
@@ -179,7 +182,16 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   const provider = getPhase2VisionProvider(input.frameWidthPx, input.frameHeightPx);
   const knownLimitations: string[] = [];
   const t0 = Date.now();
-  stage("preparing", `provider=${provider.name} · ${input.frames.length} frames at ${input.visionFps} fps · ${input.frameWidthPx}x${input.frameHeightPx}`);
+  // BOTH RATES, NAMED. This line used to read "4121 frames at 5 fps" and be
+  // the only number on screen, which reads as "the whole analysis runs at 5fps"
+  // -- so a perfectly reasonable question is why it is not 8, the rate that is
+  // configured and paid for. They are different stages: 5fps is how often the
+  // local computer vision looks at the video for players and skeletons, which
+  // costs CPU time here; 8fps is how many frames of the finished overlay the
+  // coaching model is given, which is the one with a price on it.
+  stage("preparing", `provider=${provider.name} · ${input.frames.length} frames at ${input.visionFps} fps`
+    + ` (players + skeletons; the coach reads the overlay at ${overlayFps()} fps)`
+    + ` · ${input.frameWidthPx}x${input.frameHeightPx}`);
   stage("court", "Finding the court");
 
   // Court geometry doesn't change within a single fixed-camera clip, so
@@ -354,7 +366,6 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // bulk of "5.6 people per frame" in a real gym — and (b) which side of
   // the net it's on, which the tracker uses to stop identities swapping
   // across the net.
-  const courtFrame = courtFrameFor(courtCalibration.quadKind);
   const feetCourt = (box: BoundingBoxNorm) =>
     courtCalibration.confidence > 0 ? transformToCourtCoordinates(box, courtCalibration, input.frameWidthPx, input.frameHeightPx) : null;
   // Gate in IMAGE space, not court space.
@@ -375,10 +386,6 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
       (box.y + box.height) * input.frameHeightPx,
     ];
     return pointInPolygon(feet, gatePolygon);
-  };
-  const sideOf = (box: BoundingBoxNorm): "near" | "far" | null => {
-    const c = feetCourt(box);
-    return c ? courtSideOf(courtFrame, c.y) : null;
   };
   let offCourtDropped = 0;
   const filteredDetections: FrameDetectionSet[] = perFrameDetections.map((f) => {
@@ -405,35 +412,51 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   //
   // buildRoster takes the count as an INPUT instead, because the sport
   // already knows it: doubles is two players each side of the net, in every
-  // frame of every clip. It needs court geometry to do that and returns
-  // nothing when there is none, which is when the tracker is still the best
-  // available answer.
+  // frame of every clip.
+  //
+  // IT USED TO FALL BACK TO THE TRACKER when there was no court, and that
+  // fallback fired on every single run after court detection was removed from
+  // the product -- so the roster shipped, deployed, and changed nothing, and
+  // the tag page still offered seventy-four chips. The geometry now lives
+  // behind a plane inside buildRoster: feet when a homography exists, the
+  // player's own body height on the image when it does not. There is no
+  // no-geometry case left, so there is no fallback and no path back to
+  // however-many identities the tracker feels like minting.
   const rosterSlots = input.setup?.matchMode === "singles" ? 1 : 2;
   const roster = buildRoster(filteredDetections, {
     toCourtFeet: feetCourt,
     slotsPerSide: rosterSlots,
+    imageAspect: input.frameWidthPx / input.frameHeightPx,
   });
-  let rawTracks: PlayerTrack[];
-  if (roster.tracks.length > 0) {
-    rawTracks = roster.tracks;
-    log(`roster: ${roster.tracks.length} player(s) from ${roster.detectionsSeen} detections`
-      + ` — ${roster.droppedOffCourt} off court, ${roster.droppedSurplus} surplus bodies`);
-  } else {
-    rawTracks = await provider.trackPlayers(filteredDetections, { sideOf });
-    log(`roster: no court geometry, fell back to tracking — ${rawTracks.length} track(s)`);
+  const rawTracks: PlayerTrack[] = roster.tracks;
+  log(`roster: ${roster.tracks.length} player(s) from ${roster.detectionsSeen} detections`
+    + ` on the ${roster.plane} plane`
+    + (roster.split
+      ? ` (sides split on ${roster.split.axis} at ${roster.split.at.toFixed(2)}, `
+        + `separation ${roster.split.quality.toFixed(2)})`
+      : roster.plane === "image" ? " (no usable net line — one pool of slots)" : "")
+    + ` — ${roster.droppedOffCourt} off court, ${roster.droppedSurplus} surplus bodies`);
+  if (roster.plane === "image") {
     knownLimitations.push(
-      "Without a usable court the players could not be pinned to a fixed four, "
-      + "so the same person may appear more than once."
+      "No court was marked, so the four players were told apart by where they stand in the "
+      + "frame and what they are wearing rather than by position on the court. The count is "
+      + "still fixed at four, but a player who is hidden behind their partner for a long spell "
+      + "can come back as the other one."
     );
   }
-  // trackPlayers() has no calibration context of its own, so it always
-  // leaves courtPosition null -- backfill it here using the same
-  // homography (feetCourt) already computed above for on-court filtering
-  // and side assignment. Every downstream consumer (rally motion
-  // clustering, movement metrics, coaching facts) prefers real court-
-  // meters distance over the cruder image-space-per-second fallback
-  // whenever calibration succeeded; when it did not, feetCourt already
-  // returns null and behavior is unchanged.
+  if (roster.plane === "image" && !roster.split) {
+    knownLimitations.push(
+      "The two sides of the net could not be told apart in this footage, so nothing stopped "
+      + "an identity swapping between players on opposite sides."
+    );
+  }
+  // Backfill any court position the roster did not set, from the same
+  // homography (feetCourt) already computed above for on-court filtering.
+  // Every downstream consumer (rally motion clustering, movement metrics,
+  // coaching facts) prefers real court distance over the cruder image-space-
+  // per-second fallback whenever calibration succeeded; when it did not,
+  // feetCourt returns null, the roster ran on the image plane, and the field
+  // stays null all the way down rather than being invented here.
   const tracks: PlayerTrack[] = rawTracks.map((t) => ({
     ...t,
     points: t.points.map((p) => ({ ...p, courtPosition: p.courtPosition ?? feetCourt(p.boxImageNorm) })),
@@ -647,6 +670,9 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // finds rallies without ball data, so that clip gets NO rallies and NO
   // shots, honestly, rather than a guessed boundary from something else.
   const ballTrack: VisionPipelineOutput["ballTrack"] = { points: [], stats: null, diagnostics: {}, rawDetections: [] };
+  // Filled from the wrist-speed contacts further down, once the poses those
+  // contacts are measured from have been smoothed and gated. Declared here
+  // because the return statement and the overlay both close over it.
   const shots: Shot[] = [];
   // Always empty now: crossings were rally evidence and nothing computes them.
   // Kept as a field so the overlay renderer's shape does not have to change.
@@ -733,6 +759,128 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     log(`pose: ${beforeSmoothing} frames smoothed (3-point median within bursts); `
       + `${limbGate.stats.dropped} joint(s) dropped for stretching a limb past its own length`
       + (limbGate.stats.unmeasured ? ` (${limbGate.stats.unmeasured} bone(s) had too few samples to judge)` : ""));
+  }
+
+  // CONTACT TIMESTAMPS, from the arms rather than the ball.
+  //
+  // Here and not earlier because it must run on the SMOOTHED, GATED poses: a
+  // wrist-speed peak is a derivative, and a derivative of a noisy signal is
+  // mostly noise. One jittery frame before smoothing is a spike taller than
+  // any real swing, and the limb gate has already thrown out the joints that
+  // were geometrically impossible rather than merely fast.
+  //
+  // What this restores: facts.ts groups rallies from `unknown_shot` events and
+  // calls measureSwing() at each one, which is the only path by which a
+  // measured knee angle, shoulder turn or contact height reaches the coaching
+  // model. Ball tracking used to emit them; when it was removed the events
+  // stopped, every per-shot mechanic came back empty, and the model went back
+  // to judging technique by eye while the code that could measure it sat
+  // unused. See swing-events.ts for what this signal can and cannot do.
+  const swings = detectSwingEvents(poses);
+  events.push(...swingsToUnknownShotEvents(swings));
+  if (swings.length > 0) {
+    const perPlayer = new Map<string, number>();
+    for (const s of swings) perPlayer.set(s.playerId, (perPlayer.get(s.playerId) ?? 0) + 1);
+    log(`swings: ${swings.length} contact candidate(s) from wrist speed — `
+      + [...perPlayer].map(([id, c]) => `${id}:${c}`).join(", "));
+    knownLimitations.push(
+      "Contact times are estimated from each player's wrist speed, not from the ball. With pose "
+      + `sampled at ${input.visionFps}fps they are good to roughly a tenth of a second, and a hard `
+      + "fake or a practice swing between points can be counted as a shot. The body angles measured "
+      + "at these moments are real measurements; which shot they belong to is an estimate."
+    );
+  } else if (poses.length > 0) {
+    log("swings: no contact candidates — no wrist-speed peak cleared this clip's own baseline");
+    knownLimitations.push(
+      "No paddle contacts could be picked out of the players' movement, so the per-shot body "
+      + "measurements are empty for this analysis."
+    );
+  }
+
+  // A SHOT ROW PER CONTACT, whose only real content is the body measurement.
+  //
+  // This is the last link in the chain, and the one whose absence made the
+  // rest pointless. contactsFromShots() in analyst-facts.ts reads
+  // analysis_shots, filters each row's `mechanics` through COACHABLE_MECHANICS
+  // and hands the survivors to the coaching model as `body` -- so a measured
+  // knee angle reaches Gemini through this table or not at all. Ball tracking
+  // used to write these rows; when it went, the table emptied, and the prompt
+  // started telling the model outright that "no body measurements were taken
+  // on any contact, so any technique note must come from watching the footage"
+  // -- which is exactly the guess-from-video the pose pass exists to replace.
+  //
+  // WHAT IS AND IS NOT FILLED IN. Everything the ball used to supply is null
+  // and stays null: shot TYPE (a dink and a drive look the same in a wrist
+  // trace), where the ball landed, its speed, its arc, whether it bounced
+  // first. Writing "dink" here because the hand moved slowly would be the same
+  // fabricated confidence the ball tracker was removed for. The model reads
+  // shot types off the video itself and is better at it. What this adds is the
+  // measurement it cannot make by eye: the angles of the body at the moment of
+  // contact.
+  //
+  // The window is widened to match the sampling. measureSwing defaults to a
+  // window tuned for burst-rate pose; at VISION_FPS the samples are 200ms
+  // apart, so a tight window contains one frame and every field comes back
+  // null. SWING_SAMPLE_WINDOW_S is wide enough to catch the frames either side
+  // of contact and no wider -- past about a second it starts measuring the
+  // next shot.
+  if (swings.length > 0) {
+    const aspect = input.frameHeightPx > 0 ? input.frameWidthPx / input.frameHeightPx : 1;
+    const posesByPlayer = new Map<string, PlayerPoseFrame[]>();
+    for (const f of poses) {
+      const list = posesByPlayer.get(f.playerId);
+      if (list) list.push(f);
+      else posesByPlayer.set(f.playerId, [f]);
+    }
+    const clipSeconds = input.frames.length > 0
+      ? input.frames[input.frames.length - 1].timestampSeconds
+      : 0;
+    const swingRallies = clusterRalliesFromHits(swings.map((s) => s.timestampSeconds), clipSeconds);
+    const rallyIdxAt = (t: number): number =>
+      swingRallies.find((r) => t >= r.startS && t <= r.endS)?.idx ?? 0;
+    const shotIdxInRally = new Map<number, number>();
+    let measured = 0;
+    for (const sw of swings) {
+      const rallyIdx = rallyIdxAt(sw.timestampSeconds);
+      const shotIdx = shotIdxInRally.get(rallyIdx) ?? 0;
+      shotIdxInRally.set(rallyIdx, shotIdx + 1);
+      const frames = posesByPlayer.get(sw.playerId) ?? [];
+      const m = measureSwing(frames, sw.timestampSeconds, SWING_SAMPLE_WINDOW_S, aspect);
+      // A measurement with nothing in it is not written. An absent key cannot
+      // be mistaken for a reading of zero; a row full of nulls can.
+      const anyField = m.kneeAngleAtContactDeg !== null || m.contactHeightTorsos !== null
+        || m.shoulderTurnDeg !== null || m.contactHeightRatio !== null
+        || m.backswingShoulders !== null || m.wristSpeedIntoContact !== null;
+      const keep = m.samples >= 2 && anyField;
+      if (keep) measured += 1;
+      shots.push({
+        rallyIdx, shotIdx,
+        t: sw.timestampSeconds,
+        playerId: sw.playerId,
+        type: "unknown",
+        category: "unknown",
+        confidence: sw.confidence,
+        hitCourt: null, hitZone: "unknown",
+        landingCourt: null, landingZone: "unknown",
+        speedMpsApprox: null, arcNorm: null, bouncedBefore: null,
+        outcome: "in",
+        features: {
+          detected_from: "wrist-speed-peak",
+          peak_shoulders_per_s: sw.peakShouldersPerSecond,
+          above_own_baseline_mads: sw.standardScore,
+        },
+        mechanics: keep ? m : null,
+      });
+    }
+    log(`shots: ${shots.length} contact row(s), ${measured} with measured body angles`
+      + ` (window ${SWING_SAMPLE_WINDOW_S}s, aspect ${aspect.toFixed(2)})`);
+    if (measured === 0) {
+      knownLimitations.push(
+        "Contacts were found but no body angle could be measured at any of them — the skeletons "
+        + "around those moments were too sparse or too low-confidence. Technique notes must come "
+        + "from watching the footage rather than from a measured number."
+      );
+    }
   }
 
   // Positioning, which needs no ball at all.
@@ -876,7 +1024,8 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
 
   events.sort((a, b) => a.timestampSeconds - b.timestampSeconds);
   const shotEventCount = events.filter((e) => e.type === "unknown_shot").length;
-  log(`shots: ${shots.length} classified (${shotEventCount} ball-detected contacts) · done in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  log(`contacts: ${shotEventCount} found from wrist speed, ${shots.length} shot row(s) written`
+    + ` · done in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
   // The line this whole exercise exists for. Every claim about what makes a
   // run slow has so far been inferred from reading the code; this is the
   // stopwatch.

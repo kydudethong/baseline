@@ -20,13 +20,19 @@ test("the overlay is never written slower than the model reads it", () => {
   }
 });
 
-test("the overlay never drops below 10fps, whatever the read rate", () => {
-  // 10 is what a person scrubbing needs, and the decimation from 30 is what
-  // stopped this stage killing long runs.
+test("the overlay is drawn at exactly the rate the model reads it", () => {
+  // THERE USED TO BE A FLOOR OF 10 HERE and it drew frames for nobody: the
+  // model reads at ANALYST_FPS, so anything drawn above that rate is decoded,
+  // rendered, encoded and then skipped. The floor existed because this stage
+  // once decimated from a 30fps source and 10 was what stopped it killing long
+  // runs -- a constraint that any rate at or below 10 satisfies anyway.
   const before = process.env.ANALYST_FPS;
   try {
-    process.env.ANALYST_FPS = "3";
-    assert.equal(overlayFps(), 10);
+    for (const rate of ["3", "8", "12"]) {
+      process.env.ANALYST_FPS = rate;
+      assert.equal(overlayFps(), analystFps(), `overlay disagreed with the read rate at ${rate}fps`);
+      assert.equal(overlayFps(), Number(rate));
+    }
   } finally {
     if (before === undefined) delete process.env.ANALYST_FPS;
     else process.env.ANALYST_FPS = before;

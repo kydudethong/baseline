@@ -20,12 +20,16 @@ const COACHING_KINDS: Array<{ value: string; label: string }> = [
 ];
 
 /**
- * "Which one is you" + trigger the coaching pipeline. A real player can
- * come back under several player_N labels across one clip — Rally IQ's
- * tracker has no re-identification (see facts.ts's mergeSelfFragments()) —
- * so this is a multi-select, not a single pick, and shows several frames
- * spread across the clip rather than just one, since the player you're
- * looking for may only be a given color in some of them.
+ * "Which one is you" + trigger the coaching pipeline.
+ *
+ * STILL A MULTI-SELECT, though it no longer needs to be for the original
+ * reason. It was one because the tracker had no re-identification and a real
+ * player came back under several player_N labels across a clip (see facts.ts's
+ * mergeSelfFragments()). The roster fixed that: there are four slots and one
+ * colour each, start to finish. What multi-select is still for is the case the
+ * roster cannot fix -- a clip where the two players on one side genuinely swap
+ * identity partway through, where letting somebody tick both is the difference
+ * between a usable read and none.
  */
 export function PlayerTagPicker({
   analysisId,
@@ -163,9 +167,8 @@ export function PlayerTagPicker({
           </>
         ) : null}
         <p className="sm measure">
-          Tap every box that&apos;s you. The tracker can lose you behind another player and pick you back up
-          under a new color, so you may be more than one — that&apos;s expected. The frames below are spread
-          across the clip so you can check.
+          Tap the box that&apos;s you. There are four players on the court and four here — one colour each,
+          for the whole clip.
         </p>
       </div>
 
