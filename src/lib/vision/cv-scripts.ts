@@ -237,6 +237,29 @@ export async function computeAppearanceSignaturesViaPython(
   return results;
 }
 
+/**
+ * Draw an unmistakable mark on one player in one still.
+ *
+ * The output of this is the ONLY thing that tells the coaching model who it is
+ * coaching -- the overlay video carries no identity at all -- so it is worth
+ * the extra process. See scripts/cv/mark_frame.py for why the mark is a ring,
+ * a chevron and a chip rather than a box.
+ */
+export async function markPlayerOnFrameViaPython(opts: {
+  imagePath: string;
+  outPath: string;
+  box: { x: number; y: number; width: number; height: number };
+  label?: string;
+}): Promise<void> {
+  const { x, y, width, height } = opts.box;
+  await runPython("mark_frame.py", [
+    path.resolve(opts.imagePath),
+    "--out", path.resolve(opts.outPath),
+    "--box", [x, y, width, height].map((v) => v.toFixed(5)).join(","),
+    "--label", opts.label ?? "YOU",
+  ], { timeoutMs: 60_000 });
+}
+
 export interface RawPoseResult {
   imagePath: string;
   error?: string;

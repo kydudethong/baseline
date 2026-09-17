@@ -51,6 +51,7 @@ import path from "node:path";
 import { downloadToFile } from "@/lib/storage/r2";
 import { cutEvidenceClips } from "./evidence-clips";
 import { OVERLAY_LEGEND } from "./overlay-legend";
+import { buildReferenceFrameImage } from "./reference-frame-image";
 import { getAllDrills } from "./drills";
 import type { CoachingDrillRow } from "@/lib/db/types";
 import { describeError } from "@/lib/analysis/describe-error";
@@ -372,11 +373,22 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       ? `Watching the ${gate.windows.length} stretches where you were playing…`
       : "Watching the clip…");
     const scanStartedAt = Date.now();
+    // The still that says who is being coached. Built here rather than inside
+    // runAnalyst so a failure to build one is logged next to the tag it came
+    // from, instead of surfacing three layers down as a prompt that quietly
+    // stopped naming anybody.
+    const referenceFrame = await buildReferenceFrameImage({
+      supabase,
+      analysisId,
+      selfPlayerLabel: analysis.self_player_label ?? null,
+      onLog: (line) => console.error(`[coaching] ${line}`),
+    });
     analyst = await runAnalyst({
       videoBytes: overlay,
       videoName: `${analysisId}.mp4`,
       input: analystInput,
       legend: OVERLAY_LEGEND,
+      referenceFrame,
       activeWindows: useGate ? gate.windows : undefined,
       onLog: (line) => console.error(`[coaching] ${line}`),
     });

@@ -1,0 +1,108 @@
+/**
+ * Build the one still that tells the coaching model who it is coaching.
+ *
+ * The overlay video carries no identity at all -- no boxes, no names, no
+ * highlight on anybody -- so this image is the whole of the answer to "which of
+ * these four people is this read for". If it cannot be built, the prompt is
+ * told so and the model is instructed not to pick somebody; a read addressed to
+ * a guessed subject is worse than one addressed to nobody, because it is
+ * indistinguishable from a correct one.
+ *
+ * WHY IT IS BUILT HERE AND NOT AT TAG TIME. The player taps their box and we
+ * store a LABEL, not a picture. Building the image at coaching time means a
+ * re-run picks up a corrected tag, a re-rendered overlay or a fixed roster
+ * without anybody having to re-tag; storing it at tag time would freeze the
+ * first answer and quietly serve it to every later run.
+ */
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import type { Database } from "@/lib/db/types";
+import { markPlayerOnFrameViaPython } from "@/lib/vision/cv-scripts";
+import { pickReferenceFrame } from "@/lib/vision/reference-frame";
+
+export interface ReferenceFrameImage {
+  mimeType: string;
+  dataBase64: string;
+  /** For the log line, so a wrong subject is diagnosable from a run. */
+  timestampSeconds: number;
+  playerLabel: string;
+}
+
+/**
+ * The marked frame, or null with the reason logged.
+ *
+ * NEVER THROWS. A coaching run that dies because a still would not render is a
+ * worse outcome than one that runs without it and says so -- the read is still
+ * worth having, minus the part addressed to one person.
+ */
+export async function buildReferenceFrameImage(opts: {
+  supabase: SupabaseClient<Database>;
+  analysisId: string;
+  /** Comma-separated labels as stored on the analysis; the first is used. */
+  selfPlayerLabel: string | null;
+  onLog?: (line: string) => void;
+}): Promise<ReferenceFrameImage | null> {
+  const log = opts.onLog ?? (() => {});
+  const label = (opts.selfPlayerLabel ?? "").split(",").map((l) => l.trim()).filter(Boolean)[0];
+  if (!label) {
+    log("reference frame: nobody is tagged as the subject — the model will not be told who to coach");
+    return null;
+  }
+
+  const [framesRes, tracksRes] = await Promise.all([
+    opts.supabase.from("analysis_frames").select("timestamp_s, debug_storage_path")
+      .eq("analysis_id", opts.analysisId).order("timestamp_s"),
+    opts.supabase.from("player_tracks").select("player_label, points").eq("analysis_id", opts.analysisId),
+  ]);
+  if (framesRes.error || tracksRes.error) {
+    log(`reference frame: could not read the stored frames — ${(framesRes.error ?? tracksRes.error)!.message}`);
+    return null;
+  }
+
+  const picked = pickReferenceFrame(framesRes.data ?? [], tracksRes.data ?? []);
+  if (!picked) {
+    log("reference frame: no rendered frame was stored for this analysis");
+    return null;
+  }
+  const mine = picked.boxes.find((b) => b.playerLabel === label);
+  if (!mine) {
+    // THE FRAME AND THE TAG DISAGREE, which is a real possibility rather than a
+    // defensive branch: the frame is chosen for having the MOST players in it,
+    // not all of them, and a subject hidden behind their partner at that
+    // instant has no box to mark.
+    log(`reference frame: ${label} is not visible at ${picked.frame.timestamp_s.toFixed(1)}s, `
+      + `the fullest frame in the clip — cannot mark them`);
+    return null;
+  }
+
+  const dir = await mkdtemp(path.join(tmpdir(), "refframe-"));
+  try {
+    const { data, error } = await opts.supabase.storage
+      .from("videos").download(picked.frame.debug_storage_path!);
+    if (error || !data) {
+      log(`reference frame: could not download ${picked.frame.debug_storage_path} — ${error?.message ?? "no data"}`);
+      return null;
+    }
+    const inPath = path.join(dir, "frame.jpg");
+    const outPath = path.join(dir, "marked.jpg");
+    await writeFile(inPath, Buffer.from(await data.arrayBuffer()));
+    await markPlayerOnFrameViaPython({ imagePath: inPath, outPath, box: mine.box, label: "YOU" });
+    const bytes = await readFile(outPath);
+    log(`reference frame: ${label} marked at ${picked.frame.timestamp_s.toFixed(1)}s `
+      + `(${picked.boxes.length} player(s) in frame, ${Math.round(bytes.length / 1024)}KB)`);
+    return {
+      mimeType: "image/jpeg",
+      dataBase64: bytes.toString("base64"),
+      timestampSeconds: picked.frame.timestamp_s,
+      playerLabel: label,
+    };
+  } catch (e) {
+    log(`reference frame: could not be built — ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}

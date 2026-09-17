@@ -425,10 +425,27 @@ export function buildGenerateBody(opts: {
   schema: Record<string, unknown>;
   maxOutputTokens?: number;
   video?: VideoConfig;
+  /**
+   * A still handed to the model alongside the video, inline.
+   *
+   * INLINE RATHER THAN UPLOADED, because it is one JPEG of a couple of hundred
+   * kilobytes and the Files API costs a round trip, a handle to track and a
+   * lifetime to reason about for something used once. The request limit is
+   * 20MB; a marked reference frame is three orders of magnitude under it.
+   *
+   * BEFORE THE VIDEO, because it is the thing the rest of the prompt refers
+   * back to -- the model is told to study this still and then find that person
+   * in the footage, and asking it to hold a question in mind through several
+   * minutes of video before being shown the answer is the harder order.
+   */
+  image?: { mimeType: string; dataBase64: string } | null;
 }): Record<string, unknown> {
   return {
     contents: [{
       parts: [
+        ...(opts.image
+          ? [{ inline_data: { mime_type: opts.image.mimeType, data: opts.image.dataBase64 } }]
+          : []),
         videoPart(opts.file, opts.video),
         { text: opts.prompt },
       ],
@@ -449,6 +466,8 @@ export async function generateJSON<T>(opts: {
   schema: Record<string, unknown>;
   maxOutputTokens?: number;
   video?: VideoConfig;
+  /** A marked still handed to the model with the video. See buildGenerateBody. */
+  image?: { mimeType: string; dataBase64: string } | null;
   /** Names this call in any error it raises ("scan segment 2/4", "technique burst 3"). */
   label?: string;
   onLog?: (line: string) => void;

@@ -451,7 +451,21 @@ def main() -> int:
             r = int(7 * scale)
             cv2.circle(img, (cx, cy), r, C_BALL, -1 if not p.get("interpolated") else 1, cv2.LINE_AA)
 
-        for tr in tracks:
+        # PLAYER BOXES ARE DRAWN ON THE IDENTITY CLIP ONLY.
+        #
+        # The main overlay is what the coaching model watches, and it no longer
+        # gets boxes at all. Four rectangles with names on them told the model
+        # who was who on every frame; the model is now told once, by a single
+        # still handed to it alongside the video with the subject marked on it,
+        # and asked to follow that person itself. That is a deliberate trade:
+        # the boxes were a per-frame answer from a pipeline that is sometimes
+        # wrong about identity, and a wrong box is worse than no box, because
+        # coaching addressed to the wrong body reads as confident and is
+        # unfalsifiable from the outside.
+        #
+        # What stays: the court, the net and the skeletons. A skeleton is a
+        # measurement of a body, not a claim about whose body it is.
+        for tr in (tracks if args.boxes_only else ()):
             pts = tr.get("points", [])
             best = None
             bdt = 0.25

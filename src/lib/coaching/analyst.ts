@@ -293,7 +293,23 @@ export function analystPrompt(
    * The window this call is watching, when the clip was too long for one.
    * Null means the call sees the whole thing and no windowing note is needed.
    */
-  segment?: { startSeconds: number; endSeconds: number } | null
+  segment: { startSeconds: number; endSeconds: number } | null,
+  /**
+   * Whether a marked still is actually attached to this call.
+   *
+   * PASSED, NOT ASSUMED. The prompt used to describe the gold box that marked
+   * the subject, and kept describing it for a while after the boxes were taken
+   * off the overlay -- so the model went looking for a mark that was not there
+   * and reported its absence as a finding about the footage. The same mistake
+   * is available here the moment a player is untagged or the frame fails to
+   * render, so the prompt is told which of the two situations it is in.
+   *
+   * NO DEFAULT, deliberately. A default is a silent answer, and either value
+   * is wrong somewhere: defaulting to true claims a mark that may not exist,
+   * defaulting to false throws away the subject on a call that had one. Making
+   * it required means a new caller cannot forget it -- the compiler asks.
+   */
+  hasReferenceFrame: boolean
 ): string {
   const contacts = input.contacts.length;
   const withBody = input.contacts.filter((c) => c.body).length;
@@ -317,8 +333,12 @@ export function analystPrompt(
 
 You are an expert pickleball coach with a computer-vision assistant.
 
-You have the assistant's overlay drawn on the footage, and a JSON record of
-what it MEASURED. The gold box labelled YOU is the player you are coaching.
+You have the assistant's overlay drawn on the footage and a JSON record of what
+it MEASURED.
+
+${hasReferenceFrame
+  ? `WHO YOU ARE COACHING. One still frame is attached to this request, taken from\nthis same clip, with ONE player marked on it — a magenta ring around them, a\nchevron above their head and the word YOU. That person is the subject.\n\nNothing in the VIDEO marks them. Every player is drawn the same way, with no\nbox, name or highlight at any point. Study the still, note who that person is —\nkit colour, build, which side of the net, which hand holds the paddle — and\nfollow them through the footage yourself. When you lose them behind another\nplayer or off screen, say so for that stretch rather than guessing; coaching\nattached to the wrong body reads as confident and cannot be checked by the\nperson reading it.`
+  : `NOBODY IS MARKED. No reference frame was supplied with this request, and\nnothing in the video identifies any player — there are no boxes, names or\nhighlights. You do not know which of the four people on court this read is for,\nand you must not pick one. Describe what the rally patterns show and address\nany coaching to the players as a group; do not write "you" as though you knew\nwho that was.`}
 
 WHAT THE MEASUREMENTS ARE
 
@@ -577,6 +597,15 @@ export async function runAnalyst(opts: {
   activeWindows?: Array<{ startSeconds: number; endSeconds: number }>;
   input: AnalystInput;
   legend: string;
+  /**
+   * One frame of this clip with the subject marked, as inline image data.
+   *
+   * THIS IS HOW THE MODEL KNOWS WHO IT IS COACHING, and the only way. The
+   * overlay carries no boxes, names or highlights on anybody. Null means the
+   * player was never tagged or the frame could not be built, and the prompt
+   * says so rather than letting the model pick somebody.
+   */
+  referenceFrame?: { mimeType: string; dataBase64: string } | null;
   onLog?: (line: string) => void;
 }): Promise<{ output: AnalystOutput; problems: string[]; model: string; file: UploadedFile | null }> {
   const model = analystModel();
@@ -637,8 +666,15 @@ export async function runAnalyst(opts: {
       const out = await generateJSON<AnalystOutput>({
         model,
         file,
-        prompt: analystPrompt(opts.input, opts.legend, plan.length > 1 ? segment : null),
+        prompt: analystPrompt(
+          opts.input, opts.legend, plan.length > 1 ? segment : null, Boolean(opts.referenceFrame)
+        ),
         schema: analystSchema(),
+        // THE SAME STILL ON EVERY SEGMENT. A long match is several calls, and
+        // each one is a fresh context that has never seen the subject -- so
+        // sending the marked frame only with the first would leave every
+        // segment after it coaching whoever the model decided to follow.
+        image: opts.referenceFrame ?? null,
         video: {
           fps,
           startOffsetSeconds: segment.startSeconds,

@@ -20,13 +20,18 @@ export async function generateMetadata({
 }
 
 /**
- * Setup before processing: mark the court, pick the players.
+ * Setup before processing: confirm the court sits on the painted lines.
  *
- * Optional by design. Skipping it costs accuracy, not function -- the pipeline
- * detects everything itself and says honestly when it could not. But two
- * minutes here removes the failure modes that are hardest to recover from
- * afterwards: a wrong court corrupts every out-of-bounds call, and untagged
- * spectators end up tracked as players.
+ * ONE QUESTION, AND IT IS REQUIRED. This screen used to ask for three things --
+ * the court, the players, and which player is you -- and it was optional,
+ * because the pipeline could fall back on its own detection for all of them.
+ * Two of the three moved to after the analysis, where the pipeline has already
+ * found the players and can show real boxes to point at.
+ *
+ * What is left cannot move, because everything measured in feet depends on it
+ * and nothing downstream can tell a court in the wrong place from one in the
+ * right place. A bad court does not produce missing numbers, it produces
+ * confident wrong ones -- so this is now a gate rather than a suggestion.
  */
 export default async function SetupPage({
   params,
@@ -91,7 +96,6 @@ export default async function SetupPage({
                         quadKind: setup.court.quadKind,
                       }
                     : null,
-                  players: setup.players.map((p) => ({ x: p.x, y: p.y, isSelf: p.isSelf })),
                   lineColorHex: setup.lineColorHex,
                   matchMode: setup.matchMode,
                 }

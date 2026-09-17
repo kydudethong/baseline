@@ -2,9 +2,10 @@ import type { CSSProperties } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { pickReferenceFrame } from "@/lib/vision/reference-frame";
 import { createClient } from "@/lib/supabase/server";
 import { getSignedDownloadUrl } from "@/lib/storage/r2";
-import { getSetup } from "@/lib/db/setup";
+import { getSetup, isCompleteSetup } from "@/lib/db/setup";
 import { getAnalysisForUser, type AnalysisWithVideo } from "@/lib/db/analyses";
 import { getPhase2Data } from "@/lib/db/vision";
 import { getProfile } from "@/lib/db/profiles";
@@ -76,7 +77,9 @@ export default async function AnalysisDetailPage({
     <ProcessingControls
       analysisId={analysis.id}
       status={analysis.status}
-      hasSetup={Boolean(setup && (setup.court || setup.players.length > 0))}
+      // The same test the server gates on, so the button and the API can
+      // never disagree about whether this clip is ready to run.
+      hasSetup={isCompleteSetup(setup)}
     />
   );
 
@@ -539,19 +542,6 @@ function initialFullCourtCorners(calibration: CourtCalibrationRow | null, width:
   };
 }
 
-/**
- * ONE frame, and it is the one where everybody is on screen.
- *
- * Three spread evenly through the clip was the old answer, from when the
- * tracker minted dozens of identities and no single moment contained them all
- * -- three chances to find yourself under three different colours. With the
- * roster there are four players and the useful frame is whichever one shows
- * all four at once. Three of those is the same picture three times, and a
- * person scrolling past two redundant images to reach the buttons is a page
- * that asks more of them than it needs to.
- */
-const REFERENCE_FRAME_COUNT = 1;
-
 /** Player self-tagging — see PlayerTagPicker.tsx. Kept as its own section, and
  * in a dialog once a read exists, because it drives (re)generating the read
  * itself rather than showing any part of it.
@@ -602,28 +592,28 @@ async function TagSection({
   const width = analysis.video?.width ?? 1920;
   const height = analysis.video?.height ?? 1080;
 
-  const debugFrames = phase2Frames.filter((f) => f.debug_storage_path);
-  // THE FULLEST FRAME, not an arbitrary one. With a single frame to show, which
-  // frame it is stops being cosmetic: one where a player is behind their
-  // partner offers a chip with nothing to point at. Ranked by how many of the
-  // roster are visible, ties broken toward the middle of the clip, where a
-  // point is more likely to be in progress than at either end.
-  const middle = debugFrames.length > 0 ? (debugFrames.length - 1) / 2 : 0;
-  const ranked = debugFrames
-    .map((f, i) => ({ f, i, visible: boxesAtTimestamp(phase2Tracks, f.timestamp_s).length }))
-    .sort((a, b) => b.visible - a.visible || Math.abs(a.i - middle) - Math.abs(b.i - middle));
-  const sampleIndices = ranked.length > 0
-    ? ranked.slice(0, REFERENCE_FRAME_COUNT).map((r) => r.i).sort((a, b) => a - b)
-    : pickSpreadIndices(debugFrames.length, REFERENCE_FRAME_COUNT);
-  const referenceFrames = await Promise.all(
-    sampleIndices.map(async (i) => {
-      const f = debugFrames[i];
-      const { data } = await supabase.storage.from("videos").createSignedUrl(f.debug_storage_path!, 3600);
-      if (!data?.signedUrl) return null;
-      const boxes = boxesAtTimestamp(phase2Tracks, f.timestamp_s);
-      return { url: data.signedUrl, timestampSeconds: f.timestamp_s, boxes } satisfies TagPickerFrame;
-    })
-  );
+  // THE SAME FRAME THE COACHING PASS WILL MARK.
+  //
+  // pickReferenceFrame is shared with the coaching pass on purpose. This page
+  // shows the player a frame and asks who they are; the coaching pass later
+  // draws a mark on a frame and hands it to the model as the only statement of
+  // who is being coached. If the two chose independently -- and they did, from
+  // two copies of the same ranking in two files -- the player would be
+  // answering a question about one moment and the model would be shown
+  // another. Same function, same frame, no way for them to drift.
+  const picked = pickReferenceFrame(phase2Frames, phase2Tracks);
+  const referenceFrames: Array<TagPickerFrame | null> = [];
+  if (picked) {
+    const { data } = await supabase.storage
+      .from("videos").createSignedUrl(picked.frame.debug_storage_path!, 3600);
+    if (data?.signedUrl) {
+      referenceFrames.push({
+        url: data.signedUrl,
+        timestampSeconds: picked.frame.timestamp_s,
+        boxes: picked.boxes,
+      });
+    }
+  }
 
   const initialSelfLabels = (analysis.self_player_label ?? "")
     .split(",")
@@ -663,33 +653,6 @@ function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
-}
-
-/** `count` roughly-evenly-spaced indices into [0, length) — first and last included when length allows. */
-function pickSpreadIndices(length: number, count: number): number[] {
-  if (length === 0) return [];
-  if (length <= count) return Array.from({ length }, (_, i) => i);
-  const indices = new Set<number>();
-  for (let i = 0; i < count; i++) {
-    indices.add(Math.round((i * (length - 1)) / (count - 1)));
-  }
-  return [...indices].sort((a, b) => a - b);
-}
-
-function boxesAtTimestamp(
-  tracks: PlayerTrackRow[],
-  timestampSeconds: number
-): Array<{ playerLabel: string; box: { x: number; y: number; width: number; height: number } }> {
-  const boxes: Array<{ playerLabel: string; box: { x: number; y: number; width: number; height: number } }> = [];
-  for (const t of tracks) {
-    const points = t.points as Array<{
-      timestampSeconds: number;
-      boxImageNorm: { x: number; y: number; width: number; height: number };
-    }>;
-    const point = points.find((p) => Math.abs(p.timestampSeconds - timestampSeconds) < 0.05);
-    if (point) boxes.push({ playerLabel: t.player_label, box: point.boxImageNorm });
-  }
-  return boxes;
 }
 
 function formatDuration(seconds: number): string {

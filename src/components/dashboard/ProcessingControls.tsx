@@ -96,33 +96,34 @@ export function ProcessingControls({
     // A bare `btn` has a transparent border and no fill, so it rendered as
     // bold text rather than a control. `btn-soft` is the secondary button.
     <Link href={`/dashboard/${analysisId}/setup`} className={primary ? "btn btn-optic" : "btn btn-soft"}>
-      {hasSetup ? "Edit court & players" : "Set up court & players"}
+      {hasSetup ? "Check the court" : "Line up the court"}
     </Link>
   );
 
   if (status === "uploaded" || status === "failed") {
-    // Setup leads when it has not been done. It is still skippable -- the
-    // pipeline detects everything itself and says honestly when it could not --
-    // but it is the step that decides whether the rest of the run is measuring
-    // or guessing, so it should not be the quieter of two buttons.
+    // NO "SKIP SETUP" BUTTON ANY MORE, because there is nothing left to skip
+    // to. Nothing detects a court, so a run without one has no scale at all --
+    // and a court in the wrong place is worse than none, since every distance
+    // is then produced and wrong with nothing able to notice. The server
+    // refuses these runs; offering a button that leads to a 400 would just be
+    // a slower way of saying the same thing.
     return (
       <div className="stack g3" style={{ alignItems: "flex-start" }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           {!hasSetup ? setupLink(true) : null}
-          <button type="button" onClick={start} disabled={busy}
+          <button type="button" onClick={start} disabled={busy || !hasSetup}
+            title={hasSetup ? undefined : "Line up the court first"}
             className={hasSetup ? "btn btn-optic" : "btn btn-soft"}>
             {busy
               ? "Starting…"
-              : status === "failed"
-                ? "Try processing again"
-                : hasSetup ? "Start processing" : "Skip setup and analyse"}
+              : status === "failed" ? "Try processing again" : "Start processing"}
           </button>
           {hasSetup ? setupLink(false) : null}
         </div>
         <p className="sm measure" style={{ opacity: 0.75 }}>
           {hasSetup
-            ? "Court and players are marked for this clip — processing will use them, and will write your coaching read at the end without asking again."
-            : "Setup finds a frame with everyone on court, fits the court lines, and asks which player is you. It takes about a minute, it is the difference between reliable rally boundaries and guesswork on a busy court, and it lets the coaching read be written as part of the run."}
+            ? "The court is marked for this clip. Processing will use it, and will write your coaching read at the end without asking again — you pick which player is you once the overlay is built."
+            : "One thing before this can run: drag the court outline onto the painted lines. Every distance in the read is measured off it, and a court in the wrong place gives wrong numbers rather than missing ones. Takes about ten seconds."}
         </p>
         {error ? <div className="error">{error}</div> : null}
       </div>

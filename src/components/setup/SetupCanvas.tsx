@@ -34,9 +34,8 @@ import { useRouter } from "next/navigation";
 import CourtPresetBar from "./CourtPresetBar";
 
 
-import { computeHomography, applyHomography } from "@/lib/vision/homography";
 import { courtSegments, type CourtLineRole } from "@/lib/vision/court-model";
-import { playersForMode, type MatchMode } from "@/lib/db/setup";
+import { type MatchMode } from "@/lib/db/setup";
 import { SetupExamples } from "./SetupExamples";
 
 type Corner = { x: number; y: number };
@@ -46,7 +45,6 @@ type Corner = { x: number; y: number };
  * bounding box when one exists, kept purely so the click target can be the
  * whole person rather than a dot at their shoes.
  */
-type Player = { x: number; y: number; isSelf: boolean; box?: [number, number, number, number] };
 /**
  * MARK THE PEOPLE, THEN SAY WHICH ONE IS YOU.
  *
@@ -65,10 +63,23 @@ type Player = { x: number; y: number; isSelf: boolean; box?: [number, number, nu
  * hand anyway when the fit is wrong, which is the same fix with nothing to
  * read.
  */
-type Stage = "court" | "players" | "self";
+/**
+ * THERE IS NO STAGE ANY MORE, and this type is gone with it.
+ *
+ * This screen ran a three-step machine: mark the court, mark the players, then
+ * say which one is you. The last two moved to AFTER the analysis, where they
+ * belong -- the pipeline has by then found the players itself, on the frame
+ * where the most of them are visible, so the question "which of these is you"
+ * is asked over real boxes instead of asking somebody to click four strangers'
+ * feet from memory before anything has been detected at all.
+ *
+ * What is left is the one thing that has to happen BEFORE the analysis, because
+ * every distance in feet depends on it: does the drawn court sit on the painted
+ * one. A court is always laid down, so this is a confirmation, not a task.
+ */
 
 /** Everything undo restores. Small enough to copy on every change. */
-interface Snapshot { corners: Corner[]; players: Player[] }
+interface Snapshot { corners: Corner[] }
 
 /**
  * Blank margin drawn around the video, as a fraction of its short side.
@@ -93,11 +104,6 @@ interface Snapshot { corners: Corner[]; players: Player[] }
 const PAD_FRAC = 0.18;
 
 
-// Court in feet. Same numbers the Python side uses; a pickleball court is 20
-// by 44 with a 7ft non-volley zone each side of the net.
-const COURT_W = 20;
-const COURT_L = 44;
-const NET_Y = 22;
 
 /**
  * A court to start from, when detection did not find one.
@@ -177,7 +183,6 @@ export interface SetupCanvasProps {
   initial: {
     frameTimestampSeconds: number;
     court: SetupCourt | null;
-    players: Player[];
     lineColorHex?: string | null;
     matchMode?: MatchMode;
   } | null;
@@ -206,7 +211,6 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   // one first means the frame is already familiar by the time the corners are
   // asked for, and somebody who bounces has at least told us the thing only
   // they can know.
-  const [stage, setStage] = useState<Stage>("players");
   // Declared up here with the rest of the canvas state, because undo/redo
   // below need to cancel an in-flight corner drag.
   const [dragging, setDragging] = useState<number | null>(null);
@@ -214,7 +218,6 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     const c = initial?.court;
     return c ? [c.nearLeft, c.nearRight, c.farRight, c.farLeft].filter(Boolean) : [];
   });
-  const [players, setPlayers] = useState<Player[]>(initial?.players ?? []);
   const [quadKind, setQuadKind] = useState<"full" | "near-half">(
     initial?.court?.quadKind ?? "full"
   );
@@ -241,33 +244,31 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
 
   /** Record the state BEFORE a change. Every mutating handler calls this first. */
   const commit = useCallback(() => {
-    setPast((h) => [...h.slice(-49), { corners, players }]);
+    setPast((h) => [...h.slice(-49), { corners }]);
     setFuture([]);
-  }, [corners, players]);
+  }, [corners]);
 
   const undo = useCallback(() => {
     setPast((h) => {
       const prev = h[h.length - 1];
       if (!prev) return h;
-      setFuture((f) => [...f, { corners, players }]);
+      setFuture((f) => [...f, { corners }]);
       setCorners(prev.corners);
-      setPlayers(prev.players);
       setDragging(null);
       return h.slice(0, -1);
     });
-  }, [corners, players]);
+  }, [corners]);
 
   const redo = useCallback(() => {
     setFuture((f) => {
       const next = f[f.length - 1];
       if (!next) return f;
-      setPast((h) => [...h, { corners, players }]);
+      setPast((h) => [...h, { corners }]);
       setCorners(next.corners);
-      setPlayers(next.players);
       setDragging(null);
       return f.slice(0, -1);
     });
-  }, [corners, players]);
+  }, [corners]);
 
   const canUndo = past.length > 0;
   const canRedo = future.length > 0;
@@ -296,16 +297,15 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    */
   const clearCourt = useCallback(() => {
     const { w, h } = frameSize();
-    commit(); setCorners(seedCourt(w, h)); setStage("court");
+    commit(); setCorners(seedCourt(w, h));
   }, [commit, frameSize]);
 
-  /** Open the court editor, laying a court down first if there is none. */
+  /** Open the court tools, laying a court down first if there is none. */
   const openCourt = useCallback(() => {
     const { w, h } = frameSize();
     if (corners.length < 4) { commit(); setCorners(seedCourt(w, h)); }
-    setFixing(true); setStage("court");
+    setFixing(true);
   }, [commit, corners.length, frameSize]);
-  const clearPlayers = useCallback(() => { commit(); setPlayers([]); setStage("players"); }, [commit]);
 
   // ZOOM AND PAN, for the two clicks this screen exists to collect.
   //
@@ -518,35 +518,29 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
         setCorners([at(c.bottomLeft), at(c.bottomRight), at(c.topRight), at(c.topLeft)]);
         setQuadKind(json.court.quadKind);
       }
-      // Detected players are seeded as tracked, but never as "you" -- that is
-      // the one thing here nothing but the user can know, and pre-selecting a
-      // guess would get confirmed without being read.
-      if (json.players.length > 0 && json.frame?.playersReliable !== false) {
-        setPlayers(json.players.map((p) => ({
-          x: p.feetPx[0] * sx, y: p.feetPx[1] * sy, isSelf: false,
-          box: [p.boxPx[0] * sx, p.boxPx[1] * sy, p.boxPx[2] * sx, p.boxPx[3] * sy] as
-            [number, number, number, number],
-        })));
-        setStage("players");
-      }
-
+      // THE DETECTED PLAYERS ARE USED, BUT NOT DRAWN AND NOT SAVED.
+      //
+      // They are still worth asking for: how many people this frame has on
+      // court is the best single check that the court quad is right, and it
+      // costs nothing extra since the detector runs anyway. What changed is
+      // that nobody is asked to confirm or correct them here -- that question
+      // is asked after the analysis, over the pipeline's own boxes.
       const bits: string[] = [];
       if (json.frame) bits.push(`Frame at ${json.frame.timestampSeconds.toFixed(1)}s.`);
       if (json.court) bits.push(`Court fitted (${(json.court.confidence * 100).toFixed(0)}% line support) — drag any corner to correct it.`);
       else if (json.courtReason) bits.push(`Court not fitted: ${json.courtReason}`);
-      if (json.frame?.playersReliable === false) {
-        bits.push("No usable player detector here, so click the players yourself.");
-      } else if (json.players.length) {
-        bits.push(`${json.players.length} player${json.players.length === 1 ? "" : "s"} found — click the one that is you.`);
-        // Say what the court gate did. Silence here is ambiguous in a way
-        // that matters: "4 players" reads the same whether nobody else was in
-        // frame or six spectators were correctly ignored, and only one of
-        // those two means the court is right.
+      // THE PLAYER COUNT AS A CHECK ON THE COURT. Whether the people standing
+      // inside the quad are the number you expect is the quickest way to catch
+      // a court that is subtly wrong -- a quad drawn one court over, or one
+      // that swallows the queue behind the fence, both look plausible on their
+      // own and both give themselves away here.
+      if (json.players.length && json.frame?.playersReliable !== false) {
         const off = json.frame?.playersOffCourt ?? 0;
+        bits.push(`${json.players.length} ${json.players.length === 1 ? "person is" : "people are"} inside it.`);
         if (json.frame?.courtGated && off > 0) {
-          bits.push(`${off} more ${off === 1 ? "person was" : "people were"} ignored for standing off court.`);
+          bits.push(`${off} more ${off === 1 ? "person was" : "people were"} outside it and ignored.`);
         } else if (json.frame?.courtGated === false) {
-          bits.push("No court was fitted, so nobody could be ruled out for standing off it — expect spectators in the list.");
+          bits.push("Nobody could be ruled out for standing off court, because no court was fitted.");
         }
       }
       setAutoNote(bits.join(" "));
@@ -575,68 +569,6 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   /* ---------------------------------------------------------------------
    * Drawing.
    * ------------------------------------------------------------------- */
-
-  /**
-   * How tall a person standing here would be, in pixels.
-   *
-   * Taken from the court itself: six feet, measured at that spot through the
-   * same homography the overlay is drawn with, so it shrinks correctly with
-   * distance -- a player at the far baseline is a fraction of the size of one
-   * near the camera, and a fixed pixel height would be absurd at one end or
-   * the other. Falls back to a share of the frame when there is no court yet.
-   */
-  const personHeightPx = useCallback((feetX: number, feetY: number): number => {
-    // The VIDEO's height, not the canvas's. The canvas carries a margin on
-    // every side now, so reading its height here would inflate the fallback
-    // player box by the padding -- roughly a third too tall.
-    const frameH = videoRef.current?.videoHeight || 720;
-    if (corners.length === 4) {
-      const farY = quadKind === "near-half" ? NET_Y : COURT_L;
-      const toCourt = computeHomography(
-        [
-          [corners[0].x, corners[0].y], [corners[1].x, corners[1].y],
-          [corners[2].x, corners[2].y], [corners[3].x, corners[3].y],
-        ],
-        [[0, 0], [COURT_W, 0], [COURT_W, farY], [0, farY]]
-      );
-      const toImage = computeHomography(
-        [[0, 0], [COURT_W, 0], [COURT_W, farY], [0, farY]],
-        [
-          [corners[0].x, corners[0].y], [corners[1].x, corners[1].y],
-          [corners[2].x, corners[2].y], [corners[3].x, corners[3].y],
-        ]
-      );
-      if (toCourt && toImage) {
-        const [cx, cy] = applyHomography(toCourt, [feetX, feetY]);
-        if (Number.isFinite(cx) && Number.isFinite(cy)) {
-          const a = applyHomography(toImage, [cx, cy]);
-          const b = applyHomography(toImage, [Math.min(cx + 1, COURT_W), cy]);
-          const pxPerFt = Math.hypot(b[0] - a[0], b[1] - a[1]);
-          if (Number.isFinite(pxPerFt) && pxPerFt > 0.5) {
-            return Math.max(24, Math.min(frameH * 0.9, pxPerFt * 6));
-          }
-        }
-      }
-    }
-    return frameH * 0.14;
-  }, [corners, quadKind]);
-
-  /**
-   * Sample the line colour from the pixel the user clicked.
-   *
-   * Read from the RAW video frame, never from the canvas. The canvas has the
-   * court overlay painted on top of it, so a click on a guide line would
-   * sample OUR blue rather than the paint underneath -- and the fitter would
-   * then be told to look for the colour of its own overlay.
-   */
-
-  /** The rectangle that represents this player on screen, box or not. */
-  const playerRect = useCallback((q: Player): [number, number, number, number] => {
-    if (q.box) return q.box;
-    const h = personHeightPx(q.x, q.y);
-    const w = h * 0.42;
-    return [q.x - w / 2, q.y - h, q.x + w / 2, q.y];
-  }, [personHeightPx]);
 
   /**
    * The court's own lines, projected from the four corners.
@@ -746,42 +678,6 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       ctx.fillText(String(i + 1), c.x, c.y);
     });
 
-    players.forEach((p, i) => {
-      const colour = p.isSelf ? "#ffd23a" : "#5ce08c";
-      ctx.strokeStyle = colour;
-      ctx.lineWidth = (p.isSelf ? 3.5 : 2) * s;
-
-      // The box is both the label and the target. A marker at the feet is
-      // where the coordinate belongs but not where anyone points -- people
-      // click the person -- so draw the person.
-      const [x1, y1, x2, y2] = playerRect(p);
-      if (p.isSelf) {
-        ctx.fillStyle = "rgba(255, 210, 58, 0.16)";
-        ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-      }
-      // Dashed means "this is where a person of your height would stand",
-      // solid means "the detector found a person here". Same click target,
-      // different claim, and the drawing should not blur the two.
-      if (!p.box) ctx.setLineDash([7 * s, 5 * s]);
-      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-      ctx.setLineDash([]);
-      const labelX = (x1 + x2) / 2;
-      const labelY = y1 - 8 * s;
-
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 6 * s, 0, 7);
-      ctx.stroke();
-
-      const text = p.isSelf ? "you" : `P${i + 1}`;
-      ctx.font = `600 ${14 * s}px system-ui, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "alphabetic";
-      const w = ctx.measureText(text).width + 10 * s;
-      ctx.fillStyle = colour;
-      ctx.fillRect(labelX - w / 2, labelY - 15 * s, w, 19 * s);
-      ctx.fillStyle = "#101216";
-      ctx.fillText(text, labelX, labelY);
-    });
 
     // THE MAGNIFIER, last, so nothing draws over it.
     //
@@ -831,47 +727,13 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     }
 
     ctx.restore();
-  }, [corners, players, courtLines, showLines, playerRect, dragging]);
+  }, [corners, courtLines, showLines, dragging]);
 
   useEffect(() => { draw(); }, [draw, time, videoReady]);
 
   /* ---------------------------------------------------------------------
    * Interaction.
    * ------------------------------------------------------------------- */
-
-  /**
-   * Which player, if any, a click landed on.
-   *
-   * Anywhere inside the box counts, because that is the shape of the thing a
-   * person is aiming at. Boxes are tested smallest-first so a player standing
-   * in front of another can still be picked -- with overlapping boxes the
-   * nearer, larger one would otherwise swallow every click meant for the
-   * player behind. Hand-placed markers have no box and fall back to a radius
-   * around the feet.
-   */
-  const hitPlayer = (list: Player[], p: Corner, radius: number): number => {
-    const rects = list.map((q) => playerRect(q));
-    const inside = list
-      .map((_q, i) => i)
-      .filter((i) => {
-        const [x1, y1, x2, y2] = rects[i];
-        return p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2;
-      })
-      .sort((a, b) => {
-        const areaOf = (i: number) => (rects[i][2] - rects[i][0]) * (rects[i][3] - rects[i][1]);
-        return areaOf(a) - areaOf(b);
-      });
-    if (inside.length) return inside[0];
-    // Missed every body, but a click just outside one is far likelier to mean
-    // that player than to mean "put a new marker here".
-    let best = -1;
-    let bestD = radius;
-    list.forEach((q, i) => {
-      const d = Math.hypot(q.x - p.x, q.y - p.y);
-      if (d < bestD) { bestD = d; best = i; }
-    });
-    return best;
-  };
 
   /**
    * Cursor -> VIDEO pixel coordinates.
@@ -905,28 +767,10 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    * a release that has not travelled far enough to be a drag commits it.
    */
   const placeAt = (client: { clientX: number; clientY: number }) => {
-    const p = toImage(client);
-    const canvas = canvasRef.current!;
-    const scale = canvas.width / canvas.getBoundingClientRect().width;
-    const grab = 30 * scale;
-    if (stage === "court") {
-      if (corners.length < 4) { commit(); setCorners([...corners, p]); }
-      return;
-    }
-    if (stage === "players") {
-      // Marking WHO IS ON COURT. A tap on somebody already marked removes
-      // them; empty court adds one. Nothing here says which is you.
-      const hit = hitPlayer(players, p, grab * 2);
-      commit();
-      if (hit >= 0) setPlayers(players.filter((_, i) => i !== hit));
-      else if (players.length < 8) setPlayers([...players, { x: p.x, y: p.y, isSelf: false }]);
-      return;
-    }
-    // stage === "self": one of them is you, and only one.
-    const hit = hitPlayer(players, p, grab * 2);
-    if (hit < 0) return;
-    commit();
-    setPlayers(players.map((q, i) => ({ ...q, isSelf: i === hit ? !q.isSelf : false })));
+    // A tap only ever adds a missing corner. In practice there is always a
+    // court on the frame when this screen opens, so this is the escape hatch
+    // for somebody who cleared it rather than the normal path.
+    if (corners.length < 4) { commit(); setCorners([...corners, toImage(client)]); }
   };
 
   const onDown = (ev: React.PointerEvent<HTMLCanvasElement>) => {
@@ -967,7 +811,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     // Grabbing an existing corner is the one thing that acts on press: it is a
     // drag by definition, and waiting for release would mean the corner never
     // followed the finger.
-    if (stage === "court") {
+    {
       const p = toImage(ev);
       const canvas = canvasRef.current!;
       const scale = canvas.width / canvas.getBoundingClientRect().width;
@@ -1084,9 +928,11 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
               quadKind,
             }
           : null,
-      // The box was only ever a click target on this one frame; what matters
-      // downstream is the feet, which is what the tracker matches against.
-      players: players.map(({ x, y, isSelf }) => ({ x, y, isSelf })),
+      // ALWAYS EMPTY, and the field is kept so an older saved setup still
+      // parses. Who is who is decided after the analysis now, against the
+      // pipeline's own boxes on the frame where most of the roster is visible
+      // -- not by clicking strangers' feet before anything has been detected.
+      players: [],
       // Null means white, which is what the fitter assumes on its own.
       lineColorHex: lineColor,
       matchMode,
@@ -1133,44 +979,23 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   };
 
   const courtDone = corners.length === 4;
-  const selfChosen = players.some((p) => p.isSelf);
   /**
-   * ONE REQUIREMENT: say which player is you.
+   * ONE REQUIREMENT: the court is where the court is.
    *
-   * Setup used to ask for two things, and the second -- clicking the four
-   * corners of the court -- was the one people gave up on. It is fiddly on a
-   * phone, it has to be redone for every clip, and a player who just wants to
-   * know why their third shot keeps popping up is being asked to do surveying
-   * first.
+   * This is the only thing that has to be settled before the analysis runs,
+   * and it is required rather than optional now. Everything measured in feet
+   * hangs off this quad -- how far you stood off the kitchen line, how much
+   * ground you covered, which zone a shot was played from -- and a court that
+   * is subtly wrong does not produce missing numbers, it produces confident
+   * wrong ones. There is no honest way to report that after the fact, because
+   * the numbers look exactly like correct numbers.
    *
-   * The court has NOT gone away; it moved out of the person's hands. Detection
-   * finds it in the pipeline like it always did, and the geometry behind the
-   * kitchen and positioning coaching is unchanged. What changed is that a
-   * corner it gets slightly wrong is now a small error in one measurement
-   * instead of a wall between a user and their analysis.
-   *
-   * The corner tools are still here, one button away, for the clip shot from
-   * an angle detection cannot read. They are a repair, which is what they
-   * always should have been.
+   * It is a confirmation, not a survey: a court is always drawn on the frame
+   * when this screen opens, from a saved preset when there is one and a
+   * sensible default otherwise. The work is looking at it, and dragging a
+   * corner only if it is off.
    */
-  const ready = selfChosen;
-
-  /* ---------------------------------------------------------------------
-   * The correction path.
-   *
-   * Automatic detection is right most of the time and wrong often enough
-   * that "wrong" has to be a first-class answer, not something the user has
-   * to work out how to express. So the page asks a plain question and gives
-   * two equally weighted replies -- and choosing "something's off" opens the
-   * tools rather than sending the user somewhere else to find them.
-   * ------------------------------------------------------------------- */
-  const startPlayersOver = () => {
-    commit();
-    setStage("players");
-    setPlayers([]);
-    setFixing(true);
-    setAutoNote("Click each player at their feet. Then press \u201cPick who I am\u201d and click yourself.");
-  };
+  const ready = courtDone;
 
   return (
     <div className="stack g4">
@@ -1235,7 +1060,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${baseScale * zoom})`,
             cursor: panMode
               ? (panning ? "grabbing" : "grab")
-              : stage === "court" ? "crosshair" : "pointer",
+              : "crosshair",
             opacity: videoReady ? 1 : 0,
             transition: "opacity .2s ease",
           }}
@@ -1333,60 +1158,65 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             <span className="eyebrow">Set up this clip</span>
             <span className={`pill ${ready ? "p-good" : "p-warn"}`}>
               <span className="dot" />
-              {ready ? "Ready to analyse" : "Tap yourself to start"}
+              {ready ? "Ready to analyse" : "Place the court to start"}
             </span>
           </div>
 
           {/*
             ONE TILE, because there is one thing to do.
 
-            This was two tiles and a court-preset bar, which is three things
-            competing for attention on a screen whose entire job is "tap the
-            player who is you". The court moved into the pipeline; what is left
-            is the only decision the software genuinely cannot make, which is
-            which of these people the coaching should be about.
+            It used to be "tap the player who is you", and before that it was
+            that plus the court plus a preset bar. Picking yourself moved to
+            after the analysis -- by then the pipeline has found the players
+            and can show you real boxes on the frame where most of them are
+            visible, which is a far easier question than clicking four
+            strangers' feet on a frame nothing has looked at yet.
+
+            What is left is the one answer the software cannot supply and
+            cannot recover from getting wrong.
           */}
           <div
             className="stack g2"
             style={{
               padding: "var(--a4)",
               borderRadius: "var(--r3)",
-              background: selfChosen ? "var(--good-wash)" : "var(--warn-wash)",
-              border: `1px solid ${selfChosen ? "var(--good)" : "var(--warn)"}`,
+              background: courtDone ? "var(--good-wash)" : "var(--warn-wash)",
+              border: `1px solid ${courtDone ? "var(--good)" : "var(--warn)"}`,
             }}
           >
             <div className="row g2" style={{ alignItems: "center" }}>
               <span style={{
                 width: 22, height: 22, borderRadius: "50%", display: "grid", placeItems: "center",
-                background: selfChosen ? "var(--good)" : "var(--warn)", color: "#fff",
+                background: courtDone ? "var(--good)" : "var(--warn)", color: "#fff",
                 fontSize: 12, fontWeight: 700, flex: "none",
               }}>
-                {selfChosen ? "\u2713" : "1"}
+                {courtDone ? "\u2713" : "1"}
               </span>
-              <strong style={{ fontSize: 15 }}>Which player is you</strong>
+              <strong style={{ fontSize: 15 }}>Does the court line up?</strong>
             </div>
-            <p className="sm" style={{ margin: 0, color: selfChosen ? "var(--good)" : "var(--warn)" }}>
-              {selfChosen
-                ? "Tagged. Everything in the coaching read is about this player."
-                : players.length === 0
-                  ? "No players found on this frame yet \u2014 scrub to a moment where everyone is on court, then tap yourself."
-                  : `Tap yourself on the frame above. ${players.length} player${players.length === 1 ? "" : "s"} found; the one you pick turns yellow.`}
+            <p className="sm" style={{ margin: 0, color: courtDone ? "var(--good)" : "var(--warn)" }}>
+              {courtDone
+                ? "Check the blue lines sit on the painted ones — the kitchen line and the centre line as well as the outside. Drag any yellow corner that is off."
+                : "No court on the frame yet. Press “Fit the court” to lay one down, then drag its corners onto the painted lines."}
             </p>
             <div className="row g2" style={{ flexWrap: "wrap" }}>
-              {selfChosen ? (
-                <button type="button" className="btn btn-sm btn-soft"
-                        onClick={() => { setFixing(true); setStage("players"); }}>
-                  Change who is you
-                </button>
-              ) : null}
               <button type="button" className="btn btn-sm btn-soft" onClick={openCourt}>
-                {courtDone ? "Adjust the court lines" : "Set up the court lines"}
-              </button>
-              <button type="button" className="btn btn-sm btn-ghost"
-                      onClick={() => { setFixing(true); setStage("players"); }}>
-                Players look wrong?
+                {courtDone ? "Fit the court" : "Lay a court down"}
               </button>
             </div>
+            {/*
+              SAID OUT LOUD, because "it will be less accurate" is not what
+              happens. A court that is subtly wrong produces numbers that look
+              exactly like right ones -- feet off the kitchen, ground covered,
+              which zone a shot came from -- and nothing downstream can tell
+              they are wrong or warn anybody. That is why this screen is a gate
+              now rather than a suggestion.
+            */}
+            <p className="sm measure" style={{ margin: 0, color: "var(--ink-3)" }}>
+              Every distance in the read is measured off this outline. If it is
+              in the wrong place the numbers are still produced, and they are
+              still wrong — so this is worth the ten seconds.
+            </p>
           </div>
 
           <div className="row g2" style={{ alignItems: "center", flexWrap: "wrap" }}>
@@ -1466,23 +1296,9 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             </button>
           </div>
 
-          {/* Not numbered. Numbering says "do these in order", and none of
-              these have to be done at all -- the only required answer lives on
-              the panel outside this one. These are three tools. */}
-          <div className="stepbar">
-            <span className={`step ${stage === "court" ? "cur" : courtDone ? "done" : ""}`}>
-              <span className="n">{courtDone ? "✓" : "·"}</span> Court &amp; net
-            </span>
-            <span className="step"><span className="sep" /></span>
-            <span className={`step ${stage === "players" ? "cur" : players.length > 0 ? "done" : ""}`}>
-              <span className="n">{players.length > 0 ? "✓" : "·"}</span> The players
-            </span>
-            <span className="step"><span className="sep" /></span>
-            <span className={`step ${stage === "self" ? "cur" : selfChosen ? "done" : ""}`}>
-              <span className="n">{selfChosen ? "✓" : "·"}</span> Which one is you
-            </span>
-          </div>
-
+          {/* The three-step bar is gone with the three steps. It said
+              "court, players, which one is you", and two of those moved to
+              after the analysis. A stepper with one step in it is furniture. */}
           <div className="grid2">
             <div className="stack g2">
               <strong style={{ fontSize: 14 }}>Court &amp; net</strong>
@@ -1500,13 +1316,6 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                 the painted lines, it is right.
               </p>
               <div className="row g2" style={{ flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${stage === "court" ? "btn-primary" : "btn-soft"}`}
-                  onClick={() => setStage("court")}
-                >
-                  {stage === "court" ? "Adjusting corners" : "Adjust corners"}
-                </button>
                 <button
                   type="button" className="btn btn-ghost btn-sm"
                   onClick={clearCourt}
@@ -1531,13 +1340,13 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                     ? { width: v.videoWidth, height: v.videoHeight }
                     : null;
                 }}
-                onApply={(next) => { commit(); setCorners(next); setStage("court"); }}
+                onApply={(next) => { commit(); setCorners(next); }}
               />
 
               {/* The example, shown only while the corners are actually being
                   placed. Once they are down the reader has the answer and the
                   diagram is just a thing taking up room. */}
-              {stage === "court" && corners.length < 4 ? <CornerGuide compact /> : null}
+              {corners.length < 4 ? <CornerGuide compact /> : null}
               {/* The "far baseline is hidden, I marked the net" checkbox used
                   to live here. It asked the user to classify their own
                   camera angle, in a sentence that only makes sense once you
@@ -1568,50 +1377,6 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                   </button>
                 ))}
               </div>
-              {players.length > 0 && players.length !== playersForMode(matchMode) ? (
-                <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
-                  {players.length} marked, {playersForMode(matchMode)} expected for{" "}
-                  {matchMode}. That is allowed — someone may be off camera — but
-                  it is worth a look.
-                </p>
-              ) : null}
-            </div>
-
-            <div className="stack g2">
-              <strong style={{ fontSize: 14 }}>The players are wrong</strong>
-              <p className="sm" style={{ margin: 0, opacity: 0.75 }}>
-                {stage === "self"
-                  ? "Click the person who is you. Only one can be, so clicking somebody else moves the tag rather than adding a second."
-                  : "Click each player at their feet. Click a marked player again to remove them. Everyone on your court is tracked either way — who is you comes next."}
-              </p>
-              <div className="row g2" style={{ flexWrap: "wrap" }}>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={startPlayersOver}>
-                  Redo the players
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${stage === "players" ? "btn-primary" : "btn-soft"}`}
-                  onClick={() => setStage("players")}
-                >
-                  {stage === "players" ? "Choosing players" : "Choose players"}
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${stage === "self" ? "btn-primary" : "btn-soft"}`}
-                  disabled={players.length === 0}
-                  title={players.length === 0 ? "Mark the players first" : undefined}
-                  onClick={() => setStage("self")}
-                >
-                  {stage === "self" ? "Picking who I am" : "Pick who I am"}
-                </button>
-                <button
-                  type="button" className="btn btn-ghost btn-sm"
-                  disabled={players.length === 0}
-                  onClick={clearPlayers}
-                >
-                  Clear all players
-                </button>
-              </div>
             </div>
           </div>
 
@@ -1633,9 +1398,8 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
               className="btn btn-soft btn-sm"
               disabled={auto === "running"}
               onClick={() => {
-                const willClobber = corners.length > 0 || players.length > 0;
-                if (willClobber && !window.confirm(
-                  "Replace the court corners and players you have marked with a fresh detection?"
+                if (corners.length > 0 && !window.confirm(
+                  "Replace the court you have marked with a fresh detection?"
                 )) return;
                 void findFrame(lineColor);
               }}

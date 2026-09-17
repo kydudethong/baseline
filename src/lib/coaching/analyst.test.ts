@@ -127,7 +127,7 @@ test("the schema survives the Gemini dialect conversion", () => {
 });
 
 test("the prompt states the clip length and never leaks our rallies", () => {
-  const p = analystPrompt(input(), "LEGEND");
+  const p = analystPrompt(input(), "LEGEND", null, true);
   assert.ok(p.includes("LEGEND"), "the legend is part of the prompt");
   assert.ok(p.includes("2 contacts"), "says how much was measured");
   assert.ok(p.includes("dink-cross"), "the drill catalogue is included");
@@ -141,14 +141,14 @@ test("the prompt asks for the scales the database actually stores", () => {
   // clamped 1-5 on persist. Asking the model for 1-10 would have collapsed
   // every rating above 5 into "5" — turning a 6 and a 10 into the same
   // "strength", silently, forever.
-  const p = analystPrompt(input(), "LEGEND");
+  const p = analystPrompt(input(), "LEGEND", null, true);
   assert.match(p, /SKILL RATINGS 1-5/);
   assert.match(p, /severity 1-5/);
   assert.ok(!/1-10/.test(p), "no 1-10 scale anywhere in the prompt");
 });
 
 test("observations must cite a measured contact time, and the prompt says so", () => {
-  const p = analystPrompt(input(), "LEGEND");
+  const p = analystPrompt(input(), "LEGEND", null, true);
   assert.match(p, /not a time you chose/);
 });
 
@@ -171,4 +171,32 @@ test("a longer segment gets more room than a shorter one", () => {
 test("a nonsense duration falls back rather than asking for zero room", () => {
   assert.ok(analystOutputBudget(0) > THINKING_ALLOWANCE);
   assert.ok(analystOutputBudget(Number.NaN) > THINKING_ALLOWANCE);
+});
+
+test("the prompt tells the model to find the marked player when a still is attached", () => {
+  const p = analystPrompt(input(), "LEGEND", null, true);
+  assert.match(p, /still frame is attached/i);
+  assert.match(p, /follow them/i);
+});
+
+test("with no still, the prompt forbids picking a subject rather than staying quiet", () => {
+  // THE DANGEROUS CASE. Nothing in the video identifies anybody -- no boxes,
+  // no names, no highlight -- so a prompt that simply omits the subject leaves
+  // the model free to choose one, and a read addressed to a guessed person is
+  // indistinguishable from a correct one. It has to be told NOT to.
+  const p = analystPrompt(input(), "LEGEND", null, false);
+  assert.match(p, /NOBODY IS MARKED/);
+  assert.match(p, /must not pick one/i);
+  assert.doesNotMatch(p, /still frame is attached/i);
+});
+
+test("the prompt never describes a mark the overlay does not draw", () => {
+  // This has gone wrong twice: the prompt described a ball path after ball
+  // tracking was removed, and a gold YOU box after the boxes came off the
+  // overlay. Each time the model went looking for something absent and
+  // reported its absence as a finding about the footage.
+  for (const has of [true, false]) {
+    const p = analystPrompt(input(), "LEGEND", null, has);
+    assert.doesNotMatch(p, /gold box/i, "the gold box is not drawn any more");
+  }
 });

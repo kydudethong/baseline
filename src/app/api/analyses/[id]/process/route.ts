@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { getAnalysisForUser } from "@/lib/db/analyses";
+import { getSetup, isCompleteSetup } from "@/lib/db/setup";
 import { runPipeline } from "@/lib/analysis/pipeline";
 import { kickOffPipelineV2 } from "@/lib/analysis/pipeline-v2";
 import { livenessOf } from "@/lib/analysis/heartbeat";
@@ -35,6 +36,24 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   if (!analysis) return NextResponse.json({ error: "Analysis not found" }, { status: 404 });
   if (!analysis.video) {
     return NextResponse.json({ error: "Upload a video before processing." }, { status: 400 });
+  }
+  // THE COURT IS REQUIRED, and this is the only place that can enforce it.
+  //
+  // Nothing detects a court any more, so an analysis without a marked one has
+  // no scale: no distance covered, no time at the kitchen line, no zones. The
+  // reason it is refused rather than run degraded is the failure mode a court
+  // in the WRONG place has -- every one of those numbers is still produced and
+  // every one is wrong, and no stage downstream can tell the difference or
+  // warn anybody. A run that cannot be checked is worse than one that did not
+  // start, so this returns the user to the screen that fixes it.
+  if (!isCompleteSetup(await getSetup(supabase, id))) {
+    return NextResponse.json(
+      {
+        error: "Line up the court first — every distance in the read is measured off it.",
+        needsSetup: true,
+      },
+      { status: 400 }
+    );
   }
   // A run lives only in this Node process's event loop, so a dev-server
   // recompile, a deploy or an OOM kill leaves the row at "processing" with

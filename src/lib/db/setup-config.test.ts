@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  normaliseLineColor, playersForMode, rallySegOverridesForSetup,
+  isCompleteSetup, normaliseLineColor, playersForMode, rallySegOverridesForSetup,
   type PreAnalysisSetup,
 } from "./setup";
 
@@ -79,4 +79,42 @@ test("colour and mode combine", () => {
     rallySegOverridesForSetup(setup({ lineColorHex: "#ebd228", matchMode: "singles" })),
     [["court.line_color_hex", "#ebd228"], ["players.max_players", "2"]]
   );
+});
+
+const COURT = {
+  nearLeft: { x: 100, y: 900 }, nearRight: { x: 1800, y: 900 },
+  farRight: { x: 1400, y: 320 }, farLeft: { x: 500, y: 320 },
+  quadKind: "full" as const,
+};
+
+test("a setup with a court is enough to analyse", () => {
+  // AND A PLAYER LIST IS NOT REQUIRED, which is the change. It used to be, and
+  // keeping that bar after the players moved to after the analysis would block
+  // every run on a question the setup screen no longer asks -- an analysis that
+  // can never start, with the fix nowhere on screen.
+  assert.equal(isCompleteSetup(setup({ court: COURT, players: [] })), true);
+});
+
+test("a setup with no court is refused, however much else it has", () => {
+  // Nothing detects a court now, so without one there is no scale: no distance
+  // covered, no kitchen-line time, no zones.
+  assert.equal(isCompleteSetup(setup({ court: null, players: [] })), false);
+  assert.equal(
+    isCompleteSetup(setup({ court: null, lineColorHex: "#ffffff", matchMode: "singles" })),
+    false,
+    "a line colour and a match mode are settings, not a court"
+  );
+});
+
+test("no setup at all is refused rather than thrown at", () => {
+  assert.equal(isCompleteSetup(null), false);
+});
+
+test("an old setup's marked players neither help nor hinder", () => {
+  // Rows saved before the players moved still carry them. They are ignored on
+  // both sides: they cannot substitute for a court, and they cannot disqualify
+  // one either.
+  const legacy = [{ x: 10, y: 20, isSelf: true }, { x: 30, y: 40, isSelf: false }];
+  assert.equal(isCompleteSetup(setup({ court: null, players: legacy })), false);
+  assert.equal(isCompleteSetup(setup({ court: COURT, players: legacy })), true);
 });

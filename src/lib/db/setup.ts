@@ -104,8 +104,23 @@ export function rallySegOverridesForSetup(
   return out;
 }
 
+/**
+ * Whether this setup is enough to run an analysis on.
+ *
+ * A COURT, AND NOTHING ELSE. It used to also require marked players, which
+ * stopped being a sensible bar when the players moved to after the analysis --
+ * they are found by the pipeline now and tagged over its own boxes, so
+ * demanding them up front would block every run on a question nobody is asked
+ * any more. An older saved setup still carries a players array; it is ignored.
+ *
+ * The court is required, though, and that IS new. It was optional while the
+ * pipeline detected its own; with court detection gone, an analysis without
+ * one produces no distance, no kitchen-line time and no zones -- and, worse,
+ * a court marked in the wrong place produces all three, wrong, with nothing
+ * downstream able to tell. Hence a gate.
+ */
 export function isCompleteSetup(s: PreAnalysisSetup | null): boolean {
-  return Boolean(s && s.court && s.players.length > 0);
+  return Boolean(s && s.court);
 }
 
 export async function getSetup(
