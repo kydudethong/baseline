@@ -93,7 +93,7 @@ export default async function CalendarPage({
   const next = shiftMonth(monthDate, 1);
 
   return (
-    <div className="sec">
+    <div className="sec cal-page">
       <div className="sec-head">
         <div className="stack g1">
           <span className="eyebrow">Practice calendar</span>

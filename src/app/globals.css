@@ -1105,22 +1105,23 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
    way to a court. Sticky, so it stays put while they scan the month. */
 .cal-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:var(--a5);align-items:start}
 @media (max-width:900px){
-  .cal-layout{grid-template-columns:1fr}
-  /* "What do I do today" goes ABOVE the month on a phone. The grid answers
-     "am I keeping up"; only this panel answers the question somebody actually
-     opened the page with, and making them scroll a month to reach it puts the
-     answer behind the scoreboard. */
-  .cal-layout > :last-child{order:-1}
-}
-
-/* The up-next card stops following the screen on a phone, for the same reason
-   the video did: in a single column, anything pinned to the top is taken from
-   the only space there is. */
-@media (max-width:900px){
-  .upnext{position:static}
+  .cal-layout{grid-template-columns:1fr;gap:var(--a4)}
+  /* THE MONTH COMES FIRST AGAIN, and moving it second was my mistake.
+     The reasoning was sound -- "what do I do today" is the question people
+     open this page with -- but the up-next card is a whole session with its
+     drills listed, so putting it first buried the calendar under a screenful
+     and the answer to "am I keeping up" stopped existing on a phone.
+     The grid is about 300px tall and answers its question at a glance. It
+     goes first because it is SMALL, not because it matters more, and the
+     compact up-next below it is still above the fold on most phones. */
+  .cal-layout > :last-child{order:0}
 }
 
 .upnext{position:sticky;top:78px;display:flex;flex-direction:column;gap:10px;background:var(--card);border:1px solid var(--line);border-top:3px solid var(--blue);border-radius:var(--r3);padding:var(--a4);box-shadow:var(--lift)}
+/* Nothing follows the screen in a single column: whatever is pinned to the top
+   is taken from the only space there is. AFTER the rule it overrides, because
+   a media query adds no specificity -- written above it, this lost silently. */
+@media (max-width:900px){ .upnext{position:static} }
 .upnext.done{border-top-color:var(--good)}
 .upnext-head{display:flex;align-items:center;gap:var(--a2);justify-content:space-between}
 .upnext-title{font-family:var(--display);font-size:19px;font-weight:600;letter-spacing:-.015em;margin:0}
@@ -1546,4 +1547,50 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
   /* The word costs more than it earns at this width; the arrow carries it. */
   .reveal-chev{padding:5px 8px;font-size:0}
   .reveal-chev::after{font-size:15px}
+}
+
+
+/* ---------------------------------------------------------------------------
+   THE PRACTICE PAGE ON A PHONE: fit the answer on one screen.
+
+   Desktop has two columns and room to breathe, so every element was sized for
+   that and then simply shrunk. The result on a 375x812 screen was a page-title
+   block, a row of pills, a progress header, a whole practice session with its
+   drills listed out, and only then the month -- three swipes before the thing
+   the page is named after.
+
+   Everything below trades air for information, and only below 640px. Nothing
+   is removed: the header shrinks, the drills collapse to a count, and the
+   month -- which is compact and answers its question at a glance -- gets to
+   the top.
+   --------------------------------------------------------------------------- */
+@media (max-width:640px){
+  /* The page title takes a third of the screen to say the month, which is
+     also printed on every other page's nav. Half the size, no eyebrow. */
+  .cal-page .sec-head{gap:var(--a2);margin-bottom:var(--a3)}
+  .cal-page .sec-head .eyebrow{display:none}
+  .cal-page .sec-head h1{font-size:23px;line-height:1.1}
+  .cal-page .sec-head .sm{display:none}
+  /* Month arrows sit on the title's line rather than below it. */
+  .cal-page .sec-head{flex-direction:row;align-items:center}
+  .cal-page .sec-head .btn{padding-inline:10px}
+
+  /* The progress header: same information, one line less of it. */
+  .cal-top{gap:7px}
+  .cal-count{font-size:24px}
+  .cal-caption{font-size:12px}
+
+  /* The up-next card carried every drill's full instructions, which is a
+     screen and a half on its own. On a phone it states the session and how
+     many drills; tapping the day in the grid above opens the detail, which is
+     where the drills were always meant to be read from. */
+  .upnext{padding:var(--a3);gap:8px}
+  .upnext-drills .succ,
+  .upnext-drills .how{display:none}
+  .upnext-drills li{padding-left:20px}
+  .upnext-drills .nm{font-size:12.5px}
+
+  /* Section rhythm: the page used desktop gaps between every block. */
+  .cal-page .stack.g5{gap:var(--a4)}
+  .cal-page .note{font-size:12.5px;padding:10px 12px}
 }
