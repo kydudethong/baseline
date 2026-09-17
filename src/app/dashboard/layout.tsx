@@ -2,9 +2,10 @@ import Link from "next/link";
 import Image from "next/image";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { logout } from "@/app/actions/auth";
 import { DashboardNav } from "@/components/dashboard/DashboardNav";
 import { getProfile } from "@/lib/db/profiles";
+import { completedGameCount } from "@/lib/db/practice-calendar";
+import { AccountMenu } from "@/components/dashboard/AccountMenu";
 
 /**
  * The app shell: a fixed left rail, everything else in the remaining width.
@@ -26,7 +27,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   // The rail greets you by name, like the rest of the app — an email address
   // in the corner is an account identifier, not a person.
-  const profile = await getProfile(supabase, user.id);
+  const [profile, games] = await Promise.all([
+    getProfile(supabase, user.id),
+    // Never fails the shell: a count that cannot be read is a menu missing one
+    // number, not a dashboard that will not render.
+    completedGameCount(supabase, user.id).catch(() => 0),
+  ]);
   const name = firstName(profile?.display_name, user.email);
   const initial = (name[0] ?? "?").toUpperCase();
 
@@ -52,17 +58,19 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <Link href="/dashboard/new" className="btn btn-optic btn-sm">
             + Analyze a game
           </Link>
-          <div className="rail-user">
-            <span className="rail-av">{initial}</span>
-            <span className="who">
-              <span className="nm">{name}</span>
-              <form action={logout}>
-                <button type="submit" className="sub" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "inherit", font: "inherit" }}>
-                  Log out
-                </button>
-              </form>
-            </span>
-          </div>
+          {/* The corner used to be a name and a "Log out" link -- the one
+              thing nobody opens an account menu to do first. Everything the
+              app assumes about a player, including the two fields that go into
+              every coaching prompt, had nowhere to be seen or corrected. */}
+          <AccountMenu
+            name={name}
+            email={user.email ?? ""}
+            initial={initial}
+            skillLevel={profile?.skill_level ?? null}
+            paddleHand={profile?.paddle_hand ?? null}
+            gamesAnalysed={games}
+            memberSince={profile?.created_at ?? null}
+          />
         </div>
       </aside>
 

@@ -597,11 +597,9 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .rail-nav a[data-active="true"]{background:var(--optic);color:var(--optic-ink);font-weight:600}
 .rail-nav a svg{flex:none}
 .rail-foot{margin-top:auto;display:flex;flex-direction:column;gap:var(--a3)}
-.rail-user{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--r2);background:var(--sunk);min-width:0}
+/* .rail-user is gone: the corner is an AccountMenu now, which owns its own
+   trigger styling. .rail-av stays -- the avatar is used in both. */
 .rail-av{width:32px;height:32px;border-radius:50%;flex:none;display:grid;place-items:center;background:var(--blue-wash);color:var(--blue-deep);font-weight:700;font-size:13px}
-.rail-user .who{min-width:0;display:flex;flex-direction:column;line-height:1.25}
-.rail-user .nm{font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.rail-user .sub{font-size:11px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .shell-main{min-width:0;display:flex;flex-direction:column}
 .shell-page{max-width:1180px;width:100%;margin:0 auto;padding:var(--a6) var(--a5) var(--a8);display:flex;flex-direction:column;gap:var(--a6)}
 
@@ -612,8 +610,6 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
   .rail-nav a span{display:none}
   .rail-nav a{padding:9px 11px}
   .rail-foot{margin-top:0;margin-left:auto;flex-direction:row;align-items:center}
-  .rail-user .who{display:none}
-  .rail-user{background:none;padding:0}
 }
 
 /* ---- Dashboard home -----------------------------------------------------
@@ -1593,4 +1589,92 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
   /* Section rhythm: the page used desktop gaps between every block. */
   .cal-page .stack.g5{gap:var(--a4)}
   .cal-page .note{font-size:12.5px;padding:10px 12px}
+}
+
+
+/* ---------------------------------------------------------------------------
+   THE ACCOUNT MENU.
+   Opens UPWARD, because the trigger sits at the bottom of the rail on a
+   desktop; and it is pinned to the bottom of the screen on a phone, where the
+   rail is a top bar and a menu hanging off it would run past the fold.
+   --------------------------------------------------------------------------- */
+.acct{position:relative;min-width:0}
+.acct-trigger{
+  display:flex;align-items:center;gap:10px;width:100%;min-width:0;
+  padding:10px 12px;border-radius:var(--r2);
+  background:var(--sunk);border:1px solid transparent;
+  font:inherit;color:inherit;text-align:left;cursor:pointer;
+  transition:border-color .14s ease, background .14s ease;
+}
+.acct-trigger:hover{border-color:var(--line);background:var(--card)}
+.acct-trigger[aria-expanded="true"]{border-color:var(--blue);background:var(--card)}
+.acct-trigger:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.acct-who{min-width:0;display:flex;flex-direction:column;line-height:1.25}
+.acct-who .nm{font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acct-who .sub{font-size:11px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acct-caret{margin-left:auto;font-size:11px;color:var(--ink-3);transition:transform .16s ease}
+.acct-trigger[aria-expanded="true"] .acct-caret{transform:rotate(180deg)}
+
+.acct-menu{
+  position:absolute;bottom:calc(100% + 8px);left:0;
+  width:min(300px, calc(100vw - 32px));
+  z-index:60;display:flex;flex-direction:column;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r3);
+  box-shadow:0 16px 40px rgb(0 0 0 / .18);
+  overflow:hidden;
+}
+.acct-head{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--line)}
+.rail-av.lg{width:40px;height:40px;font-size:16px}
+.acct-id{min-width:0;display:flex;flex-direction:column;gap:1px}
+.acct-id strong{font-size:14px;color:var(--ink)}
+.acct-email{font-size:11.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.acct-stats{display:flex;gap:1px;background:var(--line);border-bottom:1px solid var(--line)}
+.acct-stats > div{flex:1;background:var(--card);padding:10px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.acct-num{font-family:var(--display);font-size:20px;font-weight:700;line-height:1;color:var(--ink)}
+.acct-num.sm{font-size:13px;font-weight:600;line-height:1.2}
+.acct-lbl{font-size:10.5px;color:var(--ink-3);letter-spacing:.03em}
+
+.acct-rows{padding:10px 14px 4px;display:flex;flex-direction:column;gap:7px}
+.acct-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:12.5px}
+.acct-row span{color:var(--ink-3)}
+.acct-row strong{color:var(--ink);font-weight:600}
+.acct-row strong.unset{color:var(--warn);font-weight:500}
+.acct-note{margin:0;padding:2px 14px 10px;font-size:11px;line-height:1.4;color:var(--ink-3)}
+
+.acct-item{
+  display:flex;align-items:center;gap:9px;width:100%;
+  padding:11px 14px;border:0;border-top:1px solid var(--line);
+  background:none;font:inherit;font-size:13px;color:var(--ink-2);
+  text-align:left;cursor:pointer;
+}
+.acct-item:hover{background:var(--sunk);color:var(--ink)}
+.acct-item.danger{color:var(--bad)}
+.acct-item.danger:hover{background:var(--bad-wash)}
+.acct-out{display:contents}
+
+.acct-form{display:flex;flex-direction:column;gap:9px;padding:12px 14px}
+.acct-field{display:flex;flex-direction:column;gap:3px}
+.acct-field > span{font-size:11px;color:var(--ink-3);letter-spacing:.03em}
+.acct-field input,.acct-field select{
+  font:inherit;font-size:13px;padding:7px 9px;
+  border:1px solid var(--line);border-radius:var(--r2);
+  background:var(--card);color:var(--ink);width:100%;
+}
+.acct-field input:focus-visible,.acct-field select:focus-visible{outline:2px solid var(--blue);outline-offset:0}
+.acct-actions{display:flex;gap:8px;margin-top:2px}
+.acct-err{margin:0;font-size:12px;color:var(--bad)}
+.acct-ok{margin:0;font-size:12px;color:var(--good);font-weight:600}
+
+@media (max-width:900px){
+  /* The rail is a top bar here, so the menu drops DOWN from the trigger and
+     the name beside the avatar goes -- there is no room for it in a row of
+     nav items. */
+  .acct-who{display:none}
+  .acct-caret{display:none}
+  .acct-trigger{background:none;padding:0;border:0}
+  .acct-menu{
+    position:fixed;top:auto;bottom:16px;left:16px;right:16px;width:auto;
+    max-height:min(80vh, 560px);overflow-y:auto;
+  }
 }
