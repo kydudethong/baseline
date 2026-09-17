@@ -37,9 +37,31 @@ export function CalendarMonth({
   const byDate = new Map(sessions.map((s) => [s.scheduled_on, s]));
   const open = openDate ? byDate.get(openDate) ?? null : null;
 
-  const doneCount = sessions.filter((s) => s.completed_at).length;
   const now = new Date();
   const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+  const doneCount = sessions.filter((s) => s.completed_at).length;
+
+  /**
+   * Consecutive finished sessions counting back from the most recent one that
+   * has happened.
+   *
+   * COUNTED BACKWARDS FROM THE LAST SESSION THAT IS DUE, not from the end of
+   * the month: every session still in the future is unfinished by definition,
+   * and counting those would report a broken streak to somebody who has not
+   * missed anything. A session scheduled for Friday is not a gap on Tuesday.
+   */
+  const streak = (() => {
+    const past = [...sessions]
+      .filter((s) => s.scheduled_on <= todayKey)
+      .sort((a, b) => b.scheduled_on.localeCompare(a.scheduled_on));
+    let n = 0;
+    for (const s of past) {
+      if (!s.completed_at) break;
+      n += 1;
+    }
+    return n;
+  })();
 
   async function tick(kind: "session" | "drill", id: string, done: boolean) {
     setSessions((prev) =>
@@ -89,10 +111,40 @@ export function CalendarMonth({
 
   return (
     <div className="stack g4">
-      <div className="row g2">
-        <span className="pill p-neutral">
-          {doneCount} of {sessions.length} done
-        </span>
+      {/* THE HEADER IS THE MOTIVATION, so it stopped being a grey pill.
+          "4 of 12 done" is a fact; a bar a third full is a feeling, and the
+          feeling is what gets somebody onto a court on Tuesday. The streak
+          only appears when there IS one -- a badge reading "0 in a row" is a
+          reminder of failure printed in a colour reserved for good news. */}
+      <div className="cal-top">
+        <div className="cal-stats">
+          <span className="cal-count">
+            {doneCount}<em> / {sessions.length}</em>
+          </span>
+          <span className="cal-caption">
+            {doneCount === 0
+              ? "sessions this month — the first one is the hard one"
+              : doneCount === sessions.length
+                ? "every session done. That is a whole month."
+                : `sessions done · ${sessions.length - doneCount} to go`}
+          </span>
+          {streak >= 2 ? (
+            <span className="cal-streak">🔥 {streak} in a row</span>
+          ) : null}
+        </div>
+        <div
+          className="cal-bar"
+          role="progressbar"
+          aria-valuenow={doneCount}
+          aria-valuemin={0}
+          aria-valuemax={sessions.length}
+          aria-label={`${doneCount} of ${sessions.length} sessions done`}
+        >
+          <div
+            className="cal-bar-fill"
+            style={{ width: sessions.length ? `${(doneCount / sessions.length) * 100}%` : "0%" }}
+          />
+        </div>
         {error ? <span className="xs" style={{ color: "var(--bad)" }}>{error}</span> : null}
       </div>
 
@@ -196,8 +248,8 @@ export function CalendarMonth({
         </article>
       ) : (
         <p className="note">
-          Tap a day with a session on it to see the drills and tick them off. Days without one are
-          rest — a month where every square is full is a month nobody finishes.
+          Tap a highlighted day to see its drills and tick them off. The dashed squares are rest —
+          a month where every square is full is a month nobody finishes.
         </p>
       )}
     </div>

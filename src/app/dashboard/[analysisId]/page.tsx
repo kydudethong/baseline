@@ -403,7 +403,7 @@ async function AnalysisBreakdown({
                   {" · warm-up, drills and a game to finish"}
                 </span>
               </span>
-              <span className="reveal-chev" aria-hidden="true">›</span>
+              <span className="reveal-chev" aria-hidden="true">Open</span>
             </summary>
             <div className="reveal-body">
               <PracticeSessionPanel
@@ -439,7 +439,7 @@ async function AnalysisBreakdown({
             <span className="reveal-title">The measurements behind this page</span>
             <span className="reveal-sub">Movement, the raw shot table, and what the tracker saw</span>
           </span>
-          <span className="reveal-chev" aria-hidden="true">›</span>
+          <span className="reveal-chev" aria-hidden="true">Open</span>
         </summary>
         <div className="reveal-body stack g5">
           <AnalysisResultPanel result={analysis.result!} />

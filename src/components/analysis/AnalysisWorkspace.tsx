@@ -496,7 +496,7 @@ function QualityNote({ view }: { view: AnalysisView }) {
               : "What this read could and could not measure"}
           </span>
         </span>
-        <span className="reveal-chev" aria-hidden="true">›</span>
+        <span className="reveal-chev" aria-hidden="true">Open</span>
       </summary>
       <div className="reveal-body stack g2">
         {limitations.map((l, i) => (

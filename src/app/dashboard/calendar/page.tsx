@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { CSSProperties } from "react";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -127,9 +128,16 @@ export default async function CalendarPage({
             <UpNext sessions={existing.sessions} todayKey={todayKey} />
           </div>
 
-          <details className="card">
-            <summary className="sm" style={{ cursor: "pointer" }}>Change the schedule or rebuild this month</summary>
-            <div style={{ marginTop: 16 }}>
+          <details className="reveal" style={{ "--reveal-accent": "var(--ink-3)" } as CSSProperties}>
+            <summary className="reveal-sum">
+              <span className="reveal-ic" aria-hidden="true">⚙</span>
+              <span className="reveal-txt">
+                <span className="reveal-title">Change the schedule or rebuild this month</span>
+                <span className="reveal-sub">Which days you play, and how many sessions</span>
+              </span>
+              <span className="reveal-chev" aria-hidden="true">Open</span>
+            </summary>
+            <div className="reveal-body">
               <PlanSetup
                 month={month}
                 monthLabel={monthLabel}

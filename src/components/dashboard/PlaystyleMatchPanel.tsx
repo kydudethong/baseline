@@ -66,7 +66,7 @@ export function PlaystyleMatchPanel({
             <span className="reveal-title">See which pro you play like</span>
             <span className="reveal-sub">Matched on the shape of your ratings, not your level</span>
           </span>
-          <span className="reveal-chev" aria-hidden="true">›</span>
+          <span className="reveal-chev" aria-hidden="true">Open</span>
         </summary>
         <div className="reveal-body">
       <div className="read-head">

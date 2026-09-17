@@ -60,7 +60,7 @@ export function SkillRatingsPanel({
                 {withReasons.length} skill{withReasons.length === 1 ? "" : "s"}, with what the coach saw in this game
               </span>
             </span>
-            <span className="reveal-chev" aria-hidden="true">›</span>
+            <span className="reveal-chev" aria-hidden="true">Open</span>
           </summary>
           <div className="reveal-body grid2">
             {withReasons.map((s) => (

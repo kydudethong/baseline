@@ -931,24 +931,135 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
    answers "am I keeping up", and the gap where last week should have been is
    the thing that gets somebody back on a court. */
 .lbl-sm{font-size:13px;font-weight:600;color:var(--ink)}
-.cal{border:1px solid var(--line);border-radius:var(--r3);overflow:hidden;background:var(--line);box-shadow:var(--lift)}
-.cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line)}
-.cal-head span{background:var(--sunk);padding:8px 6px;text-align:center;font-family:var(--data);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
-.cal-week{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line)}
-.cal-day{position:relative;display:flex;flex-direction:column;gap:4px;align-items:flex-start;min-height:78px;padding:7px 8px;background:var(--card);border:0;text-align:left;font:inherit;cursor:default;color:var(--ink-3)}
-.cal-day.empty{background:var(--sunk)}
-.cal-day .n{font-family:var(--data);font-size:12px;font-weight:600}
-/* A day with a session earns the page's colour; a rest day does not. The
-   contrast between them IS the information. */
-.cal-day.has{background:var(--blue-wash);color:var(--ink);cursor:pointer}
+/* ---------------------------------------------------------------------------
+   THE PRACTICE CALENDAR.
+
+   It was a spreadsheet: seven columns hairlined apart by a 1px background
+   bleeding through, cells that were the same flat wash whether they held a
+   session or nothing, and a grey pill reading "4 of 12 done". Every piece of
+   information was on the screen and none of it was worth looking at -- and
+   this is the one page whose whole job is to make somebody want to go to a
+   court on Tuesday.
+
+   So the grid is a grid of OBJECTS now. A day with a session is a small card
+   that lifts when you reach for it; a day you finished is filled and ticked;
+   a rest day is quiet but deliberately present, because a month where every
+   square is full is a month nobody finishes.
+   --------------------------------------------------------------------------- */
+
+/* ---- the progress header ---- */
+.cal-top{display:flex;flex-direction:column;gap:10px}
+.cal-stats{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.cal-count{
+  font-family:var(--display);font-size:30px;font-weight:700;letter-spacing:-.02em;
+  line-height:1;color:var(--ink);
+}
+.cal-count em{font-style:normal;color:var(--ink-3);font-size:18px;font-weight:600}
+.cal-caption{font-size:13px;color:var(--ink-2)}
+.cal-streak{
+  margin-left:auto;display:inline-flex;align-items:center;gap:6px;
+  padding:5px 11px;border-radius:999px;
+  background:var(--warn-wash);color:var(--warn);
+  font-size:12px;font-weight:700;
+}
+/* THE BAR IS THE POINT OF THE HEADER. "4 of 12" is a fact; a bar that is a
+   third full is a feeling, and the feeling is what gets somebody onto a
+   court. */
+.cal-bar{height:8px;border-radius:999px;background:var(--sunk);overflow:hidden}
+.cal-bar-fill{
+  height:100%;border-radius:999px;
+  background:linear-gradient(90deg, var(--blue-deep), var(--blue-bright));
+  transition:width .5s cubic-bezier(.2,.8,.2,1);
+}
+
+/* ---- the month ---- */
+.cal{display:flex;flex-direction:column;gap:6px;background:transparent;border:0;box-shadow:none}
+.cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;background:transparent}
+.cal-head span{
+  background:transparent;padding:2px 0 4px;text-align:center;
+  font-family:var(--data);font-size:10px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--ink-3);
+}
+.cal-week{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;background:transparent}
+
+.cal-day{
+  position:relative;display:flex;flex-direction:column;gap:5px;align-items:flex-start;
+  min-height:92px;padding:9px 10px;
+  background:var(--card);
+  border:1px solid var(--line);border-radius:var(--r3);
+  text-align:left;font:inherit;cursor:default;color:var(--ink-3);
+  transition:transform .14s ease, box-shadow .14s ease, border-color .14s ease;
+}
+/* A rest day is not an error. Faint, borderless, still holding its number --
+   the gaps are what make the full squares mean something. */
+.cal-day.empty{background:transparent;border-color:transparent}
+.cal-day:not(.has):not(.empty){background:transparent;border-style:dashed;border-color:var(--line)}
+.cal-day .n{font-family:var(--data);font-size:12px;font-weight:700}
+
+/* A day with a session: tinted, with a coloured spine so a week reads at a
+   glance as "these three". */
+.cal-day.has{
+  background:var(--blue-wash);border-color:color-mix(in srgb, var(--blue) 28%, var(--line));
+  color:var(--ink);cursor:pointer;
+  box-shadow:var(--lift);
+}
+.cal-day.has::before{
+  content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;
+  border-radius:0 3px 3px 0;background:var(--blue);
+}
+.cal-day.has:hover{transform:translateY(-2px);box-shadow:0 8px 20px color-mix(in srgb, var(--blue) 22%, transparent)}
+.cal-day.has:active{transform:translateY(0)}
 .cal-day.has .n{color:var(--blue-deep)}
-.cal-day.has .t{font-size:11px;line-height:1.3;color:var(--ink-2);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-.cal-day.done{background:var(--good-wash)}
+.cal-day.has .t{
+  font-size:11px;line-height:1.3;color:var(--ink-2);
+  overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+}
+
+/* Finished. Filled rather than tinted, because the whole reward of this page
+   is watching squares go solid. */
+.cal-day.done{background:var(--good-wash);border-color:color-mix(in srgb, var(--good) 38%, var(--line))}
+.cal-day.done::before{background:var(--good)}
 .cal-day.done .n{color:var(--good)}
-.cal-day .tick{position:absolute;top:6px;right:8px;color:var(--good);font-weight:700;font-size:13px}
-.cal-day.today{box-shadow:inset 0 0 0 2px var(--blue)}
-.cal-day.open{box-shadow:inset 0 0 0 2px var(--blue-deep)}
+.cal-day.done .t{color:var(--good);opacity:.85}
+.cal-day .tick{
+  position:absolute;top:7px;right:8px;
+  display:grid;place-items:center;width:18px;height:18px;border-radius:50%;
+  background:var(--good);color:#fff;font-weight:800;font-size:11px;line-height:1;
+}
+@media (prefers-reduced-motion: no-preference){
+  .cal-day.done .tick{animation:cal-pop .26s cubic-bezier(.2,1.5,.4,1)}
+}
+@keyframes cal-pop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
+
+/* Today gets a label, not just a ring. A ring asks you to work out what it
+   means; the word does not. */
+.cal-day.today{border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb, var(--blue) 18%, transparent)}
+.cal-day.today .n::after{
+  content:"TODAY";margin-left:6px;
+  font-size:8.5px;font-weight:800;letter-spacing:.08em;color:var(--blue);
+  vertical-align:1px;
+}
+.cal-day.open{border-color:var(--blue-deep);box-shadow:0 0 0 3px color-mix(in srgb, var(--blue) 30%, transparent)}
 .cal-day:disabled{cursor:default}
+.cal-day:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+
+@media (max-width:640px){
+  /* Seven columns on a phone leaves ~44px a cell: the title cannot fit, so it
+     goes, and a dot carries "there is something here" instead. */
+  .cal{gap:4px}
+  .cal-head,.cal-week{gap:4px}
+  .cal-day{min-height:52px;padding:6px 4px;align-items:center;gap:3px}
+  .cal-day .t{display:none}
+  .cal-day.has::before{display:none}
+  .cal-day.has::after{
+    content:"";width:6px;height:6px;border-radius:50%;background:var(--blue);
+  }
+  .cal-day.done::after{background:var(--good)}
+  .cal-day .tick{position:static;width:15px;height:15px;font-size:9px}
+  .cal-day.done::after{display:none}
+  .cal-day.today .n::after{display:none}
+  .cal-day.today{box-shadow:0 0 0 2px color-mix(in srgb, var(--blue) 30%, transparent)}
+}
 
 .drill-row{display:grid;grid-template-columns:20px 1fr;gap:var(--a3);align-items:start;padding:12px;border:1px solid var(--line);border-radius:var(--r2);background:var(--card)}
 .drill-row.done{background:var(--good-wash);border-color:transparent}
@@ -993,7 +1104,21 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
    today", which is the question somebody actually opens this page with on the
    way to a court. Sticky, so it stays put while they scan the month. */
 .cal-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:var(--a5);align-items:start}
-@media (max-width:900px){ .cal-layout{grid-template-columns:1fr} }
+@media (max-width:900px){
+  .cal-layout{grid-template-columns:1fr}
+  /* "What do I do today" goes ABOVE the month on a phone. The grid answers
+     "am I keeping up"; only this panel answers the question somebody actually
+     opened the page with, and making them scroll a month to reach it puts the
+     answer behind the scoreboard. */
+  .cal-layout > :last-child{order:-1}
+}
+
+/* The up-next card stops following the screen on a phone, for the same reason
+   the video did: in a single column, anything pinned to the top is taken from
+   the only space there is. */
+@media (max-width:900px){
+  .upnext{position:static}
+}
 
 .upnext{position:sticky;top:78px;display:flex;flex-direction:column;gap:10px;background:var(--card);border:1px solid var(--line);border-top:3px solid var(--blue);border-radius:var(--r3);padding:var(--a4);box-shadow:var(--lift)}
 .upnext.done{border-top-color:var(--good)}
