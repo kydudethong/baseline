@@ -1615,13 +1615,18 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .acct-caret{margin-left:auto;font-size:11px;color:var(--ink-3);transition:transform .16s ease}
 .acct-trigger[aria-expanded="true"] .acct-caret{transform:rotate(180deg)}
 
+/* FIXED, AND PLACED BY SCRIPT. It lives on document.body now, so `left` and
+   `bottom` are set inline from the trigger's measured position -- there is no
+   ancestor left to be positioned against, which is the entire point: the rail
+   clips at 246px and the shell clips overflow-x, and between them a 300px
+   menu lost its right-hand third. */
 .acct-menu{
-  position:absolute;bottom:calc(100% + 8px);left:0;
-  width:min(300px, calc(100vw - 32px));
-  z-index:60;display:flex;flex-direction:column;
+  position:fixed;
+  width:min(320px, calc(100vw - 24px));
+  max-height:min(76vh, 620px);overflow-y:auto;
+  z-index:80;display:flex;flex-direction:column;
   background:var(--card);border:1px solid var(--line);border-radius:var(--r3);
-  box-shadow:0 16px 40px rgb(0 0 0 / .18);
-  overflow:hidden;
+  box-shadow:0 16px 44px rgb(0 0 0 / .20);
 }
 .acct-head{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--line)}
 .rail-av.lg{width:40px;height:40px;font-size:16px}
@@ -1630,13 +1635,20 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .acct-email{font-size:11.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .acct-stats{display:flex;gap:1px;background:var(--line);border-bottom:1px solid var(--line)}
-.acct-stats > div{flex:1;background:var(--card);padding:10px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.acct-stats > div{flex:1 1 0;background:var(--card);padding:10px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.acct-num.sm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acct-num{font-family:var(--display);font-size:20px;font-weight:700;line-height:1;color:var(--ink)}
 .acct-num.sm{font-size:13px;font-weight:600;line-height:1.2}
 .acct-lbl{font-size:10.5px;color:var(--ink-3);letter-spacing:.03em}
 
 .acct-rows{padding:10px 14px 4px;display:flex;flex-direction:column;gap:7px}
 .acct-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:12.5px}
+/* The value must never be the thing that gives way. It was invisible for a
+   different reason -- the menu was clipped -- but a row whose right-hand side
+   can be squeezed to nothing is one narrow viewport away from the same
+   symptom. */
+.acct-row strong{flex:none;white-space:nowrap}
+.acct-row > span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acct-row span{color:var(--ink-3)}
 .acct-row strong{color:var(--ink);font-weight:600}
 .acct-row strong.unset{color:var(--warn);font-weight:500}
@@ -1667,14 +1679,13 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .acct-ok{margin:0;font-size:12px;color:var(--good);font-weight:600}
 
 @media (max-width:900px){
-  /* The rail is a top bar here, so the menu drops DOWN from the trigger and
-     the name beside the avatar goes -- there is no room for it in a row of
-     nav items. */
+  /* The rail is a top bar here, so the name beside the avatar goes -- there is
+     no room for it in a row of nav items. */
   .acct-who{display:none}
   .acct-caret{display:none}
   .acct-trigger{background:none;padding:0;border:0}
-  .acct-menu{
-    position:fixed;top:auto;bottom:16px;left:16px;right:16px;width:auto;
-    max-height:min(80vh, 560px);overflow-y:auto;
-  }
+  /* Edge to edge at the bottom of the screen, overriding the measured
+     position: anchoring a 320px panel to a 32px avatar in a top bar puts it
+     against whichever edge the avatar is nearest. */
+  .acct-menu{left:16px !important;right:16px;bottom:16px !important;width:auto}
 }

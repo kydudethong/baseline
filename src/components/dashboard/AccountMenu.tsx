@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { logout } from "@/app/actions/auth";
 import { updateProfile, type ProfileFormState } from "@/app/actions/profile";
 
@@ -42,6 +43,51 @@ export function AccountMenu({
     updateProfile, {}
   );
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
+
+  // THE MENU RENDERS INTO document.body, NOT INTO THE RAIL.
+  //
+  // It used to be absolutely positioned inside the rail, and the rail is 246px
+  // wide with overflow-y:auto -- which clips horizontally too, because a box
+  // with one axis scrollable cannot leave the other visible. So a 300px menu
+  // lost its right-hand third: "September" read "Septembe", and the skill
+  // level and paddle hand VALUES, which sit at the right end of their rows,
+  // were cut off entirely. The menu looked like it was missing the data it
+  // exists to show. .shell adds overflow-x:clip on top of that.
+  //
+  // A portal escapes every ancestor clip, whatever any of them do later.
+  //
+  // No mounted-guard is needed: the menu only exists once `open` is true, and
+  // `open` can only be set by a click, which cannot happen during a server
+  // render. Guarding it with a state flag set in an effect would be a
+  // cascading render to solve a problem that does not arise.
+
+  const place = useCallback(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const width = Math.min(320, window.innerWidth - 32);
+    // Opens UPWARD from the trigger, which sits at the bottom of the rail.
+    // Clamped to the viewport so it can never be the thing off-screen.
+    const left = Math.max(12, Math.min(r.left, window.innerWidth - width - 12));
+    setPos({ left, bottom: Math.max(12, window.innerHeight - r.top + 8) });
+  }, []);
+
+  useLayoutEffect(() => { if (open) place(); }, [open, place]);
+
+  useEffect(() => {
+    if (!open) return;
+    // The rail scrolls and the window resizes; a menu anchored to a trigger
+    // that has moved is worse than one that is merely in the wrong place.
+    const onMove = () => place();
+    window.addEventListener("resize", onMove);
+    window.addEventListener("scroll", onMove, true);
+    return () => {
+      window.removeEventListener("resize", onMove);
+      window.removeEventListener("scroll", onMove, true);
+    };
+  }, [open, place]);
 
   // CLOSE ON AN OUTSIDE CLICK AND ON ESCAPE. A menu that can only be dismissed
   // by hitting the same button again is a menu people leave open and then
@@ -49,7 +95,12 @@ export function AccountMenu({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      // BOTH refs. The menu is portalled out of the trigger's subtree, so
+      // testing the trigger alone would close it on its own first click.
+      if (wrapRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", onDown);
@@ -89,8 +140,14 @@ export function AccountMenu({
         <span className="acct-caret" aria-hidden="true">⌃</span>
       </button>
 
-      {open ? (
-        <div className="acct-menu" role="menu">
+      {open && pos
+        ? createPortal(
+        <div
+          className="acct-menu"
+          role="menu"
+          ref={menuRef}
+          style={{ left: pos.left, bottom: pos.bottom }}
+        >
           <div className="acct-head">
             <span className="rail-av lg">{initial}</span>
             <span className="acct-id">
@@ -182,8 +239,10 @@ export function AccountMenu({
               <span aria-hidden="true">→]</span> Log out
             </button>
           </form>
-        </div>
-      ) : null}
+        </div>,
+        document.body
+      )
+        : null}
     </div>
   );
 }
