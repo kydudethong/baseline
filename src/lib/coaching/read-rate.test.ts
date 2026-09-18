@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ANALYST_FPS, analystFps, overlayFps } from "./read-rate";
+import { ANALYST_FPS, analystFps, gatingEnabled, overlayFps } from "./read-rate";
 
 test("the overlay is never written slower than the model reads it", () => {
   // The bug: ANALYST_FPS went to 15 while the overlay stayed at 10. You cannot
@@ -56,5 +56,26 @@ test("an out-of-range rate falls back rather than being obeyed", () => {
   } finally {
     if (before === undefined) delete process.env.ANALYST_FPS;
     else process.env.ANALYST_FPS = before;
+  }
+});
+
+test("motion gating is off unless somebody turns it on", () => {
+  // NOT A PREFERENCE — A CORRECTNESS DEFAULT. Whatever the gate skips, the
+  // model never sees, so a rally in a skipped stretch cannot be recovered by
+  // any prompt. It was cutting real points short on real footage: a kitchen
+  // exchange is four people standing almost still, which reads as dead time.
+  // "auto" used to turn it on at high media resolution, which is the default
+  // resolution — so the risky path was the one nobody chose.
+  const before = process.env.ANALYST_GATE;
+  try {
+    delete process.env.ANALYST_GATE;
+    assert.equal(gatingEnabled(), false, "gating is on by default again");
+    process.env.ANALYST_GATE = "auto";
+    assert.equal(gatingEnabled(), false, "\"auto\" quietly re-enabled it");
+    process.env.ANALYST_GATE = "on";
+    assert.equal(gatingEnabled(), true, "there is no way to turn it back on");
+  } finally {
+    if (before === undefined) delete process.env.ANALYST_GATE;
+    else process.env.ANALYST_GATE = before;
   }
 });

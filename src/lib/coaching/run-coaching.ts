@@ -42,6 +42,7 @@ import { matchPlaystyles } from "./pro-playstyles";
 import { shotRowsFromAnalyst } from "./shot-rows";
 import { fillApproachTimes } from "./approach-times";
 import { activeWindows } from "./active-windows";
+import { gatingEnabled } from "./read-rate";
 import { recordCapture } from "./capture";
 import { readOverlayBytes, OverlayMissingError } from "./overlay-source";
 import fsp from "node:fs/promises";
@@ -354,15 +355,31 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     //
     // So it runs only when a pass is expensive enough to be worth the risk.
     // ANALYST_GATE=on forces it back on, ANALYST_GATE=off forces it off.
-    const gateEnv = (process.env.ANALYST_GATE ?? "auto").toLowerCase();
-    const gateWorthIt = gateEnv === "on"
-      || (gateEnv !== "off" && analystMediaResolution() === "high");
-    const useGate = gate.gated && gateWorthIt;
+    // OFF BY DEFAULT NOW, and the reason is that its predicted failure mode
+    // turned up in real footage: rallies missing from the read, and rallies
+    // cut short. Both are exactly what this comment said would happen. A
+    // kitchen exchange is four people planted at the line moving only their
+    // hands, so the motion signal goes quiet in the middle of a point that is
+    // very much still being played -- and whatever the gate skips, the model
+    // never sees at all. No prompt can recover a rally that was not sent.
+    //
+    // What it costs to leave it off: the scan watches the whole clip, so a
+    // twenty-minute game at 10fps and high resolution is roughly double what a
+    // half-gated one cost. That is a few dollars a game against an analysis
+    // that is missing points, and a missing point is not a degraded read, it
+    // is a wrong one -- the rally count, the shot totals and every average are
+    // all computed off what came back.
+    //
+    // ANALYST_GATE=on puts it back for anyone who would rather pay less and
+    // accept the risk. It is worth revisiting if the windows ever get their
+    // own evidence: the right fix is a gate that knows about hands as well as
+    // feet, not a cheaper one.
+    const useGate = gate.gated && gatingEnabled();
 
     console.error(
-      !gateWorthIt && gate.gated
-        ? `[coaching] watching the whole clip — gating would save little at `
-          + `${analystMediaResolution()} resolution and can cut a dink rally`
+      !useGate && gate.gated
+        ? "[coaching] watching the whole clip — motion gating is off by default "
+          + "because it was cutting real rallies short (ANALYST_GATE=on to re-enable)"
         : useGate
           ? `[coaching] watching ${Math.round(gate.coverage * 100)}% of the clip — `
             + `${gate.windows.length} stretch(es) where players were actually moving`

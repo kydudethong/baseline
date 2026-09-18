@@ -85,3 +85,26 @@ export function analystFps(): number {
 export function overlayFps(): number {
   return analystFps();
 }
+
+/**
+ * Whether to send the model only the stretches where players were moving.
+ *
+ * OFF UNLESS EXPLICITLY ENABLED, which is a reversal. The old default was
+ * "auto", meaning on whenever media resolution was high -- and high is the
+ * default resolution, so the risky path was the one nobody chose.
+ *
+ * It was cutting real rallies. The gate reads player movement, and the one
+ * phase of pickleball where nobody moves is the kitchen dink exchange, which
+ * is where most points are decided: the signal goes quiet in the middle of a
+ * live point. Whatever it skips, the model never sees, so nothing downstream
+ * and no wording in the prompt can recover it -- a missing rally is not a
+ * degraded read, it is a wrong one, since the rally count, the shot totals and
+ * every average are computed from what came back.
+ *
+ * Leaving it off roughly doubles the scan cost on a long clip. That is the
+ * right way round: the cost of including dead time is a few dollars, and the
+ * cost of cutting a rally in half is an analysis that is confidently wrong.
+ */
+export function gatingEnabled(): boolean {
+  return (process.env.ANALYST_GATE ?? "off").toLowerCase() === "on";
+}
