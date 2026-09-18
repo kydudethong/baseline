@@ -8,7 +8,7 @@ const base = (over: Partial<AnalystOutput> = {}): AnalystOutput => ({
   playstyle: { summary: "s", tendencies: [], under_pressure: "u" },
   coaching: {
     headline: "h", summary: "s", strengths: [],
-    top_priority_fix: { issue: "i", why_it_matters: "w", evidence: "e" }, secondary: [],
+    top_priority_fix: { issue: "i", why_it_matters: "w", evidence: "e", at_s: null }, secondary: [],
   },
   data_gaps: null,
   ...over,
@@ -147,4 +147,55 @@ test("a shot whose rally was dropped keeps counting as a contact", () => {
   const got = mergeAnalystOutputs([one], 446);
   assert.equal(got.shots.length, 2, "a contact is still a contact");
   assert.equal(got.shots.find((s) => s.t === 508)!.rally_idx, 0);
+});
+
+test("a rally cut in half by a segment boundary is rejoined", () => {
+  // THE CAUSE OF "RALLIES ARE GETTING CUT SHORT". A long match is watched in
+  // segments; a point straddling a boundary comes back as two rallies, the
+  // first ending where the footage ran out and the second starting mid-point.
+  // Nothing put them back together, so the rally count came out one too high
+  // per boundary and every per-rally average with it.
+  const a = base({ rallies: [
+    { idx: 1, start_s: 10, end_s: 30, end_reason: "segment ended", winner: null, confidence: 0.4 },
+  ]});
+  const b = base({ rallies: [
+    { idx: 1, start_s: 30.2, end_s: 38, end_reason: "into the net", winner: "player_2", confidence: 0.9 },
+  ]});
+  const out = mergeAnalystOutputs([a, b], 60);
+  assert.equal(out.rallies.length, 1, "the two halves were kept as two points");
+  assert.equal(out.rallies[0].start_s, 10);
+  assert.equal(out.rallies[0].end_s, 38);
+  // The later half is the one that saw the point end; "segment ended" is not
+  // a thing that happens in pickleball.
+  assert.equal(out.rallies[0].end_reason, "into the net");
+  assert.equal(out.rallies[0].confidence, 0.4, "a point seen in halves was seen clearly by neither");
+});
+
+test("two genuinely separate points are left alone", () => {
+  // The guard. Joining everything would be worse than joining nothing: the
+  // rally count would collapse and long "rallies" would swallow the dead time
+  // between points.
+  const a = base({ rallies: [
+    { idx: 1, start_s: 10, end_s: 20, end_reason: "out", winner: null, confidence: 0.8 },
+    { idx: 2, start_s: 26, end_s: 34, end_reason: "net", winner: null, confidence: 0.8 },
+  ]});
+  const out = mergeAnalystOutputs([a], 60);
+  assert.equal(out.rallies.length, 2);
+  assert.deepEqual(out.rallies.map((r) => r.idx), [1, 2]);
+});
+
+test("shots follow the rally they were rejoined into", () => {
+  // Renumbering after stitching, not before: a shot pointing at rally 2 in a
+  // world where rally 2 no longer exists is worse than an unnumbered one.
+  const a = base({
+    rallies: [{ idx: 1, start_s: 10, end_s: 30, end_reason: "cut", winner: null, confidence: 0.5 }],
+    shots: [{ t: 12, rally_idx: 1, player: "player_1", type: "serve", confidence: 0.8 }],
+  });
+  const b = base({
+    rallies: [{ idx: 1, start_s: 30.4, end_s: 38, end_reason: "out", winner: null, confidence: 0.8 }],
+    shots: [{ t: 35, rally_idx: 1, player: "player_2", type: "drive", confidence: 0.8 }],
+  });
+  const out = mergeAnalystOutputs([a, b], 60);
+  assert.equal(out.rallies.length, 1);
+  assert.deepEqual(out.shots.map((sh) => sh.rally_idx), [1, 1]);
 });

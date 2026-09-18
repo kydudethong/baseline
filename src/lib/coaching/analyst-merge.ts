@@ -145,9 +145,72 @@ function mergeRallies(
     onLog?.(`analyst: ${inClip.length} rallies, all inside the clip`);
   }
 
-  return inClip
-    .sort((a, b) => a.start_s - b.start_s)
-    .map((r, i) => ({ ...r, idx: i + 1 }));
+  return renumber(stitch(inClip.sort((a, b) => a.start_s - b.start_s), onLog));
+}
+
+/**
+ * The shortest believable gap between two points, in seconds.
+ *
+ * Somebody has to retrieve the ball, walk back and serve. Matches the constant
+ * the grounding audit uses to flag this same shape, because they are the same
+ * claim about the sport -- and an audit that fires on our own merge output
+ * would be reporting a bug rather than a finding.
+ */
+const MIN_GAP_BETWEEN_RALLIES_S = 1.5;
+
+/**
+ * Rejoin a point that was reported as two.
+ *
+ * SEGMENT BOUNDARIES CUT RALLIES IN HALF, and nothing put them back. A long
+ * match is watched in segments; each call sees its own stretch and numbers
+ * rallies from 1 with no idea another segment exists. A point straddling a
+ * boundary therefore comes back as two rallies -- the first ending where the
+ * footage ran out, the second starting mid-point -- and the merge sorted them,
+ * renumbered them and shipped both. That is exactly "rallies are getting cut
+ * short", plus a rally count inflated by one per boundary, and every
+ * per-rally average wrong by the same amount.
+ *
+ * The rule is physical rather than positional: no two points can be under a
+ * second and a half apart, because somebody has to fetch the ball and serve.
+ * That catches the boundary case without needing to know where the boundaries
+ * were, and it also repairs a rally the model split over a lull in play.
+ *
+ * end_reason is taken from the LATER half, because that is the one that saw
+ * how the point actually ended; the earlier half's reason is "the footage
+ * stopped", which is not a thing that happens in pickleball.
+ */
+function stitch(sorted: Rally[], onLog?: (line: string) => void): Rally[] {
+  if (sorted.length < 2) return sorted;
+  const out: Rally[] = [sorted[0]];
+  let joined = 0;
+  for (const cur of sorted.slice(1)) {
+    const prev = out[out.length - 1];
+    if (cur.start_s - prev.end_s < MIN_GAP_BETWEEN_RALLIES_S) {
+      out[out.length - 1] = {
+        ...prev,
+        end_s: Math.max(prev.end_s, cur.end_s),
+        end_reason: cur.end_reason || prev.end_reason,
+        winner: cur.winner ?? prev.winner,
+        // The lower of the two: a point reported in two halves was seen
+        // clearly by neither call on its own.
+        confidence: Math.min(prev.confidence ?? 1, cur.confidence ?? 1),
+      };
+      joined += 1;
+    } else {
+      out.push(cur);
+    }
+  }
+  if (joined > 0) {
+    onLog?.(
+      `analyst: rejoined ${joined} rall${joined === 1 ? "y" : "ies"} reported in halves `
+      + `(under ${MIN_GAP_BETWEEN_RALLIES_S}s apart — usually a segment boundary through the middle of a point)`
+    );
+  }
+  return out;
+}
+
+function renumber(rallies: Rally[]): Rally[] {
+  return rallies.map((r, i) => ({ ...r, idx: i + 1 }));
 }
 
 /**

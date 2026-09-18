@@ -34,7 +34,7 @@ const clean: AnalystOutput = {
   skills: [{ skill_key: "dinking", rating: 6, basis: "four dinks in rally 1" }],
   coaching: {
     headline: "Bend more on dinks", summary: "", strengths: [],
-    top_priority_fix: { issue: "straight legs on dinks", why_it_matters: "", evidence: "172° at 12.4s" },
+    top_priority_fix: { issue: "straight legs on dinks", why_it_matters: "", evidence: "172° at 12.4s", at_s: 12.4 },
     secondary: [],
   },
   observations: [{
@@ -311,4 +311,50 @@ test("the prompt tells the model the rate it is actually being shown", () => {
   const p = analystPrompt(input(), "LEGEND", null, true);
   assert.match(p, new RegExp(`watching at ${ANALYST_FPS}\\s*\\n?\\s*frames per second`));
   assert.doesNotMatch(p, /watching at 5\b/);
+});
+
+test("a criticism citing a moment where nothing happened is caught", () => {
+  // THE POINT OF CITING A MOMENT AT ALL. The seconds named here are played
+  // back to the player beside the sentence. Four seconds showing nothing makes
+  // a correct criticism look invented, and the reasonable conclusion from
+  // that is that the whole read is guesswork.
+  const out = structuredClone(clean);
+  out.coaching.top_priority_fix.at_s = 55.0;
+  assert.ok(auditAnalysis(out, input()).some((p) => /the priority fix cites 55.0s, where no swing was measured/.test(p)));
+});
+
+test("a criticism citing a real swing passes", () => {
+  const out = structuredClone(clean);
+  out.coaching.top_priority_fix.at_s = 12.4;
+  assert.deepEqual(auditAnalysis(out, input()).filter((p) => /priority fix/.test(p)), []);
+});
+
+test("a criticism about a passage rather than an instant is allowed", () => {
+  // "You backed off the kitchen line here" covers a couple of seconds of
+  // movement, not one contact. Demanding contact-level precision would flag
+  // the positional criticism that is often the most useful kind.
+  const out = structuredClone(clean);
+  out.coaching.top_priority_fix.at_s = 10.8; // 1.6s from the 12.4s contact
+  assert.deepEqual(auditAnalysis(out, input()).filter((p) => /priority fix/.test(p)), []);
+});
+
+test("a criticism that honestly places nothing is not punished", () => {
+  // Null is an allowed, honest answer — better than a number that sends
+  // somebody to the wrong four seconds. Flagging it would push the model to
+  // invent a timestamp to satisfy the audit.
+  const out = structuredClone(clean);
+  out.coaching.top_priority_fix.at_s = null;
+  assert.deepEqual(auditAnalysis(out, input()).filter((p) => /priority fix/.test(p)), []);
+});
+
+test("secondary points are checked too, and named individually", () => {
+  const out = structuredClone(clean);
+  out.coaching.secondary = [
+    { issue: "ok", evidence: "", at_s: 3.96 },
+    { issue: "bad", evidence: "", at_s: 80.0 },
+  ];
+  const problems = auditAnalysis(out, input());
+  assert.ok(problems.some((p) => /secondary point 2/.test(p)),
+    "the bad one was not named, so nobody can tell which to look at");
+  assert.ok(!problems.some((p) => /secondary point 1/.test(p)));
 });

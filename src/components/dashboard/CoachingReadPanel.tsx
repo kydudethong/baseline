@@ -2,6 +2,8 @@ import Link from "next/link";
 import type { CoachingObservationRow, CoachingReadRow } from "@/lib/db/types";
 import { type CoachingRead } from "@/lib/coaching/types";
 import { Check, Paddle } from "@/components/motifs/Motifs";
+import { CoachingInsight } from "@/components/analysis/CoachingInsight";
+import type { Evidence } from "@/lib/db/evidence";
 
 /**
  * The coaching read, with every point said ONCE.
@@ -40,11 +42,27 @@ import { Check, Paddle } from "@/components/motifs/Motifs";
  * the tagging call produced no observations at all.
  */
 export function CoachingReadPanel({
-  read, observations,
+  read, observations, hero, heroEvidence, drillName, analysisId, heroVerdict,
 }: {
   read: CoachingReadRow;
   /** Only to decide whether the narrative fallback is the only coaching there is. */
   observations: CoachingObservationRow[];
+  /**
+   * The top priority fix, WITH ITS FOOTAGE.
+   *
+   * IT HAD NOWHERE TO BE SHOWN. The workspace skips this one deliberately --
+   * "it leads the read below, so it is not repeated here" -- and the read
+   * below only rendered the narrative when there were no observations at all.
+   * On the normal path the single most important criticism therefore appeared
+   * as a line of text in the takeaways and nowhere else: no clip, no
+   * timestamp, nothing to check it against. The claim with the most weight on
+   * the page was the only one the player could not go and look at.
+   */
+  hero?: CoachingObservationRow | null;
+  heroEvidence?: Evidence | null;
+  drillName?: string | null;
+  analysisId?: string;
+  heroVerdict?: "right" | "wrong" | "unsure" | null;
 }) {
   const coaching = parseCoaching(read.coaching_json);
 
@@ -54,6 +72,22 @@ export function CoachingReadPanel({
 
   return (
     <div className="stack g6">
+      {hero ? (
+        <CoachingInsight
+          observation={hero}
+          hero
+          eyebrow="The one thing to work on first"
+          clipUrl={heroEvidence?.clipUrl ?? null}
+          fallbackUrl={heroEvidence?.fallbackUrl ?? null}
+          startSeconds={heroEvidence?.startSeconds ?? null}
+          windowStartSeconds={heroEvidence?.windowStartSeconds ?? null}
+          windowEndSeconds={heroEvidence?.windowEndSeconds ?? null}
+          technique={heroEvidence?.technique ?? null}
+          drillName={drillName ?? null}
+          analysisId={analysisId}
+          initialVerdict={heroVerdict ?? null}
+        />
+      ) : null}
       {/* THE HEADLINE PARAGRAPH IS GONE.
           "Dominant Kitchen Offense Balanced by Smarter Baseline Margins" --
           a sentence no player would write, restating in praise-shaped prose

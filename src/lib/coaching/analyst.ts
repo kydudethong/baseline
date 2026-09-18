@@ -151,8 +151,18 @@ export interface AnalystOutput {
     headline: string;
     summary: string;
     strengths: string[];
-    top_priority_fix: { issue: string; why_it_matters: string; evidence: string };
-    secondary: Array<{ issue: string; evidence: string }>;
+    /**
+     * `at_s` is the moment in the clip this criticism is about.
+     *
+     * THE HEADLINE CRITICISM COULD NOT BE CHECKED. The observations further
+     * down the page each carry a cut clip and play where they sit; the top
+     * priority fix, which is the thing a reader actually acts on, carried only
+     * a sentence of prose -- "seen in your clip: your drops kept floating" --
+     * pointing nowhere. The claim with the most weight on the page was the one
+     * with the least ability to be disagreed with.
+     */
+    top_priority_fix: { issue: string; why_it_matters: string; evidence: string; at_s: number | null };
+    secondary: Array<{ issue: string; evidence: string; at_s: number | null }>;
   };
   observations: Array<{
     rally_idx: number | null;
@@ -174,6 +184,10 @@ export interface AnalystOutput {
 export function analystSchema(): Record<string, unknown> {
   const num = { type: "number" };
   const str = { type: "string" };
+  // Nullable rather than optional: a criticism the model genuinely cannot
+  // place in time must say so, not quietly omit the field and look the same
+  // as one that simply forgot.
+  const numOrNull = { type: "number", nullable: true };
   return {
     type: "object",
     properties: {
@@ -237,15 +251,15 @@ export function analystSchema(): Record<string, unknown> {
           strengths: { type: "array", items: str },
           top_priority_fix: {
             type: "object",
-            properties: { issue: str, why_it_matters: str, evidence: str },
-            required: ["issue", "why_it_matters", "evidence"],
+            properties: { issue: str, why_it_matters: str, evidence: str, at_s: numOrNull },
+            required: ["issue", "why_it_matters", "evidence", "at_s"],
           },
           secondary: {
             type: "array",
             items: {
               type: "object",
-              properties: { issue: str, evidence: str },
-              required: ["issue", "evidence"],
+              properties: { issue: str, evidence: str, at_s: numOrNull },
+              required: ["issue", "evidence", "at_s"],
             },
           },
         },
@@ -386,6 +400,23 @@ YOUR JOB
 1. RALLIES — points actually being played, serve to the moment the ball stops
    being played. Walking about and retrieving the ball between points is not a
    rally. Number them from 1.
+   THE TWO WAYS THIS GOES WRONG, both of which lose real points:
+   - ENDING A RALLY EARLY. A point is still live while the ball is out of
+     shot, while it is being dinked slowly over the net, and while the players
+     are barely moving. A kitchen exchange is four people standing almost
+     still moving only their hands, and it is where most points are decided —
+     it is NOT dead time, and it is not the end of the previous rally. Only
+     end a rally where you can see the point actually finish: the ball lands
+     out, goes into the net, bounces twice, or the players visibly reset for a
+     serve. If you cannot see the ending, say so in end_reason and keep the
+     rally running to where the players break up.
+   - MISSING A RALLY ENTIRELY. A quiet point is still a point. If people are
+     on court in ready position and the ball is in play, that is a rally even
+     if nobody sprints. Do not skip a stretch because it is undramatic.
+   Between two points somebody has to fetch the ball, walk back and serve, so
+   two rallies less than about two seconds apart are almost certainly one
+   rally you split in half. If you are unsure whether a lull is the end of a
+   point or a pause within one, treat it as within one and say so.
 2. SHOTS — every paddle contact in the clip: WHEN it happened, WHO hit it,
    what kind of shot it was, and roughly where it landed. You find these by
    watching. Nothing else in this pipeline detects the ball, so a contact you
@@ -402,7 +433,17 @@ YOUR JOB
    weakness, 3 is competent, 5 is a strength at this player's level. Omit a
    skill rather than inventing a number, and say what the rating rests on.
 5. COACHING — a headline, a short summary, 1-2 strengths, one priority fix,
-   1-2 secondary points. Every one cites a rally, a time, or a measured number.
+   1-2 secondary points.
+   EVERY CRITICISM MUST NAME THE MOMENT IT IS ABOUT, in at_s: the second in
+   the clip where a reader can watch the thing you are describing happen. It
+   has to be a real moment you saw, close to one of the contact timestamps you
+   were given, and inside a rally you reported. This is not decoration -- the
+   player is shown those seconds of their own footage beside your sentence, so
+   a time that shows nothing makes the criticism look invented even when it is
+   right. If a point is about a pattern with no single best example, pick the
+   clearest instance of it. If you truly cannot place it, set at_s to null and
+   say in evidence why -- that is honest, and it is better than a number that
+   sends somebody to the wrong four seconds.
 6. OBSERVATIONS — the same findings as structured records, one per finding,
    each tagged with a skill and a coaching dimension, severity 1-5 (5 being
    the most costly), and where it is about one identifiable moment, the
@@ -520,6 +561,17 @@ const RALLY_EDGE_TOLERANCE_S = 1.0;
  */
 const ORPHAN_CONTACT_SHARE = 0.33;
 
+/**
+ * How far a cited criticism moment may sit from a measured swing.
+ *
+ * Wider than the shot check, because a criticism is often about a passage
+ * rather than an instant -- "you backed off the kitchen line here" covers a
+ * couple of seconds of movement, not one contact. Wide enough to allow that,
+ * narrow enough that the clip cut around the cited second still contains the
+ * shot being described.
+ */
+const CRITICISM_EVIDENCE_TOLERANCE_S = 2.5;
+
 export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[] {
   const problems: string[] = [];
 
@@ -599,6 +651,36 @@ export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[]
     }
   }
 
+  const contactTimes = input.contacts.map((c) => c.t).sort((a, b) => a - b);
+
+  // A CRITICISM THAT POINTS AT NOTHING.
+  //
+  // The narrative read is what a player acts on, and the moment it names is
+  // now shown to them as their own footage beside the sentence. That makes a
+  // wrong timestamp worse than no timestamp: four seconds showing nothing
+  // makes a correct criticism look invented, and the player's reasonable
+  // conclusion is that the whole read is guesswork.
+  const cited: Array<{ what: string; at: number | null }> = [
+    { what: "the priority fix", at: out.coaching?.top_priority_fix?.at_s ?? null },
+    ...(out.coaching?.secondary ?? []).map((sec, i) => ({
+      what: `secondary point ${i + 1}`, at: sec.at_s ?? null,
+    })),
+  ];
+  for (const c of cited) {
+    if (c.at === null) continue;
+    if (c.at < 0 || c.at > input.clipSeconds + 0.5) {
+      problems.push(`${c.what} cites ${c.at.toFixed(1)}s, outside a ${input.clipSeconds.toFixed(1)}s clip`);
+      continue;
+    }
+    if (contactTimes.length > 0
+        && !contactTimes.some((t) => Math.abs(t - c.at!) <= CRITICISM_EVIDENCE_TOLERANCE_S)) {
+      problems.push(
+        `${c.what} cites ${c.at.toFixed(1)}s, where no swing was measured — `
+        + "the clip shown beside it will not contain the shot it describes"
+      );
+    }
+  }
+
   // Shots should land NEAR a measured contact -- and "near" is doing the work.
   //
   // THE HISTORY MATTERS, because this check has now been wrong in both
@@ -624,7 +706,6 @@ export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[]
   // sampled either side of its peak -- all expected, none a fault of the
   // model's. Reporting them as problems would train a reader to ignore this
   // list, which is the one thing a grounding report must never do.
-  const contactTimes = input.contacts.map((c) => c.t).sort((a, b) => a - b);
   if (contactTimes.length > 0) {
     const invented = (out.shots ?? []).filter(
       (s) => !contactTimes.some((t) => Math.abs(t - s.t) <= SHOT_CONTACT_TOLERANCE_S)

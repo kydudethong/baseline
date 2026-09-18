@@ -362,6 +362,11 @@ async function AnalysisBreakdown({
           <CoachingReadPanel
             read={coachingData.read}
             observations={coachingData.observations}
+            hero={hero}
+            heroEvidence={hero ? evidence.get(hero.id) ?? null : null}
+            drillName={hero?.drill_slug ? drillNames[hero.drill_slug] : null}
+            analysisId={analysis.id}
+            heroVerdict={hero ? feedback?.get(hero.id) ?? null : null}
           />
         </section>
       ) : (
