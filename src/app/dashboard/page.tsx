@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { listAnalysisSummariesForUser, listAnalysesForUser } from "@/lib/db/analyses";
 import { getSignedDownloadUrl } from "@/lib/storage/r2";
 import { getRankedWeaknesses, getSkillProfiles, overallRating } from "@/lib/coaching/stats";
+import { quotaForUser } from "@/lib/db/quota";
 import { getProfile } from "@/lib/db/profiles";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { PlayIcon } from "@/components/motifs/Motifs";
@@ -40,6 +41,11 @@ export default async function HomePage() {
   const overall = completedCount > 0
     ? overallRating(await getSkillProfiles(supabase, user.id))
     : { rating: null, games: 0, skills: 0 };
+  // SHOWN BEFORE THE UPLOAD, not after it. The gate itself lives on the
+  // process route, which is where the money is; finding out you are out of
+  // games only once a 500MB clip has finished uploading would be a bad way to
+  // learn it.
+  const quota = await quotaForUser(supabase, user.id, user.email, "");
 
   if (analyses.length === 0) {
     return (
@@ -78,6 +84,15 @@ export default async function HomePage() {
               and it was computable from ratings that already existed and shown
               nowhere. Still carrying its sample size, because without that it
               is a score rather than a reading. */}
+          {!quota.unlimited ? (
+            <>
+              {" "}
+              <span style={{ opacity: 0.7 }}>
+                {Math.max(0, quota.limit - quota.used)} of {quota.limit} game
+                {quota.limit === 1 ? "" : "s"} left this month.
+              </span>
+            </>
+          ) : null}
           {overall.rating !== null ? (
             <>
               {" "}Overall <strong>{overall.rating.toFixed(1)}/5</strong>{" "}

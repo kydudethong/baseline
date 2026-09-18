@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { getAnalysisForUser } from "@/lib/db/analyses";
 import { getSetup, isCompleteSetup } from "@/lib/db/setup";
+import { quotaForUser } from "@/lib/db/quota";
 import { runPipeline } from "@/lib/analysis/pipeline";
 import { kickOffPipelineV2 } from "@/lib/analysis/pipeline-v2";
 import { livenessOf } from "@/lib/analysis/heartbeat";
@@ -46,6 +47,23 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   // every one is wrong, and no stage downstream can tell the difference or
   // warn anybody. A run that cannot be checked is worse than one that did not
   // start, so this returns the user to the screen that fixes it.
+  // THE QUOTA, CHECKED HERE because here is where the money is spent. An
+  // upload costs pennies of storage; a run costs about a dollar twenty at
+  // Gemini. Checking at upload would refuse a clip that might never be
+  // analysed, and checking on the client would not be a check at all.
+  const quota = await quotaForUser(supabase, user.id, user.email, id);
+  if (!quota.allowed) {
+    return NextResponse.json(
+      {
+        error: `You have analysed ${quota.used} of your ${quota.limit} games this month. `
+          + "Re-running a game you have already analysed is always free — this would be a new one. "
+          + `Your next ${quota.limit} unlock on ${new Date(quota.resetsAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}.`,
+        quota: { used: quota.used, limit: quota.limit, resetsAt: quota.resetsAt },
+      },
+      { status: 429 }
+    );
+  }
+
   if (!isCompleteSetup(await getSetup(supabase, id))) {
     return NextResponse.json(
       {
