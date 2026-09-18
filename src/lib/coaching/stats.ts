@@ -113,6 +113,59 @@ export async function getSkillProfiles(
   });
 }
 
+export interface OverallRating {
+  /** 1-5, one decimal. Null when nothing has been rated yet. */
+  rating: number | null;
+  /** How many completed analyses contributed at least one rating. */
+  games: number;
+  /** How many distinct skills it rests on. */
+  skills: number;
+}
+
+/**
+ * One number for where a player is, across every game.
+ *
+ * THERE WAS DELIBERATELY NO SUCH NUMBER, and the reason is worth keeping: a
+ * composite in a slot where nothing computes one is invented, and the Overview
+ * panel says so in as many words. What makes this one defensible is that it is
+ * not invented -- it is an average of real per-skill ratings, each already
+ * recency-weighted across the games that produced them, and it reports what it
+ * rests on so the reader can discount it themselves.
+ *
+ * WEIGHTED BY HOW OFTEN A SKILL WAS RATED, so a skill seen in six games counts
+ * for more than one seen once. Without that, a single lucky reading of a skill
+ * the player has barely shown moves their whole number as much as a habit
+ * observed all season.
+ *
+ * WHAT IT IS NOT: a DUPR, a rating anyone else would recognise, or a number
+ * comparable between two players. It is this system's reading of this player
+ * against their own level, which is what every rating feeding it was asked
+ * for. Anywhere it is shown, it needs the count beside it.
+ */
+export function overallRating(profiles: SkillProfile[]): OverallRating {
+  const rated = profiles.filter((p) => p.weightedAvg !== null && p.analysesRated > 0);
+  if (rated.length === 0) return { rating: null, games: 0, skills: 0 };
+
+  let sum = 0;
+  let weight = 0;
+  for (const p of rated) {
+    sum += (p.weightedAvg as number) * p.analysesRated;
+    weight += p.analysesRated;
+  }
+  return {
+    // ONE DECIMAL. The inputs are integers from 1 to 5 read off video, so a
+    // second decimal would be claiming a precision that nothing behind this
+    // number has.
+    rating: Math.round((sum / weight) * 10) / 10,
+    // The most any single skill was rated is the best available lower bound on
+    // how many games contributed -- ratings do not carry their analysis id
+    // this far, and counting rows would double-count one game rated on eight
+    // skills as eight games.
+    games: Math.max(...rated.map((p) => p.analysesRated)),
+    skills: rated.length,
+  };
+}
+
 export interface RankedObservation {
   skillKey: string;
   name: string;

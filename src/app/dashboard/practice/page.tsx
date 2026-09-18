@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { getActiveBlueprintsForUser } from "@/lib/db/blueprints";
-import { completedAnalysisMeta, getRankedWeaknesses, getSkillProfiles } from "@/lib/coaching/stats";
+import { completedAnalysisMeta, getRankedWeaknesses, getSkillProfiles, overallRating } from "@/lib/coaching/stats";
 
 export const metadata: Metadata = { title: "Practice — Baseline" };
 export const dynamic = "force-dynamic";
@@ -57,6 +57,7 @@ export default async function PracticePage() {
   ]);
 
   const ratedProfiles = profiles.filter((p) => p.weightedAvg !== null);
+  const overall = overallRating(profiles);
   const profilesByGroup = GROUP_ORDER.map((group) => ({
     group,
     skills: ratedProfiles.filter((p) => p.group === group).sort((a, b) => (a.weightedAvg ?? 0) - (b.weightedAvg ?? 0)),
@@ -72,6 +73,37 @@ export default async function PracticePage() {
           games count for more than your first ones.
         </p>
       </div>
+
+      {/*
+        ONE NUMBER, WITH WHAT IT RESTS ON NEXT TO IT.
+        There was deliberately no composite rating anywhere in this product,
+        and the reasoning was right: a number in a slot where nothing computes
+        one is invented. This one is not invented -- it is an average of real
+        per-skill ratings, each already weighted toward recent games -- but it
+        is only honest while it carries its own sample size, because a 4.2 from
+        one game and a 4.2 from twelve are different claims and only the count
+        tells them apart.
+      */}
+      {overall.rating !== null ? (
+        <div className="card stack g2">
+          <span className="eyebrow">Where you are overall</span>
+          <div className="row g3" style={{ alignItems: "baseline", flexWrap: "wrap" }}>
+            <span className="h1" style={{ margin: 0 }}>
+              {overall.rating.toFixed(1)}
+              <small style={{ fontSize: "0.5em", opacity: 0.6 }}>/5</small>
+            </span>
+            <span className="sm" style={{ color: "var(--ink-2)" }}>
+              from {overall.skills} skill{overall.skills === 1 ? "" : "s"} across{" "}
+              {overall.games} game{overall.games === 1 ? "" : "s"}
+            </span>
+          </div>
+          <p className="sm measure" style={{ margin: 0, color: "var(--ink-3)" }}>
+            This is Baseline&rsquo;s read of you against your own level, averaged over the
+            skills your clips actually showed. It is not a DUPR and it is not comparable
+            with another player&rsquo;s — it only means something next to your own earlier games.
+          </p>
+        </div>
+      ) : null}
 
       <div className="sec">
         <div className="sec-head">

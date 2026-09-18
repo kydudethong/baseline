@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { listAnalysisSummariesForUser, listAnalysesForUser } from "@/lib/db/analyses";
 import { getSignedDownloadUrl } from "@/lib/storage/r2";
-import { getRankedWeaknesses } from "@/lib/coaching/stats";
+import { getRankedWeaknesses, getSkillProfiles, overallRating } from "@/lib/coaching/stats";
 import { getProfile } from "@/lib/db/profiles";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { PlayIcon } from "@/components/motifs/Motifs";
@@ -37,6 +37,9 @@ export default async function HomePage() {
   const completedCount = analyses.filter((a) => a.status === "completed").length;
   const inFlightCount = analyses.filter((a) => a.status === "queued" || a.status === "processing").length;
   const weaknesses = completedCount > 0 ? await getRankedWeaknesses(supabase, user.id, 3) : [];
+  const overall = completedCount > 0
+    ? overallRating(await getSkillProfiles(supabase, user.id))
+    : { rating: null, games: 0, skills: 0 };
 
   if (analyses.length === 0) {
     return (
@@ -70,6 +73,20 @@ export default async function HomePage() {
           {completedCount > 0
             ? `${completedCount} game${completedCount === 1 ? "" : "s"} broken down so far.`
             : "Your first breakdown is on its way."}
+          {/* THE NUMBER BELONGS WHERE THE PLAYER LANDS. It is the one thing
+              they want to know on opening the app -- am I getting better --
+              and it was computable from ratings that already existed and shown
+              nowhere. Still carrying its sample size, because without that it
+              is a score rather than a reading. */}
+          {overall.rating !== null ? (
+            <>
+              {" "}Overall <strong>{overall.rating.toFixed(1)}/5</strong>{" "}
+              <span style={{ opacity: 0.7 }}>
+                across {overall.games} game{overall.games === 1 ? "" : "s"}
+              </span>.{" "}
+              <Link href="/dashboard/practice" style={{ color: "var(--blue)" }}>See the breakdown</Link>
+            </>
+          ) : null}
         </p>
       </div>
 
