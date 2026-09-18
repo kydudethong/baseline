@@ -33,9 +33,33 @@ export interface ReferenceTrack {
   points: unknown;
 }
 
+/**
+ * Which side of the net a court position falls on.
+ *
+ * Passed in rather than computed, for the same reason player-roles.ts takes it
+ * as an argument: who is on which side is a court-geometry question that
+ * positioning.ts already answers, and answering it twice is how two answers
+ * start to differ. The two modules use opposite y conventions, which is
+ * exactly the sort of thing a second implementation gets backwards.
+ */
+export type SideOfCourt = (courtY: number) => "near" | "far";
+
 export interface BoxAtTime {
   playerLabel: string;
   box: { x: number; y: number; width: number; height: number };
+  /**
+   * Which half of the court this player was on, when a court says so.
+   *
+   * THE PICKER OFFERED FOUR STRANGERS AS EQUALS. A player tagging themselves
+   * was shown "Player 1" through "Player 4" with nothing to say that two of
+   * them are across the net -- and the two across the net cannot be you and
+   * cannot be your partner. Which side somebody is on is the only distinction
+   * that matters in doubles, and it was the one thing the screen did not show.
+   *
+   * Null when no court position was recorded for that player at that instant,
+   * in which case the picker says so instead of guessing a side.
+   */
+  side: "near" | "far" | null;
 }
 
 /**
@@ -49,16 +73,33 @@ export interface BoxAtTime {
  */
 const MATCH_TOLERANCE_S = 0.05;
 
-export function boxesAtTimestamp(tracks: ReferenceTrack[], timestampSeconds: number): BoxAtTime[] {
+export function boxesAtTimestamp(
+  tracks: ReferenceTrack[],
+  timestampSeconds: number,
+  sideOf?: SideOfCourt
+): BoxAtTime[] {
   const boxes: BoxAtTime[] = [];
   for (const t of tracks) {
     const points = (t.points ?? []) as Array<{
       timestampSeconds: number;
       boxImageNorm: { x: number; y: number; width: number; height: number };
+      courtPosition?: { x: number; y: number } | null;
     }>;
     if (!Array.isArray(points)) continue;
     const point = points.find((p) => Math.abs(p.timestampSeconds - timestampSeconds) < MATCH_TOLERANCE_S);
-    if (point) boxes.push({ playerLabel: t.player_label, box: point.boxImageNorm });
+    if (!point) continue;
+    // THE SIDE OVER THE WHOLE TRACK, not at this instant. A player mid-stride
+    // at the net can have a foot placed across it, and a chip that says "far
+    // side" because of one frame is worse than no chip at all.
+    const sides = sideOf
+      ? points.map((p) => (p.courtPosition ? sideOf(p.courtPosition.y) : null)).filter(Boolean)
+      : [];
+    const near = sides.filter((x) => x === "near").length;
+    boxes.push({
+      playerLabel: t.player_label,
+      box: point.boxImageNorm,
+      side: sides.length === 0 ? null : near * 2 >= sides.length ? "near" : "far",
+    });
   }
   return boxes;
 }
@@ -85,7 +126,8 @@ export interface PickedReferenceFrame<F extends ReferenceFrameCandidate> {
  */
 export function pickReferenceFrame<F extends ReferenceFrameCandidate>(
   frames: F[],
-  tracks: ReferenceTrack[]
+  tracks: ReferenceTrack[],
+  sideOf?: SideOfCourt
 ): PickedReferenceFrame<F> | null {
   const usable = frames.filter((f) => f.debug_storage_path);
   if (usable.length === 0) return null;
@@ -93,7 +135,7 @@ export function pickReferenceFrame<F extends ReferenceFrameCandidate>(
   let best: PickedReferenceFrame<F> | null = null;
   let bestRank: [number, number] | null = null;
   usable.forEach((frame, index) => {
-    const boxes = boxesAtTimestamp(tracks, frame.timestamp_s);
+    const boxes = boxesAtTimestamp(tracks, frame.timestamp_s, sideOf);
     const rank: [number, number] = [boxes.length, -Math.abs(index - middle)];
     if (!bestRank || rank[0] > bestRank[0] || (rank[0] === bestRank[0] && rank[1] > bestRank[1])) {
       bestRank = rank;

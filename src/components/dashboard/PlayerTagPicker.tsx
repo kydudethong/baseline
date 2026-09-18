@@ -9,7 +9,12 @@ export interface TagPickerFrame {
   url: string;
   timestampSeconds: number;
   /** Only the players actually visible in this specific frame, box in image-normalized [0,1] coords. */
-  boxes: Array<{ playerLabel: string; box: { x: number; y: number; width: number; height: number } }>;
+  boxes: Array<{
+    playerLabel: string;
+    box: { x: number; y: number; width: number; height: number };
+    /** Which half of the court, when a court was fitted. */
+    side?: "near" | "far" | null;
+  }>;
 }
 
 const COACHING_KINDS: Array<{ value: string; label: string }> = [
@@ -106,6 +111,28 @@ export function PlayerTagPicker({
 
   const colorIndex = new Map(players.map((p, i) => [p, i]));
 
+  /**
+   * Which side of the net each player is on, from whichever frame knows.
+   *
+   * Empty when no court was fitted, in which case the picker says nothing
+   * about sides rather than inventing them -- an honest "Player 2" beats a
+   * confidently wrong "your side".
+   */
+  const sideOfPlayer = new Map<string, "near" | "far">();
+  for (const f of frames) {
+    for (const b of f.boxes) {
+      if (b.side && !sideOfPlayer.has(b.playerLabel)) sideOfPlayer.set(b.playerLabel, b.side);
+    }
+  }
+  /** The side the tagged player is on; everything else follows from it. */
+  const mySide = [...selected].map((l) => sideOfPlayer.get(l)).find(Boolean) ?? null;
+  const roleOf = (label: string): "you" | "partner" | "opponent" | null => {
+    if (selected.has(label)) return "you";
+    const side = sideOfPlayer.get(label);
+    if (!side || !mySide) return null;
+    return side === mySide ? "partner" : "opponent";
+  };
+
   function toggle(label: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -170,6 +197,22 @@ export function PlayerTagPicker({
           Tap the box that&apos;s you. There are four players on the court and four here — one colour each,
           for the whole clip.
         </p>
+        {/*
+          THE NET IS THE ONLY DISTINCTION THAT MATTERS HERE, and the screen did
+          not show it. Four chips read "Player 1" to "Player 4" as though any of
+          them might be you -- but two of them are across the net, and somebody
+          across the net is neither you nor your partner, ever. Splitting them
+          by side turns a choice between four strangers into a choice between
+          two, and makes the consequence visible: whoever shares your half is
+          your partner, and the far pair are the opposition.
+        */}
+        {sideOfPlayer.size > 0 ? (
+          <p className="sm measure" style={{ color: "var(--ink-2)" }}>
+            The two on your side of the net are you and your partner. The pair across it are
+            your opponents — picking one of them would make the whole read about the wrong
+            team.
+          </p>
+        ) : null}
       </div>
 
       {frames.length > 0 ? (
@@ -195,7 +238,19 @@ export function PlayerTagPicker({
             >
               <span className="sw" style={{ backgroundColor: color }} />
               {playerDisplayName(label)}
-              {isOn ? " ✓" : ""}
+              {/* NAMED BY ROLE THE MOMENT A ROLE EXISTS. Before anyone is
+                  tagged these are four numbered strangers, which is all the
+                  system honestly knows; once one is you, the other on your
+                  half is your partner and the far pair are opponents, and
+                  saying so is how a mis-tap becomes obvious. */}
+              {(() => {
+                const role = roleOf(label);
+                if (role === "you") return " ✓ you";
+                if (role === "partner") return " · your partner";
+                if (role === "opponent") return " · opponent";
+                const side = sideOfPlayer.get(label);
+                return side ? (side === "near" ? " · near side" : " · far side") : "";
+              })()}
             </button>
           );
         })}

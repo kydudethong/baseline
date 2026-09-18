@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { pickReferenceFrame } from "@/lib/vision/reference-frame";
+import { sideOfCourt } from "@/lib/vision/positioning";
+import { courtFrameFor } from "@/lib/vision/shots";
 import { referenceFramePath } from "@/lib/coaching/reference-frame-image";
 import { createClient } from "@/lib/supabase/server";
 import { getSignedDownloadUrl } from "@/lib/storage/r2";
@@ -238,6 +240,7 @@ async function AnalysisBreakdown({
       analysis={analysis}
       phase2Tracks={phase2.tracks}
       phase2Frames={phase2.frames}
+      calibration={phase2.calibration}
       profile={profile}
       hasExistingRead={hasRead}
       frameless={hasRead}
@@ -604,6 +607,7 @@ async function TagSection({
   analysis,
   phase2Tracks,
   phase2Frames,
+  calibration,
   profile,
   hasExistingRead,
   frameless,
@@ -612,6 +616,8 @@ async function TagSection({
   analysis: AnalysisWithVideo;
   phase2Tracks: PlayerTrackRow[];
   phase2Frames: AnalysisFrameRow[];
+  /** For the side-of-net split in the picker; null when no court was fitted. */
+  calibration: CourtCalibrationRow | null;
   profile: Awaited<ReturnType<typeof getProfile>>;
   hasExistingRead: boolean;
   frameless?: boolean;
@@ -650,7 +656,21 @@ async function TagSection({
   // two copies of the same ranking in two files -- the player would be
   // answering a question about one moment and the model would be shown
   // another. Same function, same frame, no way for them to drift.
-  const picked = pickReferenceFrame(phase2Frames, phase2Tracks);
+  // WHICH SIDE EACH PLAYER IS ON, so the picker can say that two of the four
+  // are across the net and therefore cannot be you or your partner. Taken from
+  // positioning.ts rather than recomputed: the two modules use opposite y
+  // conventions and a second implementation would eventually get it backwards.
+  // quadKind has no column of its own; it rides in diagnostics so it survives
+  // the database round trip (see court.ts). It decides where the net line sits
+  // in court units, so reading it wrong would put every player on the wrong
+  // side -- which is worse than showing no side at all.
+  const quadKind = (calibration?.diagnostics as { quadKind?: string } | null)?.quadKind ?? null;
+  const courtFrame = courtFrameFor(
+    quadKind === "full" || quadKind === "near-half" || quadKind === "near-inplay" ? quadKind : null
+  );
+  const hasCourt = Boolean(calibration) && Number(calibration?.confidence ?? 0) > 0;
+  const sideOf = hasCourt ? (y: number) => sideOfCourt(y, courtFrame) : undefined;
+  const picked = pickReferenceFrame(phase2Frames, phase2Tracks, sideOf);
   const referenceFrames: Array<TagPickerFrame | null> = [];
   if (picked) {
     const { data } = await supabase.storage
