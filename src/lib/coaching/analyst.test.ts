@@ -4,6 +4,7 @@ import test from "node:test";
 import { OVERLAY_LEGEND } from "./overlay-legend";
 import { ANALYST_FPS, auditAnalysis, analystSchema, analystPrompt, type AnalystInput, type AnalystOutput, analystOutputBudget, THINKING_ALLOWANCE, MAX_OUTPUT_TOKENS } from "./analyst";
 import { sanitiseSchema } from "./gemini";
+import { COACHING_DIMENSIONS, COACHING_DIMENSION_LABELS } from "./types";
 
 function input(over: Partial<AnalystInput> = {}): AnalystInput {
   return {
@@ -357,4 +358,48 @@ test("secondary points are checked too, and named individually", () => {
   assert.ok(problems.some((p) => /secondary point 2/.test(p)),
     "the bad one was not named, so nobody can tell which to look at");
   assert.ok(!problems.some((p) => /secondary point 1/.test(p)));
+});
+
+test("the prompt forbids the things the footage cannot show", () => {
+  // QUALITATIVE ONLY, by decision. A pickleball forty feet away in compressed
+  // video does not show a grip change or ball rotation, and a number the
+  // pipeline never measured is a number the model invented. The danger is not
+  // that these are wrong — it is that they sound exactly like the measured
+  // claims sitting beside them, so one invented figure discredits the lot.
+  const p = analystPrompt(input(), "LEGEND", null, true);
+  assert.match(p, /the GRIP/);
+  assert.match(p, /SPIN of any kind/);
+  assert.match(p, /MILES PER HOUR/);
+  assert.match(p, /never in figures/);
+});
+
+test("the prompt asks for the breadth a read is supposed to have", () => {
+  // The fix for "every point is about knee angle" is not only deduplication —
+  // it is telling the model what else there is to look at. Each of these is a
+  // dimension an observation can be tagged with, so a prompt that never
+  // mentions them produces a taxonomy nothing populates.
+  const p = analystPrompt(input(), "LEGEND", null, true);
+  for (const topic of [
+    /Body mechanics —/, /Ball quality —/, /Shot selection —/,
+    /Court IQ and decisions —/, /Positioning and footwork —/,
+    /Defense —/, /Offense —/, /Kitchen game —/,
+  ]) {
+    assert.match(p, topic);
+  }
+});
+
+test("shot selection is asked to say what the better option was", () => {
+  // "You drove that ball" is a scoreboard. The coaching is in what they should
+  // have hit instead, which is the part a player can act on.
+  const p = analystPrompt(input(), "LEGEND", null, true);
+  assert.match(p, /what the better option was/);
+});
+
+test("every coaching dimension has a label", () => {
+  // The dimension is stored as a bare string, so a new one added to the enum
+  // without a label renders as "body_mechanics" on the page.
+  for (const d of COACHING_DIMENSIONS) {
+    assert.ok(COACHING_DIMENSION_LABELS[d], `no label for ${d}`);
+    assert.doesNotMatch(COACHING_DIMENSION_LABELS[d], /_/, `${d}'s label is the raw key`);
+  }
 });

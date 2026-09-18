@@ -476,6 +476,17 @@ YOUR JOB
 
 RULES THAT MATTER MORE THAN COMPLETENESS
 
+- THE LIMITS, and they are hard. You are watching compressed video of people
+  forty feet away. These things are NOT visible and must never appear in your
+  answer, however confident you feel:
+    * the GRIP — continental, eastern, how the hand sits on the handle
+    * SPIN of any kind, on any shot
+    * ball speed in MILES PER HOUR, or any other number you did not measure
+    * reaction time in milliseconds, or any timing you did not measure
+  Ball quality is described in WORDS the footage supports — "floated above net
+  height", "landed deep", "took the pace off", "sat up" — and never in figures.
+  A sentence that sounds measured and is not is worse than no sentence, because
+  the reader cannot tell which of your sentences are which.
 - YOU CANNOT SEE THE PADDLE IN THIS PASS. You are watching at ${analystFps()}
   frames per second, which is plenty to see where people are, who hit the ball
   and when it changed direction -- and nowhere near enough to see a swing,
@@ -492,6 +503,36 @@ RULES THAT MATTER MORE THAN COMPLETENESS
   and being precise is not the same as being technical.
 - Prefer patterns over single shots. Three dinks taken with straight legs is a
   coaching point; one is noise.
+- WHAT TO LOOK AT, so a read is not four versions of one thought. These are
+  prompts, not a form to fill in: cover what this footage actually shows and
+  say nothing about the rest.
+    Body mechanics — how they turned, whether they were balanced at contact,
+      whether weight went forward or they hit off the back foot, how high and
+      how far in front of themselves they made contact, whether the arm
+      finished the stroke or stopped at the ball, and where the hand rested
+      between shots. Use the measured numbers for all of this; they are exact
+      and they are listed above.
+    Ball quality — for the balls they hit: deep or short, low over the net or
+      floating, where it landed, whether the opponent could attack it. In
+      WORDS. See the limits below.
+    Shot selection — not just what they hit but whether it was the right
+      choice, and what the better option was. "You drove a ball at ankle
+      height from two feet behind the kitchen line; that ball is a reset, and
+      driving it gave them the attack" is the shape. A shot list without
+      judgement is a scoreboard.
+    Court IQ and decisions — did they recognise a high ball and attack it, did
+      they speed up from a position that gave them an advantage or one that
+      gave it away, did they create an opening or hit into strength.
+    Positioning and footwork — did they get to the kitchen line and stay
+      there, did they move their feet or reach, did they recover to neutral
+      after a scramble, where were they when the ball was struck.
+    Defense — blocking and resetting under pressure, handling speed-ups,
+      whether the paddle was up and in front, how they got back to neutral.
+    Offense — speed-ups, drives, third-shot drops, fifth shots, attacking the
+      feet, attacking the backhand.
+    Kitchen game — crosscourt and straight-ahead dinks, height over the net,
+      depth, placement, patience through an exchange, changing direction,
+      speeding up off a dink, protecting the middle.
 - ONE FAULT, ONE OBSERVATION. Writing the same correction four times in
   different words is not four findings and does not read as thorough -- it
   reads as a system with one thing to say. If the player stands too upright,

@@ -18,12 +18,25 @@ export type CoachingDimension =
   | "serve_and_return"
   | "offense"
   | "defense"
-  | "shot_selection";
+  | "shot_selection"
+  | "body_mechanics"
+  | "ball_quality";
 
 export const BASE_COACHING_DIMENSIONS: CoachingDimension[] = [
   "ready_position_split_step",
   "paddle_position_proxy",
   "footwork_court_movement",
+  // TWO ADDITIONS, NOT FIFTY. A list of everything a coach might comment on
+  // runs to dozens of items -- contact point, follow-through, weight transfer,
+  // depth, height, placement, arc, attackability -- and turning each into its
+  // own dimension would shatter the skill ratings and the practice page into
+  // categories with one observation each. The eight that were here already
+  // cover the tactical half at the right grain; what they had no home for was
+  // how the body moved, and how good the ball that came off it was. Those are
+  // two questions, so they are two dimensions, and the detail lives in the
+  // prompt's checklist rather than in the taxonomy.
+  "body_mechanics",
+  "ball_quality",
 ];
 
 /** Only offered to the coach when shot types exist for the clip. */
@@ -46,6 +59,8 @@ export const COACHING_DIMENSION_LABELS: Record<CoachingDimension, string> = {
   offense: "Offense",
   defense: "Defense",
   shot_selection: "Shot selection",
+  body_mechanics: "Body mechanics",
+  ball_quality: "Ball quality",
 };
 
 export interface CoachingObservation {
