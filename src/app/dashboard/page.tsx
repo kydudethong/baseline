@@ -45,7 +45,7 @@ export default async function HomePage() {
   // process route, which is where the money is; finding out you are out of
   // games only once a 500MB clip has finished uploading would be a bad way to
   // learn it.
-  const quota = await quotaForUser(supabase, user.id, user.email, "");
+  const quota = await quotaForUser(supabase, user.id, user.email, "", null);
 
   if (analyses.length === 0) {
     return (
@@ -88,8 +88,8 @@ export default async function HomePage() {
             <>
               {" "}
               <span style={{ opacity: 0.7 }}>
-                {Math.max(0, quota.limit - quota.used)} of {quota.limit} game
-                {quota.limit === 1 ? "" : "s"} left this month.
+                {Math.round(quota.remainingMinutes)} of {Math.round(quota.limitMinutes)} minutes
+                left this month.
               </span>
             </>
           ) : null}

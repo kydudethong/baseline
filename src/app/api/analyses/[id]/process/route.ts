@@ -48,17 +48,35 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   // warn anybody. A run that cannot be checked is worse than one that did not
   // start, so this returns the user to the screen that fixes it.
   // THE QUOTA, CHECKED HERE because here is where the money is spent. An
-  // upload costs pennies of storage; a run costs about a dollar twenty at
+  // upload costs pennies of storage; a run costs roughly six cents a minute at
   // Gemini. Checking at upload would refuse a clip that might never be
-  // analysed, and checking on the client would not be a check at all.
-  const quota = await quotaForUser(supabase, user.id, user.email, id);
+  // analysed, and checking on the client would not be a check.
+  const clipMinutes = analysis.video.duration_seconds === null
+    ? null
+    : analysis.video.duration_seconds / 60;
+  const quota = await quotaForUser(supabase, user.id, user.email, id, clipMinutes);
   if (!quota.allowed) {
+    const mins = (n: number) => `${Math.round(n)} minute${Math.round(n) === 1 ? "" : "s"}`;
+    const resets = new Date(quota.resetsAt).toLocaleDateString("en-US", { month: "long", day: "numeric" });
     return NextResponse.json(
       {
-        error: `You have analysed ${quota.used} of your ${quota.limit} games this month. `
-          + "Re-running a game you have already analysed is always free — this would be a new one. "
-          + `Your next ${quota.limit} unlock on ${new Date(quota.resetsAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}.`,
-        quota: { used: quota.used, limit: quota.limit, resetsAt: quota.resetsAt },
+        // TWO DIFFERENT PROBLEMS, SAID DIFFERENTLY. Being out of minutes is
+        // fixed by waiting; a clip longer than the whole monthly allowance is
+        // not fixed by waiting at all, and telling somebody to come back on
+        // the 1st when the 1st will not help is worse than saying nothing.
+        error: quota.clipExceedsWholeAllowance
+          ? `This clip is ${mins(clipMinutes ?? 0)} long and the whole monthly allowance is `
+            + `${mins(quota.limitMinutes)}. Trim it to a stretch you actually want read — `
+            + "the coaching is better on twenty minutes of real rallies than on an hour with the warm-up in it."
+          : `You have ${mins(quota.remainingMinutes)} left this month and this clip is `
+            + `${mins(clipMinutes ?? 0)}. Re-analysing a clip you have already run is always free. `
+            + `Your ${mins(quota.limitMinutes)} reset on ${resets}.`,
+        quota: {
+          usedMinutes: quota.usedMinutes,
+          limitMinutes: quota.limitMinutes,
+          remainingMinutes: quota.remainingMinutes,
+          resetsAt: quota.resetsAt,
+        },
       },
       { status: 429 }
     );

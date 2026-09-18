@@ -2,6 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { quotaFor, monthStart, monthEnd, isUnlimited } from "./quota";
 
+/** A clip of `m` minutes, already analysed this month. */
+const run = (analysisId: string, m: number) => ({ analysisId, minutes: m });
+const NO_ENV = { ANALYSIS_MINUTES_PER_MONTH: undefined, UNLIMITED_ANALYSIS_EMAILS: undefined };
+
 function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
   const before: Record<string, string | undefined> = {};
   for (const k of Object.keys(vars)) { before[k] = process.env[k]; 
@@ -13,53 +17,100 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
   }
 }
 
-test("three games a month, then no more", () => {
-  withEnv({ ANALYSES_PER_MONTH: undefined, UNLIMITED_ANALYSIS_EMAILS: undefined }, () => {
-    const q = quotaFor({ startedThisMonth: ["a", "b", "c"], analysisId: "d", email: "x@y.com" });
-    assert.equal(q.allowed, false);
-    assert.equal(q.used, 3);
-    assert.equal(q.limit, 3);
+test("thirty minutes a month, counted in minutes rather than clips", () => {
+  // MINUTES BECAUSE MINUTES ARE WHAT COST MONEY. Three games meant twelve
+  // minutes for one user and ninety for another on the same allowance, and
+  // the bill followed the minutes either way.
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({
+      startedThisMonth: [run("a", 20), run("b", 8)],
+      analysisId: "c", minutes: 5, email: "x@y.com",
+    });
+    assert.equal(q.usedMinutes, 28);
+    assert.equal(q.remainingMinutes, 2);
+    assert.equal(q.allowed, false, "a 5 minute clip does not fit in 2 minutes");
   });
 });
 
-test("re-running a game already counted is free, even at the limit", () => {
-  // THE DIFFERENCE BETWEEN A QUOTA AND A TRAP. A run that failed, or one being
-  // re-analysed after fixing the court or re-tagging the wrong player, is the
-  // SAME game. Charging again would leave somebody at their limit with a bad
-  // court and no way to fix it — which is exactly when they most need the
-  // re-run.
-  withEnv({ ANALYSES_PER_MONTH: undefined, UNLIMITED_ANALYSIS_EMAILS: undefined }, () => {
-    const q = quotaFor({ startedThisMonth: ["a", "b", "c"], analysisId: "b", email: "x@y.com" });
+test("a clip that fits exactly is allowed", () => {
+  // The boundary belongs to the user. Refusing a clip that fits to the second
+  // would make the number on the page a lie.
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({
+      startedThisMonth: [run("a", 20)], analysisId: "b", minutes: 10, email: "x@y.com",
+    });
     assert.equal(q.allowed, true);
-    assert.equal(q.used, 3, "a re-run must not inflate the count either");
   });
 });
 
-test("the same game started twice counts once", () => {
-  withEnv({ ANALYSES_PER_MONTH: undefined, UNLIMITED_ANALYSIS_EMAILS: undefined }, () => {
-    const q = quotaFor({ startedThisMonth: ["a", "a", "a", "b"], analysisId: "c", email: "x@y.com" });
-    assert.equal(q.used, 2);
+test("re-analysing a clip costs nothing, even with no minutes left", () => {
+  // THE DIFFERENCE BETWEEN A QUOTA AND A TRAP. A run that failed, or one
+  // re-analysed after fixing the court or re-tagging the wrong player, is the
+  // same footage. Charging twice leaves somebody out of minutes with a bad
+  // court and no way to fix it.
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({
+      startedThisMonth: [run("a", 30)], analysisId: "a", minutes: 30, email: "x@y.com",
+    });
+    assert.equal(q.allowed, true);
+    assert.equal(q.usedMinutes, 30, "a re-run must not be added again either");
+  });
+});
+
+test("the same clip started three times is counted once", () => {
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({
+      startedThisMonth: [run("a", 12), run("a", 12), run("a", 12)],
+      analysisId: "b", minutes: 5, email: "x@y.com",
+    });
+    assert.equal(q.usedMinutes, 12);
+    assert.equal(q.allowed, true);
+  });
+});
+
+test("a clip longer than the whole allowance says so, rather than saying wait", () => {
+  // Two different problems. Being out of minutes is fixed by waiting for the
+  // 1st; a 45-minute clip against a 30-minute allowance is never fixed by
+  // waiting, and telling somebody to come back next month when next month
+  // cannot help is worse than saying nothing.
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({ startedThisMonth: [], analysisId: "a", minutes: 45, email: "x@y.com" });
+    assert.equal(q.allowed, false);
+    assert.equal(q.clipExceedsWholeAllowance, true);
+  });
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({ startedThisMonth: [run("a", 28)], analysisId: "b", minutes: 5, email: "x@y.com" });
+    assert.equal(q.allowed, false);
+    assert.equal(q.clipExceedsWholeAllowance, false, "this one IS fixed by waiting");
+  });
+});
+
+test("a duration we never recorded is let through, not charged or refused", () => {
+  // Missing metadata is our bug. Refusing somebody's run over a gap they
+  // cannot see punishes them for it; the exploit needs a deliberately broken
+  // upload, which is a worse trade than the occasional free clip.
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({ startedThisMonth: [run("a", 29)], analysisId: "b", minutes: null, email: "x@y.com" });
     assert.equal(q.allowed, true);
   });
 });
 
 test("a listed account has no limit", () => {
   withEnv({ UNLIMITED_ANALYSIS_EMAILS: "dev@example.com, other@example.com" }, () => {
-    const q = quotaFor({ startedThisMonth: ["a", "b", "c", "d", "e"], analysisId: "f", email: "dev@example.com" });
+    const q = quotaFor({
+      startedThisMonth: [run("a", 500)], analysisId: "b", minutes: 90, email: "dev@example.com",
+    });
     assert.equal(q.allowed, true);
     assert.equal(q.unlimited, true);
   });
 });
 
-test("the allowlist ignores case and spacing, and an empty one exempts nobody", () => {
-  // A trailing space in a secret is invisible and would silently switch the
-  // dev account back on to the limit.
+test("the allowlist ignores case and spacing on BOTH sides", () => {
+  // The secret is typed by a person and the email comes from the auth
+  // provider, so either can differ in case. A dev account quietly back on the
+  // limit is a confusing way to lose an afternoon.
   withEnv({ UNLIMITED_ANALYSIS_EMAILS: "  DEV@Example.com  " }, () => {
     assert.equal(isUnlimited("dev@example.com"), true);
-    // AND THE OTHER DIRECTION, which is the one that actually bites: the
-    // secret is typed by a person and the email comes from the auth provider,
-    // so either side can differ in case. A dev account silently back on the
-    // limit is a confusing way to spend an afternoon.
     assert.equal(isUnlimited("DEV@Example.com"), true);
     assert.equal(isUnlimited(" dev@EXAMPLE.com "), true);
     assert.equal(isUnlimited("someone@else.com"), false);
@@ -70,13 +121,16 @@ test("the allowlist ignores case and spacing, and an empty one exempts nobody", 
   });
 });
 
-test("the limit is configurable without a deploy", () => {
-  withEnv({ ANALYSES_PER_MONTH: "10", UNLIMITED_ANALYSIS_EMAILS: undefined }, () => {
-    assert.equal(quotaFor({ startedThisMonth: ["a", "b", "c"], analysisId: "d", email: "x@y.com" }).allowed, true);
+test("the limit is configurable, and a typo does not mean zero", () => {
+  withEnv({ ANALYSIS_MINUTES_PER_MONTH: "90", UNLIMITED_ANALYSIS_EMAILS: undefined }, () => {
+    assert.equal(quotaFor({
+      startedThisMonth: [run("a", 60)], analysisId: "b", minutes: 25, email: "x@y.com",
+    }).allowed, true);
   });
-  withEnv({ ANALYSES_PER_MONTH: "not a number", UNLIMITED_ANALYSIS_EMAILS: undefined }, () => {
-    // A typo in a secret must not mean "zero games a month for everybody".
-    assert.equal(quotaFor({ startedThisMonth: [], analysisId: "d", email: "x@y.com" }).limit, 3);
+  withEnv({ ANALYSIS_MINUTES_PER_MONTH: "not a number", UNLIMITED_ANALYSIS_EMAILS: undefined }, () => {
+    assert.equal(quotaFor({
+      startedThisMonth: [], analysisId: "b", minutes: 1, email: "x@y.com",
+    }).limitMinutes, 30);
   });
 });
 

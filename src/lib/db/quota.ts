@@ -1,27 +1,32 @@
 /**
- * How many games a month an account may analyse.
+ * How much gameplay a month an account may analyse.
  *
- * THE GATE IS ON PROCESSING, NOT UPLOADING. Uploading costs a few cents of
- * storage; analysing costs real money at Gemini, about a dollar twenty for a
- * twenty-minute game. So an upload is always free and the count is of games
- * actually analysed -- which also means somebody can upload, look at the setup
- * screen, decide the camera angle was wrong and delete it, without having paid
- * for anything.
+ * MINUTES, NOT GAMES, because minutes are what things cost. A run is billed by
+ * how much video Gemini watches -- roughly six cents a minute at the current
+ * settings -- so three games meant anything from twelve minutes to ninety
+ * depending on how long somebody's clips happened to be, and the same
+ * allowance could cost five times as much for one user as another. Counting
+ * the thing that costs money makes the limit mean one thing for everybody.
  *
- * RE-RUNNING A GAME IS FREE. This is not generosity, it is the difference
- * between a quota and a trap: a run that failed, or one re-analysed after
- * fixing the court or re-tagging the wrong player, is the SAME game. Charging
- * for it would mean a user with three games and one bad court has two games
- * left and no way to fix the first. The count is of distinct analyses started
- * this month, so the second run of one of them changes nothing.
+ * THE GATE IS ON PROCESSING, NOT UPLOADING. An upload costs pennies of
+ * storage; a run costs real money. So an upload is always free, and somebody
+ * can upload a clip, look at the setup screen, decide the camera angle was
+ * wrong and delete it, without having spent any of their month.
+ *
+ * RE-RUNNING A CLIP IS FREE. This is the difference between a quota and a
+ * trap: a run that failed, or one re-analysed after fixing the court or
+ * re-tagging the wrong player, is the same footage. Charging twice would leave
+ * somebody out of minutes with a bad court and no way to fix it -- exactly
+ * when they most need the re-run.
  */
 
-/** Games a month on the default plan. */
-export const ANALYSES_PER_MONTH = 3;
+/** Minutes of gameplay a month on the default plan. */
+export const MINUTES_PER_MONTH = 30;
 
-export function monthlyLimit(): number {
-  const v = Number(process.env.ANALYSES_PER_MONTH);
-  return Number.isFinite(v) && v > 0 ? Math.floor(v) : ANALYSES_PER_MONTH;
+export function monthlyLimitMinutes(): number {
+  const v = Number(process.env.ANALYSIS_MINUTES_PER_MONTH);
+  // A typo in a secret must not mean "nobody may analyse anything".
+  return Number.isFinite(v) && v > 0 ? v : MINUTES_PER_MONTH;
 }
 
 /**
@@ -33,8 +38,7 @@ export function monthlyLimit(): number {
  * column that does not exist, and the first thing anybody saw would be a 500
  * on upload. A secret can be set on the running app in one command.
  *
- * When the plans become real this belongs in the database. Until then the
- * honest version is the one that works.
+ * When the plans become real this belongs in the database.
  */
 export function unlimitedEmails(): string[] {
   return (process.env.UNLIMITED_ANALYSIS_EMAILS ?? "")
@@ -60,41 +64,69 @@ export function monthEnd(now: Date = new Date()): Date {
 
 export interface QuotaState {
   unlimited: boolean;
-  /** Distinct games analysed so far this month. */
-  used: number;
-  limit: number;
+  /** Minutes of gameplay already analysed this month. */
+  usedMinutes: number;
+  limitMinutes: number;
+  /** Minutes left, floored at zero. */
+  remainingMinutes: number;
   /** Whether the run being asked about may go ahead. */
   allowed: boolean;
-  /** When the count goes back to zero. */
+  /**
+   * Set when the clip is refused because it is longer than the WHOLE monthly
+   * allowance, which is a different problem with a different fix: waiting for
+   * the reset will not help, and trimming the clip will.
+   */
+  clipExceedsWholeAllowance: boolean;
   resetsAt: string;
 }
 
+export interface StartedRun {
+  analysisId: string;
+  minutes: number;
+}
+
 /**
- * Decide from a list of this month's already-started analyses.
+ * Decide from what this user has already started this month.
  *
- * Split from the query so the rule can be tested without a database. The
- * caller passes the ids of analyses this user has ALREADY started processing
- * this month, plus the id of the one being asked about.
+ * Split from the query so the rule can be tested without a database.
  */
 export function quotaFor(opts: {
-  startedThisMonth: readonly string[];
-  /** The analysis about to run. Already in the list means this is a re-run. */
+  startedThisMonth: readonly StartedRun[];
+  /** The run being asked about. Null minutes means the duration is unknown. */
   analysisId: string;
+  minutes: number | null;
   email: string | null | undefined;
   now?: Date;
 }): QuotaState {
-  const limit = monthlyLimit();
+  const limitMinutes = monthlyLimitMinutes();
   const resetsAt = monthEnd(opts.now).toISOString();
-  if (isUnlimited(opts.email)) {
-    return { unlimited: true, used: opts.startedThisMonth.length, limit, allowed: true, resetsAt };
-  }
-  const distinct = new Set(opts.startedThisMonth);
-  const used = distinct.size;
-  // A re-run of a game already counted takes no new slot. Checked by id rather
-  // than by count, so it holds even at exactly the limit -- which is the case
-  // that matters, since that is when somebody needs to fix a bad court.
-  const isRerun = distinct.has(opts.analysisId);
-  return { unlimited: false, used, limit, allowed: isRerun || used < limit, resetsAt };
+
+  // One entry per analysis, so a clip started three times is counted once.
+  const byId = new Map<string, number>();
+  for (const r of opts.startedThisMonth) byId.set(r.analysisId, r.minutes);
+  const usedMinutes = Math.round([...byId.values()].reduce((a, b) => a + b, 0) * 10) / 10;
+  const remainingMinutes = Math.max(0, Math.round((limitMinutes - usedMinutes) * 10) / 10);
+
+  const base = { usedMinutes, limitMinutes, remainingMinutes, resetsAt, clipExceedsWholeAllowance: false };
+  if (isUnlimited(opts.email)) return { ...base, unlimited: true, allowed: true };
+
+  // A re-run is already paid for. Checked by id rather than by arithmetic, so
+  // it holds when the account is exactly out of minutes -- which is the only
+  // time it matters.
+  if (byId.has(opts.analysisId)) return { ...base, unlimited: false, allowed: true };
+
+  // A duration we never recorded is our missing metadata, not the user's
+  // fault. Letting it through is the lesser error: refusing a run because of
+  // our own gap punishes somebody for a bug they cannot see, and the exploit
+  // requires deliberately breaking the upload.
+  if (opts.minutes === null) return { ...base, unlimited: false, allowed: true };
+
+  return {
+    ...base,
+    unlimited: false,
+    allowed: usedMinutes + opts.minutes <= limitMinutes,
+    clipExceedsWholeAllowance: opts.minutes > limitMinutes,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -105,26 +137,37 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * This user's quota, read from what they have actually started this month.
  *
  * "STARTED" MEANS THE STATUS LEFT `uploaded`. A clip sitting in the account
- * that nobody ever analysed costs pennies of storage and takes no slot; one
- * that failed halfway does take a slot, because the money was spent either
- * way and pretending otherwise would let a retry loop run up a real bill.
+ * that nobody ever analysed takes nothing; one that failed halfway does,
+ * because the money was spent either way and pretending otherwise turns a
+ * retry loop into a real bill.
  */
 export async function quotaForUser(
   supabase: SupabaseClient,
   userId: string,
   email: string | null | undefined,
-  analysisId: string
+  analysisId: string,
+  /** Length of the clip about to run; null when it is not known. */
+  minutes: number | null
 ): Promise<QuotaState> {
   const { data, error } = await supabase
     .from("analyses")
-    .select("id")
+    .select("id, videos(duration_seconds)")
     .eq("user_id", userId)
     .neq("status", "uploaded")
     .gte("created_at", monthStart().toISOString());
   if (error) throw error;
-  return quotaFor({
-    startedThisMonth: ((data ?? []) as Array<{ id: string }>).map((r) => r.id),
-    analysisId,
-    email,
+
+  const rows = (data ?? []) as Array<{
+    id: string;
+    videos: { duration_seconds: number | null } | Array<{ duration_seconds: number | null }> | null;
+  }>;
+  const started: StartedRun[] = rows.map((r) => {
+    // Supabase returns an embedded one-to-one as an object or a one-element
+    // array depending on how the relationship is declared; handle both rather
+    // than depending on which.
+    const v = Array.isArray(r.videos) ? r.videos[0] : r.videos;
+    const secs = v?.duration_seconds ?? null;
+    return { analysisId: r.id, minutes: secs === null ? 0 : secs / 60 };
   });
+  return quotaFor({ startedThisMonth: started, analysisId, minutes, email });
 }
