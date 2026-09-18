@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { getActiveBlueprintsForUser } from "@/lib/db/blueprints";
+import { SkillRadar } from "@/components/breakdown/SkillRadar";
 import { completedAnalysisMeta, getRankedWeaknesses, getSkillProfiles, overallRating } from "@/lib/coaching/stats";
 
 export const metadata: Metadata = { title: "Practice — Baseline" };
@@ -105,39 +106,25 @@ export default async function PracticePage() {
         </div>
       ) : null}
 
-      <div className="sec">
-        <div className="sec-head">
-          <h2 className="h2">Recurring weaknesses</h2>
-          <span className="count xs">{weaknesses.length}</span>
-        </div>
-        {weaknesses.length === 0 ? (
-          <div className="note">No recurring weaknesses surfaced yet — nice work.</div>
-        ) : (
-          <div className="stack g3">
-            {weaknesses.map((w) => (
-              <div key={w.skillKey} className="weak">
-                <div className="stripe" />
-                <div className="in">
-                  <span className="eyebrow">{w.name}</span>
-                  <p className="h3">{w.mostRecent.title}</p>
-                  <p className="sm">{w.mostRecent.detail}</p>
-                  <div className="evid">
-                    <Link href={`/dashboard/${w.mostRecent.analysisId}`}>
-                      most recent: {w.mostRecent.analysisTitle}
-                    </Link>
-                    <span className="chip">shown up {w.occurrences}×</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
       {profilesByGroup.length > 0 ? (
         <div className="sec">
           <div className="sec-head">
             <h2 className="h2">Skill ratings over time</h2>
+          </div>
+          {/*
+            THE SHAPE FIRST, THEN THE NUMBERS. The radar was only ever drawn
+            for a single game, where it says what one clip showed. Here it is
+            drawn from the recency-weighted average of every game, which is the
+            more useful picture by some distance -- it is the answer to "what
+            kind of player am I", where one game only answers "how did that go".
+            It could not be drawn before because the component insisted on a
+            database row; it takes a rating now.
+          */}
+          <div className="card">
+            <SkillRadar skills={ratedProfiles.map((p) => ({
+              skill_key: p.skillKey,
+              raw: p.weightedAvg as number,
+            }))} />
           </div>
           <div className="grid2">
             {profilesByGroup.map(({ group, skills }) => (
@@ -171,6 +158,35 @@ export default async function PracticePage() {
           </div>
         </div>
       ) : null}
+
+      <div className="sec">
+        <div className="sec-head">
+          <h2 className="h2">Recurring weaknesses</h2>
+          <span className="count xs">{weaknesses.length}</span>
+        </div>
+        {weaknesses.length === 0 ? (
+          <div className="note">No recurring weaknesses surfaced yet — nice work.</div>
+        ) : (
+          <div className="stack g3">
+            {weaknesses.map((w) => (
+              <div key={w.skillKey} className="weak">
+                <div className="stripe" />
+                <div className="in">
+                  <span className="eyebrow">{w.name}</span>
+                  <p className="h3">{w.mostRecent.title}</p>
+                  <p className="sm">{w.mostRecent.detail}</p>
+                  <div className="evid">
+                    <Link href={`/dashboard/${w.mostRecent.analysisId}`}>
+                      most recent: {w.mostRecent.analysisTitle}
+                    </Link>
+                    <span className="chip">shown up {w.occurrences}×</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="sec">
         <div className="sec-head">

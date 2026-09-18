@@ -1,6 +1,5 @@
 "use client";
 
-import type { CoachingSkillRatingRow } from "@/lib/db/types";
 import { SkillInfo } from "./SkillInfo";
 import { SKILLS, skillName } from "@/lib/coaching/types";
 
@@ -29,7 +28,23 @@ interface GroupScore {
   count: number;
 }
 
-function groupScores(skills: CoachingSkillRatingRow[]): GroupScore[] {
+/**
+ * What this chart needs from a rating, which is less than a database row.
+ *
+ * WIDENED SO IT CAN DRAW A CAREER, not just one game. The practice page holds
+ * recency-weighted averages across every analysis -- a far more interesting
+ * shape than any single clip -- and could not draw them because this component
+ * asked for CoachingSkillRatingRow, a row type carrying an id, an analysis id
+ * and a created_at that nothing here ever reads. A `raw` that is 3.4 rather
+ * than 3 plots exactly the same.
+ */
+export interface RadarSkill {
+  skill_key: string;
+  raw: number;
+  basis?: string | null;
+}
+
+function groupScores(skills: RadarSkill[]): GroupScore[] {
   const byGroup = new Map<string, number[]>();
   for (const s of skills) {
     const meta = SKILLS.find((k) => k.key === s.skill_key);
@@ -57,7 +72,7 @@ function groupScores(skills: CoachingSkillRatingRow[]): GroupScore[] {
  * pie), and a group with no rated skills this analysis sits at the center
  * with a "—" label rather than implying a score of zero.
  */
-export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
+export function SkillRadar({ skills }: { skills: RadarSkill[] }) {
   const groups = groupScores(skills);
   // Which skills feed each axis, so the icon can say what the average is made
   // of. "Offense 4.00" is the serve, the third shot and attacking play, and
@@ -229,7 +244,7 @@ export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
                 group={g.group}
                 parts={skills
                   .filter((s) => groupOfSkill.get(s.skill_key) === g.group)
-                  .map((s) => ({ name: skillName(s.skill_key), raw: s.raw, basis: s.basis }))}
+                  .map((s) => ({ name: skillName(s.skill_key), raw: s.raw, basis: s.basis ?? null }))}
               />
             </div>
             <p className="h2" style={{ marginTop: 2 }}>{g.avg !== null ? g.avg.toFixed(2) : "—"}</p>
