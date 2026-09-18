@@ -61,8 +61,22 @@ export const SEGMENT_TOKEN_BUDGET = 600_000;
  * pickleball does not contain an hour of coaching, and a player acts on a
  * handful of corrections; covering minute 55 in full while charging for it is
  * not a trade worth making silently. When it happens, it is logged.
+ *
+ * SIXTEEN, RAISED FROM EIGHT, because eight was quietly losing a fifth of
+ * every long game. Segments are capped at two minutes by the model's sense of
+ * time (see DEFAULT_MAX_SEGMENT_SECONDS), so eight of them cover sixteen
+ * minutes -- and a twenty-minute game was therefore watched as eight windows
+ * spread across it with seven gaps of about half a minute in between. Each gap
+ * holds a rally or two, and nothing downstream could tell they were missing:
+ * they simply did not appear in the read.
+ *
+ * That was survivable when a segment cost real money. At low media resolution
+ * a two-minute window is about 79,000 tokens -- twelve cents -- so full
+ * coverage of a twenty-minute game costs around a dollar twenty. Sixteen
+ * covers half an hour contiguously, which is longer than anybody's clip, and
+ * the sampling path stays for the genuinely long recording.
  */
-export const MAX_SEGMENTS = 8;
+export const MAX_SEGMENTS = 16;
 
 export interface Segment {
   startSeconds: number;

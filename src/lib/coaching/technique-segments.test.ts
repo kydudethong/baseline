@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { planSegments, maxSegmentSeconds, isSampled, MAX_SEGMENTS, DEFAULT_MAX_SEGMENT_SECONDS, maxSegmentSecondsCap, tokensPerFrame, TOKENS_PER_FRAME_LOW, SEGMENT_TOKEN_BUDGET, TOKENS_PER_FRAME_HIGH } from "./technique-segments";
+import { ANALYST_FPS } from "./read-rate";
 
 const FPS = 15;
 
@@ -109,4 +110,32 @@ test("the time cap is overridable, and the token budget still binds above it", (
     if (before === undefined) delete process.env.ANALYST_MAX_SEGMENT_SECONDS;
     else process.env.ANALYST_MAX_SEGMENT_SECONDS = before;
   }
+});
+
+test("a twenty-minute game is covered end to end, not sampled", () => {
+  // THE THIRD THING THAT WAS LOSING RALLIES, after segment boundaries cutting
+  // points in half and motion gating skipping quiet ones. Segments are capped
+  // at two minutes by the model's sense of time, so eight of them reached only
+  // sixteen minutes: a twenty-minute game was watched as eight windows with
+  // seven gaps of about half a minute between them, each gap holding a rally
+  // or two, and nothing downstream could tell they were missing.
+  const twentyMinutes = 20 * 60;
+  assert.equal(isSampled(twentyMinutes, ANALYST_FPS, "low"), false);
+  const plan = planSegments(twentyMinutes, ANALYST_FPS, "low");
+  const covered = plan.reduce((n, s) => n + (s.endSeconds - s.startSeconds), 0);
+  assert.equal(Math.round(covered), twentyMinutes, "footage was left unwatched");
+  // Contiguous: every second between the first start and the last end is in
+  // some segment. Gaps are what lost the rallies.
+  for (let i = 1; i < plan.length; i++) {
+    assert.ok(plan[i].startSeconds <= plan[i - 1].endSeconds + 0.01,
+      `gap between ${plan[i - 1].endSeconds}s and ${plan[i].startSeconds}s`);
+  }
+});
+
+test("a genuinely long recording is still sampled rather than refused", () => {
+  // The guard the cap exists for. An hour of footage does not contain an hour
+  // of coaching, and silently charging for all of it is the trade this avoids.
+  const anHour = 60 * 60;
+  assert.equal(isSampled(anHour, ANALYST_FPS, "low"), true);
+  assert.equal(planSegments(anHour, ANALYST_FPS, "low").length, MAX_SEGMENTS);
 });

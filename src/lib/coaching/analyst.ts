@@ -100,7 +100,22 @@ export function analystOutputBudget(segmentSeconds: number): number {
  * is no half-price detail setting for video to reach for.
  */
 export function analystMediaResolution(): "low" | "medium" | "high" {
-  const v = (process.env.ANALYST_MEDIA_RESOLUTION ?? "high").toLowerCase();
+  // LOW BY DEFAULT, and the arithmetic is the argument. Gemini charges per
+  // frame by tier -- about 258 tokens at high against 66 at low -- so this one
+  // setting is a 4x on the largest line in the bill, and at 10fps over a whole
+  // twenty-minute game that is the difference between roughly $3.70 and $0.95.
+  //
+  // What it costs in quality is what this pass is actually asked to see: where
+  // people are, who hit the ball, and when it changed direction. Not the
+  // paddle -- the prompt says outright that the paddle is invisible here and a
+  // separate pass reads technique from close-up bursts. Low resolution was the
+  // setting for most of this product's life and the scan was not the weak
+  // part; it moved to high during a quality push without anybody costing it.
+  //
+  // ANALYST_MEDIA_RESOLUTION=high puts it back. If rally detection gets worse
+  // after this change, that is the first thing to try -- and worth measuring
+  // rather than assuming, because it is a 4x either way.
+  const v = (process.env.ANALYST_MEDIA_RESOLUTION ?? "low").toLowerCase();
   return v === "low" ? "low" : v === "medium" ? "medium" : "high";
 }
 
