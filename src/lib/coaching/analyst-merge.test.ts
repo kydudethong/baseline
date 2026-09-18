@@ -199,3 +199,75 @@ test("shots follow the rally they were rejoined into", () => {
   assert.equal(out.rallies.length, 1);
   assert.deepEqual(out.shots.map((sh) => sh.rally_idx), [1, 1]);
 });
+
+const obs = (over: Partial<AnalystOutput["observations"][number]> = {}) => ({
+  rally_idx: null, shot_t: null, skill_key: "dinking",
+  coaching_dimension: "kitchen_game" as const, valence: "weakness" as const,
+  title: "t", detail: "", severity: 3,
+  why_it_matters: null, what_to_change: null, drill_slug: null,
+  ...over,
+});
+
+test("one fault written up by four segments becomes one observation", () => {
+  // REPORTED FROM A REAL READ. Four observations came back, all of them "knees
+  // too straight, bend to 125-140 degrees" in different words. Segments are
+  // blind to each other — a postural habit is visible in every two-minute
+  // stretch — and merging was a flatMap, so every copy reached the page.
+  const parts = [
+    base({ observations: [obs({ title: "Knees standing too tall during kitchen exchanges",
+      what_to_change: "Hinge at the hips and lower your knees to roughly 130-140 degrees", severity: 3 })] }),
+    base({ observations: [obs({ title: "Straight-leg posture on low kitchen contact",
+      what_to_change: "Drop your hips into an athletic crouch with knees bent around 125 to 135", severity: 4 })] }),
+    base({ observations: [obs({ title: "Straight-legged kitchen exchanges",
+      what_to_change: "Hinge at the hips and bend knees under 140 degrees", severity: 2 })] }),
+  ];
+  const out = mergeAnalystOutputs(parts, 600);
+  assert.equal(out.observations.length, 1, `kept ${out.observations.length}: `
+    + out.observations.map((o) => o.title).join(" | "));
+  // The clearest sighting wins, so the reader gets the strongest wording.
+  assert.equal(out.observations[0].severity, 4);
+});
+
+test("two different faults about the same skill both survive", () => {
+  // THE GUARD, and the reason tags alone are not enough to dedupe on. Standing
+  // too tall and reaching instead of moving your feet are both dinking, both
+  // kitchen_game, both weaknesses — and they are two corrections a player can
+  // act on separately.
+  const parts = [base({ observations: [
+    obs({ title: "Knees too straight at the kitchen",
+      what_to_change: "Bend your knees to 130 degrees and stay compressed" }),
+    obs({ title: "Reaching for wide dinks instead of moving",
+      what_to_change: "Take a side step so the ball stays in front of your body" }),
+  ] })];
+  const out = mergeAnalystOutputs(parts, 600);
+  assert.equal(out.observations.length, 2);
+});
+
+test("a strength and a weakness about one skill are never merged", () => {
+  const parts = [base({ observations: [
+    obs({ title: "Soft hands at the kitchen", valence: "strength",
+      what_to_change: "Keep the paddle face open on low contact" }),
+    obs({ title: "Soft hands at the kitchen", valence: "weakness",
+      what_to_change: "Keep the paddle face open on low contact" }),
+  ] })];
+  assert.equal(mergeAnalystOutputs(parts, 600).observations.length, 2);
+});
+
+test("two real findings that happen to share words are not merged", () => {
+  // THE BOUNDARY THIS SITS ON, and the reason the threshold cannot simply be
+  // lowered until the duplicates disappear. These two are different
+  // corrections — posture, and how hard the dinks are hit — and they score
+  // 0.25 against each other, which is EXACTLY what two of the four real
+  // duplicates scored. The chain is what tells them apart: paraphrases of one
+  // fault are linked through a third phrasing, and these two are not linked to
+  // anything.
+  const parts = [
+    base({ observations: [obs({ title: "Knees too straight during kitchen exchanges",
+      what_to_change: "Bend your knees to 130 degrees at the kitchen line" })] }),
+    base({ observations: [obs({ title: "Kitchen dinks floating above net height",
+      what_to_change: "Take pace off so the ball lands below their knees" })] }),
+  ];
+  const out = mergeAnalystOutputs(parts, 600);
+  assert.equal(out.observations.length, 2,
+    "two separate corrections were collapsed into one — the threshold is too loose");
+});

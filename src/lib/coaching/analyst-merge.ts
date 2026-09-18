@@ -25,6 +25,7 @@ import type { AnalystOutput } from "./analyst";
 
 /** A rally that survived the merge, with its original segment recorded. */
 type Rally = AnalystOutput["rallies"][number];
+type Observation = AnalystOutput["observations"][number] & { rally_idx: number | null };
 type Shot = AnalystOutput["shots"][number];
 
 /**
@@ -49,7 +50,17 @@ export function mergeAnalystOutputs(
     // hallucinate past the end of the clip -- one run returned seven rallies
     // between 506s and 725s of a 446-second video. Returning the raw output
     // untouched let every one of those reach the page.
-    return { ...usable[0], rallies, shots: repointShots(usable[0].shots ?? [], rallies) };
+    return {
+      ...usable[0],
+      rallies,
+      shots: repointShots(usable[0].shots ?? [], rallies),
+      // DEDUPED ON THIS PATH TOO. One call is where most clips are read, and
+      // nothing stops a single pass writing the same correction twice in
+      // different words -- it is the same failure, just without segments to
+      // blame. Skipping it here would also mean the guard tests exercised
+      // nothing, since a one-segment merge returned before reaching it.
+      observations: dedupe(usable[0].observations ?? [], onLog),
+    };
   }
   const shots = repointShots(usable.flatMap((p) => p.shots ?? []), rallies);
 
@@ -58,14 +69,14 @@ export function mergeAnalystOutputs(
   // only a rally index cannot be trusted across segments, so their rally is
   // cleared rather than guessed. A clip-wide observation is still useful; one
   // attached to the wrong point is worse than one attached to none.
-  const observations = usable.flatMap((p) =>
+  const observations = dedupe(usable.flatMap((p) =>
     (p.observations ?? []).map((o) => ({
       ...o,
       rally_idx: o.shot_t !== null && o.shot_t !== undefined
         ? (rallyAt(rallies, o.shot_t)?.idx ?? null)
         : null,
     }))
-  );
+  ), onLog);
 
   const lead = [...usable].sort((a, b) => (b.rallies?.length ?? 0) - (a.rallies?.length ?? 0))[0];
 
@@ -211,6 +222,111 @@ function stitch(sorted: Rally[], onLog?: (line: string) => void): Rally[] {
 
 function renumber(rallies: Rally[]): Rally[] {
   return rallies.map((r, i) => ({ ...r, idx: i + 1 }));
+}
+
+const STOPWORDS = new Set([
+  "a", "an", "the", "on", "in", "at", "to", "of", "for", "with", "and", "or",
+  "your", "you", "is", "are", "was", "were", "be", "being", "too", "more",
+  "during", "when", "while", "before", "after", "into", "from", "that", "this",
+]);
+
+/**
+ * The words that say WHICH fault this is, with the ones that do not stripped.
+ *
+ * So "straight-leg posture on low kitchen contact" and "straight-legged
+ * kitchen exchanges" are recognised as one finding, which is what they are.
+ */
+function fingerprint(text: string): Set<string> {
+  return new Set(
+    text.toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !STOPWORDS.has(w))
+      // Crude stemming, enough to join "legged"/"legs"/"leg".
+      .map((w) => w.replace(/(ged|ing|ed|es|s)$/, ""))
+      .filter(Boolean)
+  );
+}
+
+function overlap(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let shared = 0;
+  for (const w of a) if (b.has(w)) shared += 1;
+  return shared / Math.min(a.size, b.size);
+}
+
+/**
+ * How much of the shorter finding must appear in the longer to link them.
+ *
+ * FORTY PER CENT, AND IT IS A LINK RATHER THAN A VERDICT -- see dedupe. The
+ * four real duplicates from the reported read scored 0.64, 0.45 and 0.25
+ * against each other, while a genuinely different finding about the same skill
+ * ("you stay back after serving") scored 0.25 against one of them. So no
+ * single threshold separates them pairwise: 0.25 would merge two real
+ * findings, and 0.5 left three of four duplicates on the page.
+ */
+const SAME_FINDING_OVERLAP = 0.4;
+
+/**
+ * Collapse the same finding reported several times.
+ *
+ * SEGMENTS DO NOT KNOW ABOUT EACH OTHER. A long match is watched in up to
+ * sixteen two-minute calls, each blind to the rest, and a postural habit is
+ * visible in every one of them -- so a player who stands too upright at the
+ * kitchen gets that written up once per segment. Reported from a real read:
+ * four separate observations, all of them "knees too straight, bend to
+ * 125-140 degrees". That is not four findings, and it does not read as
+ * thorough; it reads as a system with one thing to say.
+ *
+ * Merging used to be a flatMap, so every duplicate survived onto the page.
+ *
+ * LINKED BY A CHAIN, NOT PAIRWISE. Paraphrases of one fault do not all
+ * resemble each other equally -- "knees standing too tall during kitchen
+ * exchanges" and "straight-leg posture on low kitchen contact" share almost
+ * nothing directly, and are joined through a third phrasing that resembles
+ * both. So overlap connects two findings, and anything transitively connected
+ * is one finding. Within a single skill, dimension and valence that chaining
+ * is safe; it is the only thing that separates four paraphrases from two real
+ * corrections, because pairwise they score the same.
+ *
+ * The strongest instance wins -- highest severity, the stretch where it cost
+ * most -- and the rest are dropped rather than summarised, since a summary of
+ * four paraphrases is a fifth paraphrase.
+ */
+function dedupe(all: Observation[], onLog?: (line: string) => void): Observation[] {
+  type Cluster = { obs: Observation; prints: Array<Set<string>> };
+  const clusters: Cluster[] = [];
+  for (const o of all) {
+    const print = fingerprint(`${o.title ?? ""} ${o.what_to_change ?? ""} ${o.detail ?? ""}`);
+    const linked = clusters.filter((c) =>
+      c.obs.skill_key === o.skill_key
+      && c.obs.coaching_dimension === o.coaching_dimension
+      && c.obs.valence === o.valence
+      && c.prints.some((p) => overlap(p, print) >= SAME_FINDING_OVERLAP)
+    );
+    if (linked.length === 0) {
+      clusters.push({ obs: o, prints: [print] });
+      continue;
+    }
+    // This finding may link two clusters that had not yet been connected to
+    // each other -- which is the whole point of chaining. Fold them together.
+    const head = linked[0];
+    head.prints.push(print);
+    if ((o.severity ?? 0) > (head.obs.severity ?? 0)) head.obs = o;
+    for (const other of linked.slice(1)) {
+      head.prints.push(...other.prints);
+      if ((other.obs.severity ?? 0) > (head.obs.severity ?? 0)) head.obs = other.obs;
+      clusters.splice(clusters.indexOf(other), 1);
+    }
+  }
+  const dropped = all.length - clusters.length;
+  if (dropped > 0) {
+    onLog?.(
+      `analyst: dropped ${dropped} repeat observation(s) — the same finding written up by `
+      + "more than one segment, which none of them could know"
+    );
+  }
+  return clusters.map((c) => c.obs);
 }
 
 /**
