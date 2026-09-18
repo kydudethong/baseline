@@ -413,10 +413,10 @@ YOUR JOB
 
 RULES THAT MATTER MORE THAN COMPLETENESS
 
-- YOU CANNOT SEE THE PADDLE IN THIS PASS. You are watching at 5 frames per
-  second at low resolution, which is plenty to see where people are, who hit
-  the ball and when it changed direction -- and nowhere near enough to see a
-  swing, which lasts about a third of a second. A separate pass re-watches the
+- YOU CANNOT SEE THE PADDLE IN THIS PASS. You are watching at ${analystFps()}
+  frames per second, which is plenty to see where people are, who hit the ball
+  and when it changed direction -- and nowhere near enough to see a swing,
+  which lasts about a third of a second. A separate pass re-watches the
   subject's own shots closely and writes the technique notes. So: describe
   position, timing, shot type, patterns and decisions. Do NOT describe the
   paddle's face, its path, spin, contact height or swing size. A claim about
@@ -495,6 +495,31 @@ const NOT_OUTSIDE_TECHNIQUE = [
  */
 const SHOT_CONTACT_TOLERANCE_S = 0.25;
 
+/**
+ * The shortest believable gap between two points, in seconds.
+ *
+ * Somebody has to retrieve the ball, walk back and serve. Anything under this
+ * is far more likely to be one rally reported as two -- which inflates the
+ * rally count and makes every per-rally average wrong.
+ */
+const MIN_GAP_BETWEEN_RALLIES_S = 1.5;
+
+/** Longer than this and it is probably two points with a missed serve between. */
+const MAX_PLAUSIBLE_RALLY_S = 60;
+
+/** How far outside a rally a swing may sit and still be counted as part of it. */
+const RALLY_EDGE_TOLERANCE_S = 1.0;
+
+/**
+ * The share of measured swings allowed to fall outside every rally.
+ *
+ * Not zero, on purpose. Practice swings and warm-up hits between points are
+ * exactly what a wrist-speed detector finds in dead time, so a handful of
+ * orphans is the healthy case. A third of them is a different claim: whole
+ * points are missing from the boundaries.
+ */
+const ORPHAN_CONTACT_SHARE = 0.33;
+
 export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[] {
   const problems: string[] = [];
 
@@ -502,6 +527,74 @@ export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[]
     if (r.start_s < 0 || r.end_s > input.clipSeconds + 0.5 || r.end_s <= r.start_s) {
       problems.push(
         `rally ${r.idx} at ${r.start_s.toFixed(1)}-${r.end_s.toFixed(1)}s is outside a ${input.clipSeconds.toFixed(1)}s clip`
+      );
+    }
+  }
+
+  // RALLIES, CHECKED AGAINST EVIDENCE THE MODEL NEVER SAW.
+  //
+  // Rally boundaries are the one major output with nothing independent behind
+  // them. Identity has three cues that can be cross-examined; a rally is one
+  // model's reading of the footage, and if it is wrong nothing downstream
+  // knows -- the rally count, the shot counts and every "your third shot"
+  // claim are all counted off it.
+  //
+  // The wrist-speed contacts are the independent witness. They come from the
+  // pose stream, computed before the model ever saw the clip, and the model is
+  // told explicitly that their timing is approximate and that fakes appear in
+  // them -- so it does not use them to place boundaries. That makes them a
+  // real check rather than a restatement: a cluster of arms swinging in a
+  // stretch the model called dead time is a contradiction, and so is a rally
+  // with no arm movement in it at all.
+  const rallies = [...(out.rallies ?? [])].sort((a, b) => a.start_s - b.start_s);
+  for (let i = 1; i < rallies.length; i++) {
+    const prev = rallies[i - 1];
+    const cur = rallies[i];
+    if (cur.start_s < prev.end_s - 0.05) {
+      problems.push(
+        `rallies ${prev.idx} and ${cur.idx} overlap (${prev.start_s.toFixed(1)}-${prev.end_s.toFixed(1)}s `
+        + `and ${cur.start_s.toFixed(1)}-${cur.end_s.toFixed(1)}s) — a ball cannot be in two points at once`
+      );
+    } else if (cur.start_s - prev.end_s < MIN_GAP_BETWEEN_RALLIES_S) {
+      // Between two points somebody has to retrieve the ball, walk back and
+      // serve. Under a second and a half means one rally was almost certainly
+      // cut in half at a moment the ball went out of frame.
+      problems.push(
+        `only ${(cur.start_s - prev.end_s).toFixed(1)}s between rallies ${prev.idx} and ${cur.idx} — `
+        + "too short to retrieve and serve, so this may be one rally split in two"
+      );
+    }
+  }
+  for (const r of rallies) {
+    if (r.end_s - r.start_s > MAX_PLAUSIBLE_RALLY_S) {
+      problems.push(
+        `rally ${r.idx} runs ${(r.end_s - r.start_s).toFixed(0)}s, longer than a rec-level point usually lasts — `
+        + "this may be two points merged across a serve that was missed"
+      );
+    }
+  }
+  if (input.contacts.length > 0 && rallies.length > 0) {
+    const inSomeRally = (t: number) =>
+      rallies.some((r) => t >= r.start_s - RALLY_EDGE_TOLERANCE_S && t <= r.end_s + RALLY_EDGE_TOLERANCE_S);
+    const orphaned = input.contacts.filter((c) => !inSomeRally(c.t));
+    // A few is normal and expected -- practice swings between points are
+    // exactly what a wrist-speed detector picks up in dead time. A large
+    // share is not: it means whole points were missed.
+    const share = orphaned.length / input.contacts.length;
+    if (share > ORPHAN_CONTACT_SHARE) {
+      problems.push(
+        `${orphaned.length} of ${input.contacts.length} measured swings (${Math.round(share * 100)}%) `
+        + `fall outside every rally (e.g. ${orphaned[0].t.toFixed(1)}s) — either points were missed, `
+        + "or these boundaries do not match where the arms were moving"
+      );
+    }
+    const empty = rallies.filter(
+      (r) => !input.contacts.some((c) => c.t >= r.start_s - RALLY_EDGE_TOLERANCE_S && c.t <= r.end_s + RALLY_EDGE_TOLERANCE_S)
+    );
+    if (empty.length) {
+      problems.push(
+        `${empty.length} rally/rallies contain no measured swing at all (e.g. rally ${empty[0].idx} at `
+        + `${empty[0].start_s.toFixed(1)}s) — a point in which nobody's arm moved is unlikely to be a point`
       );
     }
   }

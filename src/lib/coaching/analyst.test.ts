@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { OVERLAY_LEGEND } from "./overlay-legend";
-import { auditAnalysis, analystSchema, analystPrompt, type AnalystInput, type AnalystOutput, analystOutputBudget, THINKING_ALLOWANCE, MAX_OUTPUT_TOKENS } from "./analyst";
+import { ANALYST_FPS, auditAnalysis, analystSchema, analystPrompt, type AnalystInput, type AnalystOutput, analystOutputBudget, THINKING_ALLOWANCE, MAX_OUTPUT_TOKENS } from "./analyst";
 import { sanitiseSchema } from "./gemini";
 
 function input(over: Partial<AnalystInput> = {}): AnalystInput {
@@ -51,6 +51,85 @@ test("a well-formed analysis produces no problems", () => {
   assert.deepEqual(auditAnalysis(clean, input()), []);
 });
 
+test("overlapping rallies are caught — a ball cannot be in two points at once", () => {
+  const out = structuredClone(clean);
+  out.rallies.push({ idx: 2, start_s: 10.0, end_s: 20.0, end_reason: "out", winner: null, confidence: 0.5 });
+  assert.ok(auditAnalysis(out, input()).some((p) => /overlap/.test(p)));
+});
+
+test("two rallies a heartbeat apart are flagged as one rally split", () => {
+  // Between points somebody retrieves the ball, walks back and serves. Under a
+  // second and a half is not that — it is one point cut in half where the ball
+  // left frame, which inflates the rally count and every per-rally average.
+  const out = structuredClone(clean);
+  out.rallies.push({ idx: 2, start_s: 14.3, end_s: 20.0, end_reason: "out", winner: null, confidence: 0.5 });
+  assert.ok(auditAnalysis(out, input()).some((p) => /may be one rally split in two/.test(p)));
+});
+
+test("a normal gap between points is not flagged", () => {
+  // The guard. An audit that fires on ordinary footage trains the reader to
+  // ignore it, which is worse than having no audit at all.
+  const out = structuredClone(clean);
+  out.rallies.push({ idx: 2, start_s: 22.0, end_s: 30.0, end_reason: "out", winner: null, confidence: 0.5 });
+  const withContacts = input({
+    clipSeconds: 40,
+    contacts: [...clean.shots.map((sh) => ({ t: sh.t, player: sh.player, hit_from: undefined })),
+               { t: 24.0, player: "player_1", hit_from: undefined }],
+  });
+  assert.deepEqual(auditAnalysis(out, withContacts).filter((p) => /rally/.test(p)), []);
+});
+
+test("swings measured where the model saw no rally are reported", () => {
+  // THE ONE INDEPENDENT CHECK ON RALLY BOUNDARIES. Wrist-speed contacts come
+  // out of the pose stream before the model sees the clip, and the model is
+  // told their timing is loose and that fakes appear in them — so it does not
+  // place boundaries from them. Arms swinging through a stretch it called dead
+  // time is therefore real evidence that a point was missed, not an echo.
+  const out = structuredClone(clean);
+  const busy = input({
+    contacts: [
+      { t: 3.96, player: "player_1", hit_from: undefined },
+      { t: 40.0, player: "player_2", hit_from: undefined },
+      { t: 42.0, player: "player_1", hit_from: undefined },
+      { t: 44.0, player: "player_2", hit_from: undefined },
+      { t: 46.0, player: "player_1", hit_from: undefined },
+    ],
+    clipSeconds: 60,
+  });
+  assert.ok(auditAnalysis(out, busy).some((p) => /fall outside every rally/.test(p)),
+    "a whole point's worth of swings outside the rallies went unreported");
+});
+
+test("a few stray swings between points are NOT reported", () => {
+  // Practice swings in dead time are exactly what a wrist-speed detector
+  // finds, and flagging them would fire on every clip.
+  const out = structuredClone(clean);
+  const normal = input({
+    contacts: [
+      { t: 4.0, player: "player_1", hit_from: undefined },
+      { t: 6.0, player: "player_2", hit_from: undefined },
+      { t: 8.0, player: "player_1", hit_from: undefined },
+      { t: 10.0, player: "player_2", hit_from: undefined },
+      { t: 19.0, player: "player_1", hit_from: undefined },
+    ],
+    clipSeconds: 30,
+  });
+  assert.deepEqual(auditAnalysis(out, normal).filter((p) => /outside every rally/.test(p)), []);
+});
+
+test("a rally in which nobody's arm moved is reported", () => {
+  const out = structuredClone(clean);
+  out.rallies.push({ idx: 2, start_s: 40.0, end_s: 50.0, end_reason: "out", winner: null, confidence: 0.5 });
+  const withContacts = input({ clipSeconds: 60 });
+  assert.ok(auditAnalysis(out, withContacts).some((p) => /no measured swing at all/.test(p)));
+});
+
+test("a rally longer than a rec point usually lasts is questioned", () => {
+  const out = structuredClone(clean);
+  out.rallies = [{ idx: 1, start_s: 3.5, end_s: 90.0, end_reason: "out", winner: null, confidence: 0.4 }];
+  assert.ok(auditAnalysis(out, input({ clipSeconds: 120 })).some((p) => /two points merged/.test(p)));
+});
+
 test("a rally outside the clip is caught", () => {
   // The real failure this exists for: on ky-720p the model returned rallies at
   // 119s and 131s in a 101.3s clip. Inventing time is not a fuzzy boundary,
@@ -58,8 +137,9 @@ test("a rally outside the clip is caught", () => {
   const out = structuredClone(clean);
   out.rallies.push({ idx: 2, start_s: 119, end_s: 124, end_reason: "out", winner: null, confidence: 0.5 });
   const problems = auditAnalysis(out, input());
-  assert.equal(problems.length, 1);
-  assert.match(problems[0], /outside a 101.3s clip/);
+  // It also, correctly, has no measured swing in it — a rally invented outside
+  // the clip cannot. Assert the finding that matters rather than the count.
+  assert.ok(problems.some((p) => /outside a 101.3s clip/.test(p)));
 });
 
 test("a shot nowhere near any measured contact is caught", () => {
@@ -220,4 +300,15 @@ test("the legend does not promise marks the renderer stopped drawing", () => {
   // truth better than one. Without it the model picks, silently, in exactly
   // the frames where the tracker is least reliable.
   assert.match(OVERLAY_LEGEND, /trust the still over the boxes/i);
+});
+
+test("the prompt tells the model the rate it is actually being shown", () => {
+  // IT SAID 5 AND LOW RESOLUTION for a long time while the run was sending 8
+  // and high — a number typed into the prose beside a constant that moved
+  // without it. What the model believes about its own sampling rate decides
+  // how much it is willing to claim from the footage, so a stale figure here
+  // makes it either over- or under-confident for reasons nobody can see.
+  const p = analystPrompt(input(), "LEGEND", null, true);
+  assert.match(p, new RegExp(`watching at ${ANALYST_FPS}\\s*\\n?\\s*frames per second`));
+  assert.doesNotMatch(p, /watching at 5\b/);
 });

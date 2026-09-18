@@ -29,17 +29,25 @@
  * of the two ways to spend that money: more detail per frame rather than more
  * frames, on footage where the hard thing to see is small rather than fast.
  *
- * Eight rather than ten because it is linear and cheap to reverse: at high
- * resolution each frame per second is about 46 cents on a twenty-minute game,
- * and a pickleball stroke lasts roughly a third of a second, so eight samples
- * a second still puts two or three frames inside every swing. Ten was not
- * buying a third look at anything.
+ * TEN, having been eight for a while, and the reasoning is worth keeping
+ * because the number has now moved in both directions. It was cut to eight on
+ * the argument that a pickleball stroke lasts roughly a third of a second, so
+ * eight samples a second already puts two or three frames inside every swing
+ * and ten was not buying a third look at anything. That argument is about
+ * SWINGS. The scan pass does not read swings -- it is told outright that it
+ * cannot see the paddle -- it reads rallies, and a rally boundary is the
+ * instant a ball stopped being played, which is not a third of a second long.
  *
- * If detection gets worse, this is the knob to try before anything else: it is
- * linear, where resolution is a 4x step. Below about 5 a stroke stops being
- * reliably visible and the clamp in analystFps() refuses anything under 3.
+ * The cost is linear and easy to reverse: at high resolution each frame per
+ * second is about 46 cents on a twenty-minute game, so this is roughly a
+ * dollar more per long clip.
+ *
+ * If detection gets worse, this is still the first knob to try, in either
+ * direction: it is linear, where resolution is a 4x step. Below about 5 a
+ * stroke stops being reliably visible and the clamp in analystFps() refuses
+ * anything under 3.
  */
-export const ANALYST_FPS = 8;
+export const ANALYST_FPS = 10;
 
 /** The rate in force, from ANALYST_FPS, clamped to what is worth paying for. */
 export function analystFps(): number {

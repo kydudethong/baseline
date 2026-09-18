@@ -38,9 +38,22 @@ export interface ReferenceFrameImage {
  * worse outcome than one that runs without it and says so -- the read is still
  * worth having, minus the part addressed to one person.
  */
+/**
+ * Where the marked still lives, derived rather than stored in a column.
+ *
+ * One deterministic path per analysis, overwritten on every coaching run, so
+ * the picture on the page is always the one the last run actually sent. A
+ * column would need a migration and could go stale against the file.
+ */
+export function referenceFramePath(userId: string, analysisId: string): string {
+  return `${userId}/${analysisId}/reference/marked.jpg`;
+}
+
 export async function buildReferenceFrameImage(opts: {
   supabase: SupabaseClient<Database>;
   analysisId: string;
+  /** Owner of the analysis; the storage layout is per user. */
+  userId: string;
   /** Comma-separated labels as stored on the analysis; the first is used. */
   selfPlayerLabel: string | null;
   onLog?: (line: string) => void;
@@ -91,6 +104,19 @@ export async function buildReferenceFrameImage(opts: {
     await writeFile(inPath, Buffer.from(await data.arrayBuffer()));
     await markPlayerOnFrameViaPython({ imagePath: inPath, outPath, box: mine.box, label: "YOU" });
     const bytes = await readFile(outPath);
+    // KEPT, NOT JUST SENT. This image is the whole of what the model is told
+    // about who it is coaching, and until it was stored there was no way for
+    // anyone to see it -- it was built in a temp directory, base64'd into a
+    // request and deleted. When a read is addressed to the wrong person, this
+    // is the first thing worth looking at, and "you cannot look at it" is not
+    // an acceptable answer for the one input that decides the subject.
+    //
+    // Best-effort: a failed upload must not cost the run its reference frame,
+    // which is still in hand as bytes either way.
+    const storagePath = referenceFramePath(opts.userId, opts.analysisId);
+    const { error: upErr } = await opts.supabase.storage
+      .from("videos").upload(storagePath, bytes, { contentType: "image/jpeg", upsert: true });
+    if (upErr) log(`reference frame: kept in memory but not stored — ${upErr.message}`);
     log(`reference frame: ${label} marked at ${picked.frame.timestamp_s.toFixed(1)}s `
       + `(${picked.boxes.length} player(s) in frame, ${Math.round(bytes.length / 1024)}KB)`);
     return {

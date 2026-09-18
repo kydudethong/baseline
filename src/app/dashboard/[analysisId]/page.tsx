@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { pickReferenceFrame } from "@/lib/vision/reference-frame";
+import { referenceFramePath } from "@/lib/coaching/reference-frame-image";
 import { createClient } from "@/lib/supabase/server";
 import { getSignedDownloadUrl } from "@/lib/storage/r2";
 import { getSetup, isCompleteSetup } from "@/lib/db/setup";
@@ -450,12 +451,55 @@ async function AnalysisBreakdown({
           {phase2.shots.length > 0 ? (
             <ShotsPanel shots={phase2.shots} ballTrack={phase2.ballTrack} selfLabels={selfLabels} />
           ) : null}
+          <ReferenceFrameShown supabase={supabase} analysis={analysis} />
           <p className="dev-note">
             Want to see what the tracker actually detected?{" "}
             <Link href={`/dashboard/${analysis.id}/debug`}>Open the raw detections view</Link>.
           </p>
         </div>
       </details>
+    </div>
+  );
+}
+
+/**
+ * The still the coaching model was shown, and who was marked on it.
+ *
+ * THE ONE INPUT THAT DECIDES THE SUBJECT, and until this existed nobody could
+ * look at it: the image was built in a temp directory, base64'd into the
+ * request and deleted. If a read comes back addressed to the wrong person,
+ * this is the first thing to check -- either the mark is on the wrong player,
+ * in which case the tag is wrong, or it is on the right one and the model
+ * lost them, which is a different problem with a different fix.
+ *
+ * Absent until a coaching read has run, which is correct: before that there
+ * is nothing to show, and a placeholder would imply otherwise.
+ */
+async function ReferenceFrameShown({
+  supabase,
+  analysis,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  analysis: AnalysisWithVideo;
+}) {
+  const { data } = await supabase.storage
+    .from("videos")
+    .createSignedUrl(referenceFramePath(analysis.user_id, analysis.id), 3600);
+  if (!data?.signedUrl) return null;
+  return (
+    <div className="stack g2">
+      <strong style={{ fontSize: 14 }}>What the coach was told about who you are</strong>
+      <p className="sm measure" style={{ margin: 0, color: "var(--ink-2)" }}>
+        This still is sent with the video. Nothing else in the footage says
+        which player the read is about, so if the ring is on the wrong person,
+        the coaching is about that person.
+      </p>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={data.signedUrl}
+        alt="The frame sent to the coaching model, with the tagged player ringed"
+        style={{ maxWidth: "100%", borderRadius: "var(--r3)", border: "1px solid var(--line)" }}
+      />
     </div>
   );
 }

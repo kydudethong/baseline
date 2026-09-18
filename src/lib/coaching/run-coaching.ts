@@ -380,6 +380,7 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     const referenceFrame = await buildReferenceFrameImage({
       supabase,
       analysisId,
+      userId: analysis.user_id,
       selfPlayerLabel: analysis.self_player_label ?? null,
       onLog: (line) => console.error(`[coaching] ${line}`),
     });
