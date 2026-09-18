@@ -35,6 +35,7 @@ import CourtPresetBar from "./CourtPresetBar";
 
 
 import { courtSegments, type CourtLineRole } from "@/lib/vision/court-model";
+import { imageScale, scaleBox, scalePoint } from "@/lib/vision/image-space";
 import { type MatchMode } from "@/lib/db/setup";
 import { SetupExamples } from "./SetupExamples";
 
@@ -523,10 +524,11 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       const v = videoRef.current;
       const cw = v?.videoWidth || 0;
       const ch = v?.videoHeight || 0;
-      const src = json.imageSize;
-      const sx = src && src[0] > 0 && cw > 0 ? cw / src[0] : 1;
-      const sy = src && src[1] > 0 && ch > 0 ? ch / src[1] : 1;
-      const at = (p: [number, number]): Corner => ({ x: p[0] * sx, y: p[1] * sy });
+      const scale = imageScale(json.imageSize, cw, ch);
+      const at = (p: [number, number]): Corner => {
+        const [x, y] = scalePoint(p, scale);
+        return { x, y };
+      };
 
       if (json.court) {
         const c = json.court.corners;
@@ -534,7 +536,24 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
         setQuadKind(json.court.quadKind);
       }
       // DRAWN, NOT COLLECTED. See `detected` above.
-      setDetected(json.frame?.playersReliable === false ? [] : json.players);
+      //
+      // SCALED LIKE EVERYTHING ELSE, which the first version of this was not.
+      // The boxes arrive in the space the SERVER measured in -- rally_seg caps
+      // its long side at 1280 -- so painting them straight onto a 1920-wide
+      // canvas puts every player at two-thirds of their real position, bunched
+      // toward the top-left. It reads as boxes scattered at random rather than
+      // as a scaling bug, which is what made it worth a comment: the warning
+      // was already written twenty lines above, about the court corners, and
+      // the boxes were added underneath it anyway.
+      setDetected(
+        json.frame?.playersReliable === false
+          ? []
+          : json.players.map((p) => ({
+              ...p,
+              boxPx: scaleBox(p.boxPx, scale),
+              feetPx: scalePoint(p.feetPx, scale),
+            }))
+      );
       setOffCourt(json.frame?.playersOffCourt ?? 0);
       const bits: string[] = [];
       if (json.frame) bits.push(`Frame at ${json.frame.timestampSeconds.toFixed(1)}s.`);
