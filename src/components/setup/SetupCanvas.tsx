@@ -708,17 +708,12 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       ctx.fillText(String(i + 1), c.x, c.y);
     });
 
-    // The detected players. Drawn AFTER the court so a box is never hidden
-    // under a line, and in a colour that is neither the court's blue nor the
-    // corners' yellow -- these are a different kind of claim and should not
-    // read as something to drag.
-    detected.forEach((p) => {
-      const [x1, y1, x2, y2] = p.boxPx;
-      ctx.strokeStyle = "#5ce08c";
-      ctx.lineWidth = 2 * s;
-      ctx.setLineDash([]);
-      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-    });
+    // NO PLAYER BOXES ON THIS FRAME. They were drawn here for a day and taken
+    // off: this screen asks one question -- does the outline sit on the
+    // painted lines -- and four green rectangles over the people standing on
+    // those lines make the lines harder to see, which is the opposite of
+    // helping. The count below the frame carries the same information without
+    // covering the thing being judged.
 
     // THE MAGNIFIER, last, so nothing draws over it.
     //
@@ -768,7 +763,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     }
 
     ctx.restore();
-  }, [corners, courtLines, showLines, dragging, detected]);
+  }, [corners, courtLines, showLines, dragging]);
 
   useEffect(() => { draw(); }, [draw, time, videoReady]);
 
@@ -1275,7 +1270,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                   : ""}
                 . {detected.length > 4
                   ? "More than four inside means the outline is reaching past your court."
-                  : "Green boxes on the frame show who."}
+                  : "That is the same gate the analysis will use."}
               </p>
             ) : null}
           </div>
