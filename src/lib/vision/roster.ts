@@ -81,8 +81,9 @@
  *      case and geometry is not fooled by a shirt colour.
  */
 
+import { blendBuild, buildDistance, type BuildSignature } from "./build-signature";
 import type {
-  AppearanceSignature, BoundingBoxNorm, FrameDetectionSet,
+  AppearanceSignature, BoundingBoxNorm, ColourBand, FrameDetectionSet,
   PlayerTrack, PlayerTrackPoint,
 } from "./phase2-types";
 
@@ -229,6 +230,9 @@ interface Slot {
   /** A smoothed body length, so the cost scale survives a bad frame. */
   unit: number | null;
   appearance: AppearanceSignature | null;
+  build: BuildSignature | null;
+  /** How many build readings have gone into it, since one is not a shape. */
+  buildSamples: number;
 }
 
 interface Cand {
@@ -237,6 +241,7 @@ interface Cand {
   pos: CourtPoint;
   unit: number;
   appearance: AppearanceSignature | null;
+  build: BuildSignature | null;
 }
 
 /** The court plane: feet, the lines, and the net at y = 22. */
@@ -488,6 +493,7 @@ export function buildRoster(perFrame: FrameDetectionSet[], opts: RosterOptions):
         pos,
         unit: plane.unit(d.boxImageNorm),
         appearance: d.appearanceSignature ?? null,
+        build: d.buildSignature ?? null,
       };
       const key = plane.side(pos) ?? "all";
       const list = groups.get(key);
@@ -511,6 +517,7 @@ export function buildRoster(perFrame: FrameDetectionSet[], opts: RosterOptions):
       slots.push({
         playerId: `player_${n++}`, group,
         points: [], last: null, lastT: null, velocity: null, unit: null, appearance: null,
+        build: null, buildSamples: 0,
       });
     }
   }
@@ -568,6 +575,14 @@ function place(slot: Slot, c: Cand, t: number, kind: "court" | "image"): void {
     slot.appearance = slot.appearance
       ? blend(slot.appearance, c.appearance, 0.2)
       : c.appearance;
+  }
+  if (c.build) {
+    // SLOWER THAN THE COLOUR, because a shape reading is noisier than a colour
+    // one: a player mid-lunge is genuinely a different set of ratios for that
+    // frame, where their shirt is the same shirt. A tenth-weight running mean
+    // over a whole clip is what makes this a shape rather than a pose.
+    slot.build = slot.build ? blendBuild(slot.build, c.build, 0.1) : c.build;
+    slot.buildSamples += 1;
   }
   slot.points.push({
     timestampSeconds: t,
@@ -664,21 +679,91 @@ function cost1(slot: Slot, c: Cand, t: number, plane: Plane): number | null {
   const look = slot.appearance && c.appearance
     ? appearanceDistance(slot.appearance, c.appearance) * (plane.kind === "court" ? 3 : 0.5)
     : 0;
-  return d + look;
+  // BUILD, the axis clothing cannot touch. Two partners in matching kit are
+  // nearly invisible to colour; they are rarely the same proportions. Weighted
+  // below appearance because it is measured off a 2D projection of a person
+  // who bends, turns and gets foreshortened, so a single frame's reading is
+  // much noisier than a colour -- and ignored entirely until the slot has seen
+  // enough of them to have an average worth comparing against, because one
+  // reading is a pose, not a shape.
+  const shape = slot.build && c.build && slot.buildSamples >= MIN_BUILD_SAMPLES
+    ? buildDistance(slot.build, c.build) * (plane.kind === "court" ? 1.5 : 0.25)
+    : 0;
+  return d + look + shape;
 }
 
+/**
+ * How many readings a slot needs before its build is allowed to judge anybody.
+ *
+ * One reading is a pose rather than a shape: a player reaching for a low ball
+ * has a short torso and long-looking legs for that frame. Ten samples of a
+ * moving person average most of that out, and ten frames is two seconds at the
+ * rate this pipeline samples.
+ */
+const MIN_BUILD_SAMPLES = 10;
+
+/**
+ * How much weight each band carries when all three are present.
+ *
+ * The torso leads because it is the largest, best-lit and least often occluded
+ * region, so on players in different kit it is the most reliable single cue.
+ * That ranking does NOT need reversing for matching kit: two identical shirts
+ * produce a torso distance of zero, which contributes nothing to a weighted
+ * mean, so the head and leg terms decide it between them automatically.
+ */
+const BAND_WEIGHTS = { head: 0.25, torso: 0.45, legs: 0.30 } as const;
+
 /** 0 (identical) to 1 (opposite), on hue with saturation and value as support. */
-export function appearanceDistance(a: AppearanceSignature, b: AppearanceSignature): number {
+function bandDistance(a: ColourBand, b: ColourBand): number {
   let dh = Math.abs(a.h - b.h) % 360;
   if (dh > 180) dh = 360 - dh;
   // Hue is meaningless on a grey or black shirt, so it counts for less the
   // less saturated the two are -- otherwise two players in black are compared
   // on the noise in their hue readings.
   const sat = Math.min(a.s, b.s);
-  return (dh / 180) * sat + Math.abs(a.s - b.s) * 0.3 + Math.abs(a.v - b.v) * 0.3;
+  const hue = (dh / 180) * sat;
+  // BRIGHTNESS TAKES OVER WHERE HUE CANNOT, rather than staying at a fixed
+  // small weight. With hue scaled down on desaturated pairs and nothing put in
+  // its place, the whole comparison went quiet on exactly the colours people
+  // wear on their feet -- white shoes against black shoes scored 0.25, barely
+  // above noise, which is absurd for the most visually opposite pair there is.
+  // Caught by a test with two players in the same shirt and different shoes.
+  //
+  // The cost of this is real and worth stating: brightness moves with sun and
+  // shadow, so a strong value term can make one player in shade look like
+  // somebody else. It is scaled by the saturation that is missing, so a
+  // brightly coloured shirt crossing into shadow keeps the gentle old
+  // treatment and only the grey-and-white end of the range leans on value.
+  const value = Math.abs(a.v - b.v) * (1 - sat * 0.6);
+  return Math.min(1, hue + value + Math.abs(a.s - b.s) * 0.3);
 }
 
-function blend(a: AppearanceSignature, b: AppearanceSignature, w: number): AppearanceSignature {
+/**
+ * 0 (identical) to 1 (opposite), over whichever bands both signatures have.
+ *
+ * RENORMALISED OVER THE BANDS PRESENT, not divided by a fixed total. A player
+ * whose legs are hidden behind the net would otherwise score as a closer match
+ * to everybody -- the missing term reads as agreement -- which is precisely
+ * backwards, and worst at the far end of the court where the net cuts the
+ * bodies off.
+ */
+export function appearanceDistance(a: AppearanceSignature, b: AppearanceSignature): number {
+  let sum = 0;
+  let weight = 0;
+  for (const band of ["head", "torso", "legs"] as const) {
+    const x = a[band];
+    const y = b[band];
+    if (!x || !y) continue;
+    sum += bandDistance(x, y) * BAND_WEIGHTS[band];
+    weight += BAND_WEIGHTS[band];
+  }
+  // No band in common is not "identical". Returning 0 would make a pair with
+  // nothing to compare look like a perfect match and outrank a real one.
+  if (weight === 0) return 0.5;
+  return sum / weight;
+}
+
+function blendBand(a: ColourBand, b: ColourBand, w: number): ColourBand {
   // Hue is circular: averaging 350 and 10 the naive way gives 180, the exact
   // opposite colour.
   const rad = (d: number) => (d * Math.PI) / 180;
@@ -686,6 +771,16 @@ function blend(a: AppearanceSignature, b: AppearanceSignature, w: number): Appea
   const y = Math.sin(rad(a.h)) * (1 - w) + Math.sin(rad(b.h)) * w;
   const h = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
   return { h, s: a.s * (1 - w) + b.s * w, v: a.v * (1 - w) + b.v * w };
+}
+
+function blend(a: AppearanceSignature, b: AppearanceSignature, w: number): AppearanceSignature {
+  const merge = (x: ColourBand | null, y: ColourBand | null) =>
+    x && y ? blendBand(x, y, w) : (y ?? x);
+  return {
+    head: merge(a.head, b.head),
+    torso: merge(a.torso, b.torso),
+    legs: merge(a.legs, b.legs),
+  };
 }
 
 /** Index combinations of size k from n, k <= n, small by construction. */

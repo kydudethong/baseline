@@ -221,6 +221,21 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   const [quadKind, setQuadKind] = useState<"full" | "near-half">(
     initial?.court?.quadKind ?? "full"
   );
+  /**
+   * Who the detector found, drawn but not editable.
+   *
+   * SHOWN, NOT ASKED ABOUT. Marking players by hand moved to after the
+   * analysis, where the pipeline's own boxes exist to point at. But seeing
+   * WHAT WAS FOUND still belongs here, because it is the only check on the
+   * court that has consequences in it: a quad drawn one court over, or one
+   * swallowing the queue behind the fence, both look plausible as an outline
+   * and both give themselves away the moment you see who ended up inside.
+   *
+   * Nothing here is clickable. These are the detector's opinion, not an answer
+   * being collected.
+   */
+  const [detected, setDetected] = useState<AutoPlayer[]>([]);
+  const [offCourt, setOffCourt] = useState(0);
   const [videoReady, setVideoReady] = useState(false);
   // The margin the canvas adds around the video, as a fraction of the canvas
   // width. Needed in CSS space to work out what "show the video, and nothing
@@ -518,13 +533,9 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
         setCorners([at(c.bottomLeft), at(c.bottomRight), at(c.topRight), at(c.topLeft)]);
         setQuadKind(json.court.quadKind);
       }
-      // THE DETECTED PLAYERS ARE USED, BUT NOT DRAWN AND NOT SAVED.
-      //
-      // They are still worth asking for: how many people this frame has on
-      // court is the best single check that the court quad is right, and it
-      // costs nothing extra since the detector runs anyway. What changed is
-      // that nobody is asked to confirm or correct them here -- that question
-      // is asked after the analysis, over the pipeline's own boxes.
+      // DRAWN, NOT COLLECTED. See `detected` above.
+      setDetected(json.frame?.playersReliable === false ? [] : json.players);
+      setOffCourt(json.frame?.playersOffCourt ?? 0);
       const bits: string[] = [];
       if (json.frame) bits.push(`Frame at ${json.frame.timestampSeconds.toFixed(1)}s.`);
       if (json.court) bits.push(`Court fitted (${(json.court.confidence * 100).toFixed(0)}% line support) — drag any corner to correct it.`);
@@ -678,6 +689,17 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       ctx.fillText(String(i + 1), c.x, c.y);
     });
 
+    // The detected players. Drawn AFTER the court so a box is never hidden
+    // under a line, and in a colour that is neither the court's blue nor the
+    // corners' yellow -- these are a different kind of claim and should not
+    // read as something to drag.
+    detected.forEach((p) => {
+      const [x1, y1, x2, y2] = p.boxPx;
+      ctx.strokeStyle = "#5ce08c";
+      ctx.lineWidth = 2 * s;
+      ctx.setLineDash([]);
+      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    });
 
     // THE MAGNIFIER, last, so nothing draws over it.
     //
@@ -727,7 +749,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     }
 
     ctx.restore();
-  }, [corners, courtLines, showLines, dragging]);
+  }, [corners, courtLines, showLines, dragging, detected]);
 
   useEffect(() => { draw(); }, [draw, time, videoReady]);
 
@@ -1217,6 +1239,26 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
               in the wrong place the numbers are still produced, and they are
               still wrong — so this is worth the ten seconds.
             </p>
+            {/*
+              THE COURT, JUDGED BY ITS CONSEQUENCES. An outline can look
+              plausible and still be a court away, or wide enough to swallow
+              the people waiting behind the fence. Who ended up inside it is
+              the check that catches both, and it is the same gate the
+              analysis will use: anyone standing outside is a spectator and is
+              never tracked.
+            */}
+            {detected.length > 0 || offCourt > 0 ? (
+              <p className="sm" style={{ margin: 0, color: "var(--ink-2)" }}>
+                <strong>{detected.length}</strong>
+                {detected.length === 1 ? " person is" : " people are"} inside it
+                {offCourt > 0
+                  ? `, and ${offCourt} ${offCourt === 1 ? "is" : "are"} outside and will be ignored as spectators`
+                  : ""}
+                . {detected.length > 4
+                  ? "More than four inside means the outline is reaching past your court."
+                  : "Green boxes on the frame show who."}
+              </p>
+            ) : null}
           </div>
 
           <div className="row g2" style={{ alignItems: "center", flexWrap: "wrap" }}>

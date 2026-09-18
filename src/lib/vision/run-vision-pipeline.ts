@@ -9,6 +9,7 @@ import { measureSwing, SWING_SAMPLE_WINDOW_S } from "./swing";
 import { overlayFps } from "@/lib/coaching/read-rate";
 import type { AnalysisStage } from "@/lib/db/types";
 import { StageTimer } from "@/lib/analysis/stage-timer";
+import { buildSignatureFrom } from "./build-signature";
 import { calibrationFromSetup, isPlausibleCourtQuad, playerGatePolygonPx, pointInPolygon, transformToCourtCoordinates } from "./court";
 import { buildRoster } from "./roster";
 import { clusterRalliesFromHits, type ClusteredRally } from "./rallies";
@@ -37,6 +38,7 @@ import type {
   PlayerPoseFrame,
   PlayerTrack,
   QualityDiagnostics,
+  CocoKeypointName,
 } from "./phase2-types";
 
 export interface VisionPipelineInput {
@@ -311,6 +313,18 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
           confidence: p.detectionConfidence ?? 0.5,
           timestampSeconds: frame.timestampSeconds,
           appearanceSignature: null,
+          // TAKEN HERE BECAUSE THE KEYPOINTS ARE ALREADY HERE. Detection and
+          // pose come out of one model pass, so a detection's own joints are
+          // in hand before the roster runs -- the build ratios are arithmetic
+          // on numbers that already exist, not a second look at the pixels.
+          // This is the identity cue that survives two partners in matching
+          // kit, which is the case colour cannot help with.
+          buildSignature: buildSignatureFrom(
+            p.keypoints.map((k) => ({
+              name: k.name as CocoKeypointName,
+              xNorm: k.xNorm, yNorm: k.yNorm, confidence: k.confidence,
+            }))
+          ),
         })),
       });
     }

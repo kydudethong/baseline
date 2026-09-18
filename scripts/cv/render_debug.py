@@ -451,21 +451,21 @@ def main() -> int:
             r = int(7 * scale)
             cv2.circle(img, (cx, cy), r, C_BALL, -1 if not p.get("interpolated") else 1, cv2.LINE_AA)
 
-        # PLAYER BOXES ARE DRAWN ON THE IDENTITY CLIP ONLY.
+        # PLAYER BOXES, AND WHAT THEY ARE WORTH.
         #
-        # The main overlay is what the coaching model watches, and it no longer
-        # gets boxes at all. Four rectangles with names on them told the model
-        # who was who on every frame; the model is now told once, by a single
-        # still handed to it alongside the video with the subject marked on it,
-        # and asked to follow that person itself. That is a deliberate trade:
-        # the boxes were a per-frame answer from a pipeline that is sometimes
-        # wrong about identity, and a wrong box is worse than no box, because
-        # coaching addressed to the wrong body reads as confident and is
-        # unfalsifiable from the outside.
+        # These came off the overlay for a while, on the reasoning that a box
+        # carrying a wrong name is worse than no box: coaching addressed to the
+        # wrong body reads as confident and cannot be checked from outside. The
+        # reasoning was sound; what changed is the premise. Identity now has
+        # three independent cues behind it rather than one -- colour in three
+        # bands instead of the shirt alone, body proportions from the pose, and
+        # a court gate that keeps spectators out of the roster entirely -- so
+        # the per-frame claim is worth making again.
         #
-        # What stays: the court, the net and the skeletons. A skeleton is a
-        # measurement of a body, not a claim about whose body it is.
-        for tr in (tracks if args.boxes_only else ()):
+        # The marked reference still stays as well. Two sources that agree are
+        # worth more than either alone, and where they disagree the model can
+        # say so, which is the outcome worth having.
+        for tr in tracks:
             pts = tr.get("points", [])
             best = None
             bdt = 0.25

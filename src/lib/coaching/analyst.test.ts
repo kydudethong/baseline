@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { OVERLAY_LEGEND } from "./overlay-legend";
 import { auditAnalysis, analystSchema, analystPrompt, type AnalystInput, type AnalystOutput, analystOutputBudget, THINKING_ALLOWANCE, MAX_OUTPUT_TOKENS } from "./analyst";
 import { sanitiseSchema } from "./gemini";
 
@@ -173,30 +174,50 @@ test("a nonsense duration falls back rather than asking for zero room", () => {
   assert.ok(analystOutputBudget(Number.NaN) > THINKING_ALLOWANCE);
 });
 
-test("the prompt tells the model to find the marked player when a still is attached", () => {
+test("with a still attached, the prompt says which source wins", () => {
+  // THE CONFLICT IS THE POINT. The model is told who the subject is twice —
+  // by a fixed marked still and by per-frame boxes that can swap during an
+  // overlap. Telling it both without saying which to believe leaves it to
+  // pick, silently, exactly where the tracker is least reliable.
   const p = analystPrompt(input(), "LEGEND", null, true);
-  assert.match(p, /still frame is attached/i);
-  assert.match(p, /follow them/i);
+  assert.match(p, /TRUST THE STILL/);
+  assert.match(p, /report the\nconflict/);
 });
 
-test("with no still, the prompt forbids picking a subject rather than staying quiet", () => {
-  // THE DANGEROUS CASE. Nothing in the video identifies anybody -- no boxes,
-  // no names, no highlight -- so a prompt that simply omits the subject leaves
-  // the model free to choose one, and a read addressed to a guessed person is
-  // indistinguishable from a correct one. It has to be told NOT to.
+test("with no still, the boxes are presented as a guess rather than an answer", () => {
+  // Nobody has confirmed who the subject is, so the label on the box is the
+  // pipeline's opinion. A read that says "you" as though that were settled is
+  // indistinguishable from one where somebody actually confirmed it.
   const p = analystPrompt(input(), "LEGEND", null, false);
-  assert.match(p, /NOBODY IS MARKED/);
-  assert.match(p, /must not pick one/i);
-  assert.doesNotMatch(p, /still frame is attached/i);
+  assert.match(p, /NO STILL WAS SUPPLIED/);
+  assert.match(p, /best guess/i);
+  assert.doesNotMatch(p, /TRUST THE STILL/);
 });
 
-test("the prompt never describes a mark the overlay does not draw", () => {
-  // This has gone wrong twice: the prompt described a ball path after ball
+test("the prompt and the renderer agree about what is drawn", () => {
+  // THIS HAS GONE WRONG TWICE: the prompt described a ball path after ball
   // tracking was removed, and a gold YOU box after the boxes came off the
-  // overlay. Each time the model went looking for something absent and
-  // reported its absence as a finding about the footage.
+  // overlay. Each time the model hunted for an absent mark and reported the
+  // absence as a finding about the footage. The boxes are drawn again now, so
+  // what must not appear is the opposite claim.
   for (const has of [true, false]) {
     const p = analystPrompt(input(), "LEGEND", null, has);
-    assert.doesNotMatch(p, /gold box/i, "the gold box is not drawn any more");
+    assert.doesNotMatch(p, /no boxes/i);
+    assert.doesNotMatch(p, /ball path/i);
   }
+});
+
+test("the legend does not promise marks the renderer stopped drawing", () => {
+  // The legend is a promise about pixels and has twice outlived the renderer.
+  // These two claims were true for exactly one commit each.
+  assert.doesNotMatch(OVERLAY_LEGEND, /no box, no id, no name/i);
+  assert.doesNotMatch(OVERLAY_LEGEND, /Orange line.*ball's path/i);
+  // And the things it SHOULD say now, since the boxes are back and the court
+  // gate is what keeps spectators out of them.
+  assert.match(OVERLAY_LEGEND, /Gold box labelled "You"/);
+  assert.match(OVERLAY_LEGEND, /outside the court/i);
+  // The tie-break, which is the only instruction that makes two sources of
+  // truth better than one. Without it the model picks, silently, in exactly
+  // the frames where the tracker is least reliable.
+  assert.match(OVERLAY_LEGEND, /trust the still over the boxes/i);
 });

@@ -191,10 +191,18 @@ export async function detectCourtViaPython(imagePath: string): Promise<RawCourtD
   return JSON.parse(stdout) as RawCourtDetection;
 }
 
+/**
+ * What appearance_signature.py prints: three bands, any of which may be null.
+ *
+ * Mirrors AppearanceSignature in phase2-types.ts. Kept as its own type because
+ * it is the wire format -- if the Python side changes shape, the mismatch
+ * should show up here at the boundary rather than as silently wrong distances
+ * three modules later.
+ */
 export interface RawAppearanceSignature {
-  h: number;
-  s: number;
-  v: number;
+  head: { h: number; s: number; v: number } | null;
+  torso: { h: number; s: number; v: number } | null;
+  legs: { h: number; s: number; v: number } | null;
 }
 
 /**

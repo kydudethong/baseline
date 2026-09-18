@@ -9,6 +9,8 @@
  * MockPhase2VisionProvider mirrors it with clearly-labeled synthetic data
  * for local development without CV credentials.
  */
+import type { BuildSignature } from "./build-signature";
+
 
 export interface BoundingBoxNorm {
   /** 0-1, normalised to frame width/height, top-left origin. */
@@ -56,13 +58,33 @@ export interface CourtCalibration {
   diagnostics: Record<string, unknown>;
 }
 
-export interface AppearanceSignature {
-  /** Mean hue of the torso region, degrees 0-360 (circular). */
+/** Mean colour of one sampled region: hue in degrees 0-360 (circular), s/v 0-1. */
+export interface ColourBand {
   h: number;
-  /** Mean saturation, 0-1. */
   s: number;
-  /** Mean value/brightness, 0-1. */
   v: number;
+}
+
+/**
+ * What a player looks like, in three horizontal bands.
+ *
+ * ONE BAND WAS NOT ENOUGH, and the case it failed on is the common one. This
+ * used to be a single mean over the torso -- the shirt -- on the reasoning
+ * that shirt colour almost always separates two doubles partners. Rec
+ * pickleball partners in matching kit break that completely: the signal does
+ * not weaken, it vanishes, leaving geometry to handle two people standing
+ * close together on the same side of the net, which is the exact situation
+ * geometry is worst at.
+ *
+ * Head and legs are sampled too because they are what still differs: hair and
+ * skin at the top, shorts, socks and shoes at the bottom. Any band may be null
+ * when it could not be sampled; the comparison skips those rather than
+ * discarding the whole signature.
+ */
+export interface AppearanceSignature {
+  head: ColourBand | null;
+  torso: ColourBand | null;
+  legs: ColourBand | null;
 }
 
 export interface PlayerDetection {
@@ -77,6 +99,12 @@ export interface PlayerDetection {
    * is always safe to omit.
    */
   appearanceSignature?: AppearanceSignature | null;
+  /**
+   * Body proportions from this detection's own keypoints — an identity cue
+   * that clothing cannot change. See build-signature.ts. Absent when pose was
+   * not run, or when too little of the body was confidently seen.
+   */
+  buildSignature?: BuildSignature | null;
 }
 
 export interface FrameDetectionSet {

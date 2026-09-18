@@ -1,33 +1,44 @@
 #!/usr/bin/env python3
 """
-Per-detection color signature — a cheap appearance cue the tracker uses to
-re-identify a player whose track was lost (see tracker.ts's
-MAX_MISSED_FRAMES_BEFORE_LOST / re-ID window). Deliberately not a learned
-re-ID embedding: at 2-4 players and a few hundred sampled frames, "what
-color shirt are they wearing" is almost always enough to tell two doubles
-partners apart, and it costs one more classical-CV pass, not a model.
+Per-detection colour signature — a cheap appearance cue the roster uses to tell
+two players apart when geometry alone is ambiguous.
 
-For each box, samples the UPPER-CENTER portion of the box (roughly torso/
-shirt, avoiding legs — which are frequently in shadow or occluded by the
-net/kitchen line — and avoiding the very top, which is often hair/hat) and
-returns its mean HSV. This is intentionally coarse: it is a tie-breaker for
-"does this new detection plausibly continue that lost track", not a
-biometric identifier.
+THREE BANDS, NOT ONE, and that is the whole point of this file. It used to
+sample the torso only — deliberately, "what colour shirt are they wearing is
+almost always enough to tell two doubles partners apart". That reasoning has an
+obvious hole in it and rec pickleball walks straight through: partners in
+matching kit. Sampling only the shirt does not degrade gracefully there, it
+zeroes the signal out, and the tracker is left with geometry for the one case
+geometry finds hardest — two people on the same side of the net, close
+together.
 
-Batched across every frame in ONE process (mirrors estimate_pose.py) —
-this is classical CV (numpy/cv2), so nearly all of the previous per-frame
-cost was Python-interpreter-plus-import startup, not the actual work;
-doing that once for the whole clip instead of once per frame is a real
-speedup with no change in output.
+So each box is sampled in three horizontal bands:
+
+  head   the top of the box: hair, hat, skin. Rarely matched even by people
+         who bought the same shirt.
+  torso  the shirt, as before.
+  legs   shorts, socks, shoes. Shoes in particular are almost never identical.
+
+Compared as a vector (see appearanceDistance in roster.ts). When two players
+are in the same shirt the torso term goes to zero and contributes nothing to
+the difference, so the head and leg bands decide it on their own — no
+special-casing needed, that falls out of a weighted mean.
+
+Still deliberately not a learned re-ID embedding: with at most two candidates
+on a known side of a known court, this is a tie-breaker, not a biometric.
+
+Batched across every frame in ONE process (mirrors estimate_pose.py) — this is
+classical CV (numpy/cv2), so nearly all of the per-frame cost was Python
+interpreter and import startup rather than the work itself.
 
 Usage: appearance_signature.py < requests_json  (reads JSON from stdin)
   requests_json: JSON array of {"imagePath": str, "boxes": [{"x","y","width","height"}, ...]}
   boxes are 0-1 normalized, top-left-origin image coordinates (same
   convention as BoundingBoxNorm in phase2-types.ts).
 Prints one JSON line per request to stdout, in the same order:
-  {"imagePath": str, "signatures": [{"h","s","v"} | null, ...]}
-  (h in degrees 0-360, s/v in 0-1; null for a box that couldn't be sampled,
-  e.g. it fell entirely outside the frame, or the image failed to load.)
+  {"imagePath": str, "signatures": [{"head","torso","legs"} | null, ...]}
+  each band being {"h","s","v"} (h in degrees 0-360, s/v in 0-1) or null when
+  that band could not be sampled. A signature is null only when NO band could.
 """
 import sys
 import json
@@ -35,19 +46,30 @@ import numpy as np
 import cv2
 
 
-def signature_for_box(hsv, w, h, box):
+# Each band as (top, bottom, inset) in fractions of the box.
+#
+# The insets differ because the regions taper differently: a head occupies the
+# middle of the box's width, a torso rather more of it, and legs narrow again.
+# Taking a constant inset pulled background court into the head band, which is
+# the band most likely to be the deciding one when the shirts match.
+BANDS = (
+    ("head", 0.00, 0.18, 0.25),
+    ("torso", 0.25, 0.60, 0.20),
+    ("legs", 0.62, 1.00, 0.22),
+)
+
+
+def band_mean(hsv, w, h, box, top, bottom, inset):
+    """Mean HSV of one horizontal band of a box, or None if unsampleable."""
     x = box["x"] * w
     y = box["y"] * h
     bw = box["width"] * w
     bh = box["height"] * h
 
-    # Torso strip: horizontally the middle 60% of the box, vertically
-    # 25%-60% down from the top (below the head, above the waist/legs).
-    x1 = int(np.clip(x + 0.20 * bw, 0, w - 1))
-    x2 = int(np.clip(x + 0.80 * bw, 0, w - 1))
-    y1 = int(np.clip(y + 0.25 * bh, 0, h - 1))
-    y2 = int(np.clip(y + 0.60 * bh, 0, h - 1))
-
+    x1 = int(np.clip(x + inset * bw, 0, w - 1))
+    x2 = int(np.clip(x + (1.0 - inset) * bw, 0, w - 1))
+    y1 = int(np.clip(y + top * bh, 0, h - 1))
+    y2 = int(np.clip(y + bottom * bh, 0, h - 1))
     if x2 <= x1 or y2 <= y1:
         return None
 
@@ -63,7 +85,7 @@ def signature_for_box(hsv, w, h, box):
     eligible = (sat > 40) & (val > 40) & (val < 250)
     if eligible.sum() < 0.1 * region.shape[0] * region.shape[1]:
         # Not enough colorful pixels to trust (e.g. a plain white/gray
-        # shirt) -- fall back to using every pixel in the strip rather
+        # shirt) -- fall back to using every pixel in the band rather
         # than returning nothing.
         eligible = np.ones(sat.shape, dtype=bool)
 
@@ -83,6 +105,17 @@ def signature_for_box(hsv, w, h, box):
         "s": round(float(np.mean(sat_v)) / 255.0, 3),
         "v": round(float(np.mean(val_v)) / 255.0, 3),
     }
+
+
+def signature_for_box(hsv, w, h, box):
+    out = {name: band_mean(hsv, w, h, box, top, bottom, inset)
+           for (name, top, bottom, inset) in BANDS}
+    # A signature with every band missing is no signature. One with a missing
+    # band is still useful, and saying which band is missing is better than
+    # dropping the rest: the comparison simply skips it.
+    if all(v is None for v in out.values()):
+        return None
+    return out
 
 
 def signatures_for_image(image_path, boxes):

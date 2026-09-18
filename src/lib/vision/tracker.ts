@@ -1,4 +1,4 @@
-import type { AppearanceSignature, BoundingBoxNorm, FrameDetectionSet, PlayerTrack, PlayerTrackPoint } from "./phase2-types";
+import type { AppearanceSignature, BoundingBoxNorm, ColourBand, FrameDetectionSet, PlayerTrack, PlayerTrackPoint } from "./phase2-types";
 
 /**
  * Real greedy IoU tracker — the "evaluate ByteTrack/BoT-SORT-style
@@ -73,11 +73,28 @@ const APPEARANCE_MATCH_MAX_DISTANCE = 0.25;
  * appearance_signature.py; saturation and value are supporting signals
  * only, since both drift with shadow/sun on an outdoor court.
  */
+/**
+ * The band this legacy tracker compares on.
+ *
+ * TORSO, falling back to whatever exists. Signatures carry three bands now
+ * (head, torso, legs) so that partners in matching kit can still be told
+ * apart -- see AppearanceSignature. This tracker is not the one that does
+ * that work: the roster replaced it on the real path, and it survives only
+ * behind provider-v2's IoU fallback. Reading one band keeps its behaviour
+ * exactly as it was rather than half-porting it.
+ */
+function mainBand(sig: AppearanceSignature): ColourBand | null {
+  return sig.torso ?? sig.head ?? sig.legs;
+}
+
 function appearanceDistance(a: AppearanceSignature, b: AppearanceSignature): number {
-  const rawHueDiff = Math.abs(a.h - b.h);
+  const x = mainBand(a);
+  const y = mainBand(b);
+  if (!x || !y) return 0.5;
+  const rawHueDiff = Math.abs(x.h - y.h);
   const hueDiff = Math.min(rawHueDiff, 360 - rawHueDiff) / 180; // 0-1
-  const satDiff = Math.abs(a.s - b.s);
-  const valDiff = Math.abs(a.v - b.v);
+  const satDiff = Math.abs(x.s - y.s);
+  const valDiff = Math.abs(x.v - y.v);
   return 0.6 * hueDiff + 0.25 * satDiff + 0.15 * valDiff;
 }
 
@@ -90,16 +107,22 @@ function emaAppearance(
   alpha = 0.3
 ): AppearanceSignature {
   if (!prev) return next;
-  const prevRad = (prev.h * Math.PI) / 180;
-  const nextRad = (next.h * Math.PI) / 180;
-  const x = (1 - alpha) * Math.cos(prevRad) + alpha * Math.cos(nextRad);
-  const y = (1 - alpha) * Math.sin(prevRad) + alpha * Math.sin(nextRad);
-  let hue = (Math.atan2(y, x) * 180) / Math.PI;
-  if (hue < 0) hue += 360;
+  const ema = (a: ColourBand | null, b: ColourBand | null): ColourBand | null => {
+    if (!a || !b) return b ?? a;
+    const x = (1 - alpha) * Math.cos((a.h * Math.PI) / 180) + alpha * Math.cos((b.h * Math.PI) / 180);
+    const y = (1 - alpha) * Math.sin((a.h * Math.PI) / 180) + alpha * Math.sin((b.h * Math.PI) / 180);
+    let hue = (Math.atan2(y, x) * 180) / Math.PI;
+    if (hue < 0) hue += 360;
+    return {
+      h: hue,
+      s: (1 - alpha) * a.s + alpha * b.s,
+      v: (1 - alpha) * a.v + alpha * b.v,
+    };
+  };
   return {
-    h: hue,
-    s: (1 - alpha) * prev.s + alpha * next.s,
-    v: (1 - alpha) * prev.v + alpha * next.v,
+    head: ema(prev.head, next.head),
+    torso: ema(prev.torso, next.torso),
+    legs: ema(prev.legs, next.legs),
   };
 }
 

@@ -13,13 +13,22 @@ const toCourtFeet = (box: BoundingBoxNorm) => ({
 });
 
 /** A detection whose FEET land at (xFt, yFt). */
+/**
+ * One colour in all three bands, for the many tests that only care that two
+ * players look different, not how. A real signature has three distinct bands;
+ * these tests predate them and their subject is geometry.
+ */
+function kitAllOver(c: { h: number; s: number; v: number }) {
+  return { head: c, torso: c, legs: c };
+}
+
 function at(xFt: number, yFt: number, extra: Partial<{ confidence: number; h: number; s: number; v: number }> = {}) {
   const w = 0.06, h = 0.12;
   return {
     boxImageNorm: { x: xFt / COURT_W_FT - w / 2, y: yFt / COURT_L_FT - h, width: w, height: h },
     confidence: extra.confidence ?? 0.9,
     appearanceSignature: extra.h !== undefined
-      ? { h: extra.h, s: extra.s ?? 0.8, v: extra.v ?? 0.6 }
+      ? kitAllOver({ h: extra.h, s: extra.s ?? 0.8, v: extra.v ?? 0.6 })
       : null,
   };
 }
@@ -407,8 +416,8 @@ test("geometry outranks a shirt colour, at the scale the bodies actually are", (
   // Two players a body apart at the net, in clearly different kit. On one
   // frame the appearance readings swap (a turn, a shadow, a flare off a white
   // shirt). Geometry must hold them in place.
-  const kit = (h: number) => ({ h, s: 0.9, v: 0.6 });
-  const person = (x: number, look: { h: number; s: number; v: number }) => ({
+  const kit = (h: number) => kitAllOver({ h, s: 0.9, v: 0.6 });
+  const person = (x: number, look: ReturnType<typeof kitAllOver>) => ({
     boxImageNorm: { x, y: 0.75, width: 0.06, height: 0.15 },
     confidence: 0.9,
     appearanceSignature: look,
@@ -468,13 +477,53 @@ test("an image-plane track carries no court position", () => {
 });
 
 test("appearance breaks ties but hue is ignored on black kit", () => {
-  const red = { h: 0, s: 0.9, v: 0.5 };
-  const blue = { h: 220, s: 0.9, v: 0.5 };
+  const red = kitAllOver({ h: 0, s: 0.9, v: 0.5 });
+  const blue = kitAllOver({ h: 220, s: 0.9, v: 0.5 });
   assert.ok(appearanceDistance(red, blue) > 0.5, "clearly different shirts read as different");
-  const black1 = { h: 10, s: 0.03, v: 0.1 };
-  const black2 = { h: 200, s: 0.03, v: 0.1 };
+  const black1 = kitAllOver({ h: 10, s: 0.03, v: 0.1 });
+  const black2 = kitAllOver({ h: 200, s: 0.03, v: 0.1 });
   assert.ok(appearanceDistance(black1, black2) < 0.1,
     "two black shirts must not read as different just because their hue noise differs");
+});
+
+test("two players in the SAME shirt are still told apart by hair and shoes", () => {
+  // THE CASE THAT USED TO BE INVISIBLE. The signature was one mean over the
+  // torso, so matching kit did not weaken it, it zeroed it -- and geometry was
+  // left alone with two people standing close together on the same side of the
+  // net, which is the one arrangement geometry is worst at.
+  const shirt = { h: 210, s: 0.8, v: 0.6 };
+  const a = { head: { h: 30, s: 0.5, v: 0.25 }, torso: shirt, legs: { h: 0, s: 0.02, v: 0.92 } };
+  const b = { head: { h: 45, s: 0.6, v: 0.75 }, torso: shirt, legs: { h: 0, s: 0.02, v: 0.08 } };
+  assert.ok(appearanceDistance(a, b) > 0.25,
+    `identical shirts, dark vs light hair, white vs black shoes read as ${appearanceDistance(a, b).toFixed(3)} apart`);
+  // And the same person at two instants still reads as the same person.
+  assert.ok(appearanceDistance(a, { ...a, torso: { ...shirt, v: 0.55 } }) < 0.05);
+});
+
+test("a band nobody can see is skipped, not counted as agreement", () => {
+  // A player whose legs are behind the net has no leg band. Dividing by a
+  // fixed total would let that missing term read as a perfect match on the
+  // legs -- making the half-hidden player a closer match to EVERYBODY, worst
+  // at the far end of the court where the net cuts bodies off.
+  const seen = { head: { h: 30, s: 0.5, v: 0.3 }, torso: { h: 210, s: 0.8, v: 0.6 }, legs: { h: 0, s: 0.02, v: 0.9 } };
+  const hidden = { head: { h: 200, s: 0.5, v: 0.3 }, torso: { h: 20, s: 0.8, v: 0.6 }, legs: null };
+  const bothVisible = { ...hidden, legs: { h: 0, s: 0.02, v: 0.9 } };
+  // STRICTLY GREATER. These two have identical legs, so the visible pairing
+  // averages in a zero while the hidden one renormalises over what is left --
+  // and a fixed divisor makes them exactly equal, which `>=` waves through.
+  const hiddenD = appearanceDistance(seen, hidden);
+  const visibleD = appearanceDistance(seen, bothVisible);
+  assert.ok(hiddenD > visibleD,
+    `hiding a band scored ${hiddenD.toFixed(3)} against ${visibleD.toFixed(3)} — `
+    + "the missing band is being counted as agreement");
+});
+
+test("nothing in common is uncertainty, not a perfect match", () => {
+  // Returning 0 for a pair with no comparable band would rank it above every
+  // real match in the assignment — the cheapest pairing available.
+  const none = { head: null, torso: null, legs: null };
+  const d = appearanceDistance(none, { head: { h: 10, s: 0.9, v: 0.5 }, torso: null, legs: null });
+  assert.ok(d > 0.2 && d < 0.8, `no shared band scored ${d}, which ranks it as a match`);
 });
 
 test("one visible player goes to their OWN slot, not always the first", () => {
@@ -534,5 +583,91 @@ test("slots keep their own player through jitter and dropout", () => {
     }
     assert.ok(maxJump < 6,
       `${tr.playerId} jumped ${maxJump.toFixed(1)}ft between frames — it is holding two different people`);
+  }
+});
+
+/** Two builds far enough apart to be different people, and the pair of them. */
+const STOCKY = { shoulderToTorso: 1.15, legToTorso: 1.30, headToTorso: 0.32 };
+const LANKY = { shoulderToTorso: 0.70, legToTorso: 2.20, headToTorso: 0.32 };
+
+/** Everyone in the same kit, which is the case this exists for. */
+const TEAM_KIT = {
+  head: { h: 30, s: 0.4, v: 0.3 },
+  torso: { h: 210, s: 0.85, v: 0.6 },
+  legs: { h: 0, s: 0.05, v: 0.85 },
+};
+
+function twin(x: number, y: number, build: typeof STOCKY) {
+  return {
+    boxImageNorm: { x: x - 0.03, y: y - 0.12, width: 0.06, height: 0.12 },
+    confidence: 0.9,
+    appearanceSignature: TEAM_KIT,
+    buildSignature: build,
+  };
+}
+
+test("in identical kit, build decides a tie geometry cannot", () => {
+  // THE CASE EVERYTHING ELSE FAILS. Same shirts, same shorts, same shoes — so
+  // all three colour bands agree and the appearance term is exactly zero. Two
+  // detections then arrive almost exactly between the two slots, which is the
+  // moment geometry has nothing to say either. Build is the only thing left,
+  // and it is the only cue in the system that clothing cannot change.
+  const rows = [];
+  for (let i = 0; i < 14; i++) {
+    rows.push({ t: i * 0.2, people: [
+      twin(0.40, 0.92, STOCKY), twin(0.60, 0.92, LANKY),
+      twin(0.35, 0.30, STOCKY), twin(0.65, 0.30, LANKY),
+    ]});
+  }
+  // A frame where the two near players are all but on top of each other, and
+  // the stocky one is now very slightly to the RIGHT of the lanky one.
+  rows.push({ t: 2.8, people: [
+    twin(0.499, 0.92, LANKY), twin(0.501, 0.92, STOCKY),
+    twin(0.35, 0.30, STOCKY), twin(0.65, 0.30, LANKY),
+  ]});
+  const got = buildRoster(frames(rows), { toCourtFeet: noCourt });
+  const near = got.tracks.filter((tr) => tr.points[0].boxImageNorm.y > 0.5);
+  assert.equal(near.length, 2);
+  // The slot that has been following the stocky player must take the stocky
+  // detection, even though the lanky one is a hair closer to where it was.
+  const stockySlot = near.find((tr) => tr.points[0].boxImageNorm.x < 0.4)!;
+  const lastX = stockySlot.points[stockySlot.points.length - 1].boxImageNorm.x + 0.03;
+  assert.ok(lastX > 0.5,
+    `the slot tracking the stocky player took the detection at ${lastX.toFixed(3)} — `
+    + "it followed position over build in a frame where position said nothing"
+  );
+});
+
+test("build breaks ties without overruling where somebody actually is", () => {
+  // The guard on the test above. Build is measured off a 2D projection of a
+  // person who bends and turns, so a single frame's reading is noisy — it is
+  // weighted to settle a coin-flip, never to move a player across the court.
+  // If it can do that, a bad pose frame can teleport an identity.
+  //
+  // CLOSE ENOUGH THAT A SWAP IS PHYSICALLY POSSIBLE, which is the whole
+  // difficulty. The first version of this test put them at opposite ends of
+  // the court, where a swap is refused by the jump limit before any cost is
+  // compared — so it passed with the build weight cranked a hundredfold and
+  // proved nothing. At two body widths apart the swap is available, and only
+  // the weighting stops it.
+  const rows = [];
+  for (let i = 0; i < 14; i++) {
+    rows.push({ t: i * 0.2, people: [
+      twin(0.45, 0.92, STOCKY), twin(0.60, 0.92, LANKY),
+      twin(0.35, 0.30, STOCKY), twin(0.65, 0.30, LANKY),
+    ]});
+  }
+  // Both stay put, but their BUILD readings swap — which is what a bad pose
+  // frame looks like. Position is unambiguous, so nothing should move.
+  rows.push({ t: 2.8, people: [
+    twin(0.45, 0.92, LANKY), twin(0.60, 0.92, STOCKY),
+    twin(0.35, 0.30, STOCKY), twin(0.65, 0.30, LANKY),
+  ]});
+  const got = buildRoster(frames(rows), { toCourtFeet: noCourt });
+  const near = got.tracks.filter((tr) => tr.points[0].boxImageNorm.y > 0.5);
+  for (const tr of near) {
+    const xs = tr.points.map((p) => p.boxImageNorm.x);
+    assert.equal(new Set(xs).size, 1,
+      "a single frame of swapped build readings moved a stationary player across the court");
   }
 });

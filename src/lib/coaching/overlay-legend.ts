@@ -23,28 +23,33 @@ the overlay is a claim about it, and it is sometimes wrong.
 
 ## Who you are coaching
 
-**A still image is supplied alongside this video.** It is one frame taken from
-the clip you are watching, with ONE player marked on it. That player is the
-subject: the person this coaching read is addressed to.
+You are told this **twice, by two independent sources**, and the disagreement
+between them is information.
 
-Nothing in the video itself marks them. There are no boxes, no names and no
-highlight on any player at any point — every player is drawn exactly the same
-way. Finding the subject is your job, and you do it the way a person would:
-look at the marked still, note who they are — kit colour, build, which side
-they are on, which hand holds the paddle — and follow that person through the
-footage.
+1. **A still image is supplied alongside this video.** One frame from this clip
+   with ONE player marked — a magenta ring, a chevron above their head, the
+   word YOU. That is the subject.
+2. **The video carries a box on each tracked player**, labelled with their
+   role; the subject's says "You".
 
-This is deliberate. The pipeline could label a box on every frame and used to,
-but it is sometimes wrong about identity, and coaching addressed to the wrong
-body reads as confident and cannot be checked by the person reading it. You
-watching the footage is the better tracker.
+The boxes come from the pipeline's own identity tracking, which uses three
+things: the colours of a player's head, shirt and legs; their body proportions
+taken from the skeleton; and a court gate that excludes anyone standing outside
+the lines. It is good. It is not infallible, and it fails in a specific place —
+when two players on the same side are close together, overlapping, or one is
+hidden behind the other.
+
+So: **trust the still over the boxes when they conflict.** If the player ringed
+in the still is clearly not the one wearing the "You" box in a stretch of
+footage, the tracker has swapped them, and that is worth reporting as a finding
+in its own right — it tells the reader which parts of this read to doubt.
 
 Two things follow:
 
 - **Say so if you lose them.** If the subject is off screen, hidden behind
-  another player, or you are not sure which of two people they are, say that
-  about that stretch instead of guessing. An honest gap is worth more than a
-  coaching point attached to the wrong person.
+  another player, or the labels look wrong for a stretch, say that about that
+  stretch instead of guessing. An honest gap is worth more than a coaching
+  point attached to the wrong person.
 - **Only the subject's technique is coached.** The other three are context:
   where they stood, what they did to create the situation. Do not write
   coaching for them.
@@ -62,14 +67,20 @@ Two things follow:
 
 ## Players
 
+- **Green box with a role name** — a tracked player. At most four exist: the
+  roster takes the player count from the sport rather than discovering it, so a
+  fifth person on screen is a spectator and is never boxed.
+- **Gold box labelled "You"** — the subject, according to the tracker. Cross-
+  check it against the marked still, as above.
+- **Nobody outside the court lines is boxed.** Anyone whose feet fall outside
+  the court is treated as a spectator or a player from the next court and is
+  excluded before tracking starts. If somebody clearly on your court is never
+  boxed, the court outline is wrong, and that is worth saying.
 - **Stick figure** — pose, drawn only from keypoints the model actually saw, so
   an incomplete figure means low confidence, not a missing limb. Limb colours:
   torso green, **right arm gold**, **left arm blue**, legs paler versions of
   the same, head grey-blue. The arms are coloured differently on purpose — a
   forehand and a backhand look identical otherwise.
-- **Nothing else is drawn on a player.** No box, no id, no name, no highlight,
-  including on the subject. Every skeleton looks the same because a skeleton is
-  a measurement of a body, not a claim about whose body it is.
 
 ## There is no ball, and no paddle
 
