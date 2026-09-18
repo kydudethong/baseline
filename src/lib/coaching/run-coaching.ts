@@ -745,31 +745,50 @@ export async function persistCoachingOutput(opts: {
   // whole feature exists to delete: "what happened at several points in the
   // clip". Several points is not evidence.
   //
-  // So an observation with no moment borrows the MIDDLE OF ITS RALLY. Not the
-  // start, which is a serve and looks the same in every rally, and not the
-  // end, which is the point already being over. The middle is the exchange.
+  // So an observation with no moment borrows its RALLY -- the whole of it, and
+  // this is the part that was wrong.
   //
-  // Flagged as approximate, because it is: the page captions it as the rally
-  // rather than as a cited instant, and that distinction is the difference
-  // between showing your working and inventing it.
-  const rallyMid = (idx: number | null): number | null => {
+  // IT USED TO BORROW THE MIDPOINT and cut the ordinary shot-length clip
+  // around it: two seconds before, one and a half after. The reasoning was
+  // that "the middle is the exchange", which is not true of a rally that goes
+  // serve, return, drive, put-away -- and is not true at all when the rally
+  // boundaries themselves are wrong. Reported from real footage: a criticism
+  // about standing too tall DURING KITCHEN EXCHANGES came with a clip of a
+  // player about to serve, who was never at the kitchen in it.
+  //
+  // That is not an approximate citation, it is a manufactured one. The
+  // observation claimed nothing about that instant; the pipeline picked the
+  // instant, cut four seconds around it, and put it under the sentence as
+  // evidence. A reader who watches it and sees something else does not
+  // conclude "this clip is approximate" -- they conclude the analysis is
+  // wrong, and on that evidence they are right to.
+  //
+  // A rally-level claim gets rally-level evidence: the window is the whole
+  // rally, start to end, captioned as the rally rather than as an instant. It
+  // cannot contradict the sentence, because "here is the point I am talking
+  // about" is exactly what the sentence is about.
+  const rallyWindow = (idx: number | null): { start: number; end: number } | null => {
     if (idx === null) return null;
     const r = out.rallies.find((x) => x.idx === idx);
     if (!r || !Number.isFinite(r.start_s) || !Number.isFinite(r.end_s)) return null;
-    const mid = (Number(r.start_s) + Number(r.end_s)) / 2;
-    return Number.isFinite(mid) ? mid : null;
+    const start = Number(r.start_s);
+    const end = Number(r.end_s);
+    return end > start ? { start, end } : null;
   };
 
   if (out.observations.length > 0) {
     const obsRows = out.observations.map((o) => {
       const named = Number.isFinite(Number(o.shot_t)) ? Number(o.shot_t) : null;
-      const borrowed = named === null ? rallyMid(o.rally_idx) : null;
+      const window = named === null ? rallyWindow(o.rally_idx) : null;
       return {
       analysis_id: analysisId,
       read_id: readId,
       rally_idx: o.rally_idx,
-      t_s: named ?? borrowed,
-      t_is_approx: named === null && borrowed !== null,
+      // The rally's START when the moment was borrowed, so the footage plays
+      // the point from the beginning rather than dropping the reader into the
+      // middle of it. The end comes from the rally, via t_is_approx.
+      t_s: named ?? window?.start ?? null,
+      t_is_approx: named === null && window !== null,
       skill_key: o.skill_key,
       coaching_dimension: o.coaching_dimension,
       valence: o.valence,
@@ -787,7 +806,7 @@ export async function persistCoachingOutput(opts: {
       };
     });
     const { data: inserted, error: insertObsError } = await supabase
-      .from("coaching_observations").insert(obsRows).select("id, t_s, severity");
+      .from("coaching_observations").insert(obsRows).select("id, t_s, severity, rally_idx, t_is_approx");
     if (insertObsError) throw insertObsError;
 
     // THE EVIDENCE. Every observation that names a moment gets the footage of
@@ -813,9 +832,16 @@ export async function persistCoachingOutput(opts: {
           analysisId,
           sourcePath: evSrc,
           clipSeconds: Number(analysis.video?.duration_seconds ?? 0),
-          requests: (inserted as Array<{ id: string; t_s: number | null; severity: number }>)
+          requests: (inserted as Array<{ id: string; t_s: number | null; severity: number; rally_idx: number | null; t_is_approx: boolean | null }>)
             .filter((r) => r.t_s !== null)
-            .map((r) => ({ id: r.id, tSeconds: Number(r.t_s), severity: r.severity })),
+            .map((r) => ({
+              id: r.id,
+              tSeconds: Number(r.t_s),
+              severity: r.severity,
+              // A borrowed moment gets the whole point, not a shot-length
+              // window around an instant nobody claimed.
+              endSeconds: r.t_is_approx ? rallyWindow(r.rally_idx)?.end : undefined,
+            })),
           onLog: (line) => console.error(`[coaching] ${line}`),
         });
         for (const c of clips) {
@@ -833,7 +859,20 @@ export async function persistCoachingOutput(opts: {
     }
   }
 
+  // SAY WHEN THERE ARE NONE. An empty skills array satisfies the schema, so a
+  // run that rated nothing looked exactly like a run that rated everything
+  // until you noticed the chart was missing from the page -- and "why can I
+  // not see my skill ratings" was unanswerable from the logs.
+  if (out.skills.length === 0) {
+    console.error(
+      "[coaching] no skill ratings returned — the ratings chart will be absent from the page. "
+      + "The model is asked to omit a skill rather than invent a number, so this is what a clip "
+      + "it could not judge looks like"
+    );
+  }
   if (out.skills.length > 0) {
+    console.error(`[coaching] ${out.skills.length} skill rating(s): `
+      + out.skills.map((sk) => `${sk.skill_key}=${sk.rating}`).join(", "));
     const skillRows = out.skills.map((s) => ({
       analysis_id: analysisId,
       skill_key: s.skill_key,

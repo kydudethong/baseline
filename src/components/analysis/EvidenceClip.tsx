@@ -89,8 +89,15 @@ export function EvidenceClip({
           className="evidence-video"
         />
         <figcaption className="evidence-cap">
+          {/* SAY WHICH KIND OF EVIDENCE THIS IS. An approximate clip is now the
+              WHOLE rally rather than a few seconds around a moment the
+              pipeline chose, so the caption says so plainly: the coach named
+              the point, not the instant. It used to read "around 41.2s", which
+              claimed a precision nobody had — and when the reader watched 41.2s
+              and saw a serve under a sentence about the kitchen, the honest
+              conclusion was that the analysis was wrong. */}
           {approx
-            ? <>From rally {o.rally_idx}{t !== null ? <> — around {timecode(t)}</> : null}</>
+            ? <>Rally {o.rally_idx}, in full — the coach named this point, not a single shot</>
             : t !== null
               ? <>The seconds around <strong>{timecode(t)}</strong>{o.rally_idx !== null ? <>, rally {o.rally_idx}</> : null}</>
               : <>From the clip the coach read</>}

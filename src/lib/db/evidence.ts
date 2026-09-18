@@ -111,16 +111,38 @@ export async function evidenceForObservations(
     })
   );
 
+  // The rallies, for the observations whose moment was borrowed rather than
+  // cited. A claim about a whole point is played as the whole point; a
+  // shot-length window cut around an instant the model never named is what put
+  // a serve under a sentence about kitchen exchanges.
+  const rallyEnd = new Map<number, number>();
+  try {
+    const { data } = await supabase
+      .from("coaching_rallies").select("idx, end_s").eq("analysis_id", analysisId);
+    for (const r of (data ?? []) as Array<{ idx: number; end_s: number | null }>) {
+      if (Number.isFinite(Number(r.end_s))) rallyEnd.set(r.idx, Number(r.end_s));
+    }
+  } catch {
+    // Without them an approximate observation falls back to the shot-length
+    // window, which is what it used to get. Worse, not broken.
+  }
+
   observations.forEach((o, i) => {
     const t = o.t_s === null || !Number.isFinite(Number(o.t_s)) ? null : Number(o.t_s);
-    const start = t === null ? null : Math.max(0, t - LEAD_S);
+    const approxEnd = o.t_is_approx && o.rally_idx !== null ? rallyEnd.get(o.rally_idx) ?? null : null;
+    // An approximate moment IS the rally's start, so the window runs from
+    // there to the rally's end rather than backing up before it.
+    const start = t === null ? null : approxEnd !== null ? t : Math.max(0, t - LEAD_S);
+    const end = start === null
+      ? null
+      : approxEnd !== null ? approxEnd : start + LEAD_S + TRAIL_S;
     out.set(o.id, {
       clipUrl: urls[i],
       fallbackUrl: source,
       startSeconds: t,
       windowStartSeconds: start,
-      windowEndSeconds: start === null ? null : start + LEAD_S + TRAIL_S,
-      technique: nearest(t),
+      windowEndSeconds: end,
+      technique: approxEnd !== null ? null : nearest(t),
     });
   });
   return out;

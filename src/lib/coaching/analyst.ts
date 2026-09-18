@@ -444,9 +444,16 @@ YOUR JOB
    wrong label is not.
 3. PLAYSTYLE of the subject — how they actually play, where they win and lose
    points, what they reach for under pressure. Describe, do not flatter.
-4. SKILL RATINGS 1-5, only for skills this clip supports. 1 is a clear
-   weakness, 3 is competent, 5 is a strength at this player's level. Omit a
-   skill rather than inventing a number, and say what the rating rests on.
+4. SKILL RATINGS 1-5, for the skills this footage lets you judge. 1 is a clear
+   weakness, 3 is competent, 5 is a strength at this player's level. Say what
+   each rating rests on.
+   RATE EVERY SKILL YOU SAW EVIDENCE FOR, and be generous about what counts as
+   evidence: a player who dinked four times has shown you their dinking. Omit a
+   skill you genuinely did not see -- do not invent a number for a shot they
+   never played -- but returning no ratings at all means the player is shown no
+   ratings at all, which is the wrong answer for any clip with a rally in it.
+   If you are watching one stretch of a longer match, rate what THIS stretch
+   showed; the ratings are averaged across stretches afterwards.
 5. COACHING — a headline, a short summary, 1-2 strengths, one priority fix,
    1-2 secondary points.
    EVERY CRITICISM MUST NAME THE MOMENT IT IS ABOUT, in at_s: the second in

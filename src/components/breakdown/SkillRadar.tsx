@@ -2,7 +2,7 @@
 
 import type { CoachingSkillRatingRow } from "@/lib/db/types";
 import { SkillInfo } from "./SkillInfo";
-import { SKILLS } from "@/lib/coaching/types";
+import { SKILLS, skillName } from "@/lib/coaching/types";
 
 /**
  * The five groups on the radar.
@@ -59,6 +59,10 @@ function groupScores(skills: CoachingSkillRatingRow[]): GroupScore[] {
  */
 export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
   const groups = groupScores(skills);
+  // Which skills feed each axis, so the icon can say what the average is made
+  // of. "Offense 4.00" is the serve, the third shot and attacking play, and
+  // the player's question is which of those pulled it up or down.
+  const groupOfSkill = new Map(SKILLS.map((s) => [s.key, s.group]));
   const rated = skills.filter((s) => Number.isFinite(s.raw));
   const overall = rated.length > 0 ? rated.reduce((a, b) => a + b.raw, 0) / rated.length : null;
 
@@ -221,7 +225,12 @@ export function SkillRadar({ skills }: { skills: CoachingSkillRatingRow[] }) {
                   of the serve, the third shot and attacking play -- so the
                   thing that needs explaining is the axis the player is
                   actually looking at, not the parts it was built from. */}
-              <SkillInfo group={g.group} />
+              <SkillInfo
+                group={g.group}
+                parts={skills
+                  .filter((s) => groupOfSkill.get(s.skill_key) === g.group)
+                  .map((s) => ({ name: skillName(s.skill_key), raw: s.raw, basis: s.basis }))}
+              />
             </div>
             <p className="h2" style={{ marginTop: 2 }}>{g.avg !== null ? g.avg.toFixed(2) : "—"}</p>
           </div>

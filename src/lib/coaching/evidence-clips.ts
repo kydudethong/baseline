@@ -31,6 +31,7 @@
  * analysis.
  */
 
+import { clipWindow } from "./evidence-window";
 import { execFile } from "node:child_process";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -44,6 +45,7 @@ import { describeError } from "@/lib/analysis/describe-error";
 const run = promisify(execFile);
 
 /** How much of the approach to keep. A stroke reads as a stroke with its wind-up. */
+export { clipWindow };
 export const LEAD_S = 2.0;
 /** And the follow-through, which is half of what a correction is about. */
 export const TRAIL_S = 1.5;
@@ -74,6 +76,18 @@ export interface ClipRequest {
   tSeconds: number;
   /** Ranking for the MAX_CLIPS cut: higher is kept. */
   severity?: number;
+  /**
+   * An explicit window, for a claim about a whole point rather than a shot.
+   *
+   * WITHOUT THIS EVERY CLIP WAS SHOT-SHAPED -- two seconds before the moment
+   * and one and a half after -- including the ones whose "moment" was picked
+   * by the pipeline because the model never named one. Four seconds cut around
+   * a fabricated instant is not weaker evidence, it is different evidence: a
+   * criticism about kitchen exchanges came back over footage of a serve.
+   *
+   * When the claim is about a rally, the clip is the rally.
+   */
+  endSeconds?: number;
 }
 
 export interface ClipResult {
@@ -151,8 +165,7 @@ export async function cutEvidenceClips(opts: {
     for (const req of wanted) {
       // Clamped to the clip. ffmpeg given a negative -ss produces an empty
       // file, which plays as a broken video rather than as a shorter moment.
-      const startS = Math.max(0, req.tSeconds - LEAD_S);
-      const endS = Math.min(opts.clipSeconds, req.tSeconds + TRAIL_S);
+      const { startSeconds: startS, endSeconds: endS } = clipWindow(req, opts.clipSeconds);
       if (!(endS > startS)) continue;
 
       const name = evidenceClipKey(opts.analysisId, req.tSeconds);
