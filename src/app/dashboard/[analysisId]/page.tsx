@@ -27,6 +27,9 @@ import { CourtCalibrationEditor, type FullCourtCorners } from "@/components/dash
 import { computeHomography, applyHomography } from "@/lib/vision/homography";
 import type { CourtCalibrationRow } from "@/lib/db/types";
 import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
+import { ShareLinkButton } from "@/components/dashboard/ShareLinkButton";
+import { shareUrl } from "@/lib/db/share";
+import { env } from "@/lib/env";
 import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
 import { PracticeSessionPanel } from "@/components/dashboard/PracticeSessionPanel";
 import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel";
@@ -459,6 +462,11 @@ async function AnalysisBreakdown({
           {phase2.shots.length > 0 ? (
             <ShotsPanel shots={phase2.shots} ballTrack={phase2.ballTrack} selfLabels={selfLabels} />
           ) : null}
+          {/* SHARING LIVES IN THE DETAIL PANEL, not beside the read. It is a
+              thing the OWNER does occasionally, not part of reading your own
+              coaching, and a share button sitting under a criticism invites
+              posting somebody's worst rally by accident. */}
+          {hasRead ? <ShareLinkButton url={shareUrl(analysis.id, env.siteUrl)} /> : null}
           <ReferenceFrameShown supabase={supabase} analysis={analysis} />
           <p className="dev-note">
             Want to see what the tracker actually detected?{" "}
