@@ -39,12 +39,10 @@ export function ShareLinkButton({ url }: { url: string }) {
   return (
     <div className="stack g2">
       <div className="row g2" style={{ alignItems: "center", flexWrap: "wrap" }}>
-        <button type="button" className="btn btn-soft btn-sm" onClick={onClick}>
+        <button type="button" className="btn btn-soft btn-sm" onClick={onClick}
+                title="Anyone with the link can watch this game — no account needed">
           {state === "copied" ? "Link copied ✓" : "Share this read"}
         </button>
-        <span className="sm" style={{ color: "var(--ink-3)" }}>
-          Opens without an account. Anyone with the link can watch this game.
-        </span>
       </div>
       {state === "shown" ? (
         <input

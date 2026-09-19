@@ -166,9 +166,21 @@ export default async function AnalysisDetailPage({
               analysis={analysis}
               heading={
                 <>
-                  <div className="row g2" style={{ alignItems: "center" }}>
+                  <div className="row g2" style={{ alignItems: "center", flexWrap: "wrap" }}>
                     <h1 className="player-title">{analysis.title}</h1>
                     <StatusBadge status={analysis.status} />
+                    {/* AT THE TOP, BESIDE THE TITLE. This first went into the
+                        collapsed "measurements" panel on the reasoning that
+                        sharing is an occasional owner action -- which read
+                        sensibly and was wrong about the only use case there
+                        is. The whole point of the feature is handing a read to
+                        somebody standing next to you at a court, and a button
+                        three taps inside a disclosure marked "Movement, the
+                        raw shot table" is a button nobody finds. Reported as
+                        exactly that: "i dont see share this read button". */}
+                    {analysis.status === "completed"
+                      ? <ShareLinkButton url={shareUrl(analysis.id, env.siteUrl)} />
+                      : null}
                   </div>
                   <div className="player-meta">
                     <span>
@@ -462,11 +474,6 @@ async function AnalysisBreakdown({
           {phase2.shots.length > 0 ? (
             <ShotsPanel shots={phase2.shots} ballTrack={phase2.ballTrack} selfLabels={selfLabels} />
           ) : null}
-          {/* SHARING LIVES IN THE DETAIL PANEL, not beside the read. It is a
-              thing the OWNER does occasionally, not part of reading your own
-              coaching, and a share button sitting under a criticism invites
-              posting somebody's worst rally by accident. */}
-          {hasRead ? <ShareLinkButton url={shareUrl(analysis.id, env.siteUrl)} /> : null}
           <ReferenceFrameShown supabase={supabase} analysis={analysis} />
           <p className="dev-note">
             Want to see what the tracker actually detected?{" "}
