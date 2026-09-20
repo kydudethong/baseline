@@ -5,33 +5,49 @@ import Link from "next/link";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { analysisIdFromToken } from "@/lib/db/share";
 import { getCoachingData } from "@/lib/db/coaching";
+import { getAnalysisView } from "@/lib/db/analysis-view";
+import { getPracticePlan } from "@/lib/db/practice-plan";
 import { evidenceForObservations } from "@/lib/db/evidence";
+import { getAllDrills } from "@/lib/coaching/drills";
 import { topPriorityObservation } from "@/lib/coaching/ranking";
+import { playstyleMatches } from "@/lib/coaching/playstyle-match";
 import { getSignedDownloadUrl } from "@/lib/storage/r2";
-import { CoachingInsight } from "@/components/analysis/CoachingInsight";
-import { SkillRadar } from "@/components/breakdown/SkillRadar";
-import type { CoachingObservationRow } from "@/lib/db/types";
+import { AnalysisWorkspace } from "@/components/analysis/AnalysisWorkspace";
+import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
+import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel";
+import { PracticeSessionPanel } from "@/components/dashboard/PracticeSessionPanel";
+import { ErrorState } from "@/components/analysis/ErrorState";
+import type { AnalysisWithVideo } from "@/lib/db/analyses";
 
 /**
- * One analysis, readable by anybody holding the link.
+ * One analysis, in full, readable by anybody holding the link.
  *
- * THIS PAGE EXISTS FOR A CONVERSATION AT A COURT. Analysing a stranger's game
- * and handing them the result on their phone is the demo; "first make an
- * account" is where that conversation ends. So there is no sign-in here, and
- * deliberately nothing to sign in to: no tagging, no re-running, no feedback
- * buttons, no way to reach the owner's other games. Everything on this page is
- * a read of one row.
+ * THE SAME PAGE THE OWNER SEES, minus the things that write. The first
+ * version of this was a hand-built summary -- the read, a chart, the clips --
+ * on the reasoning that a stranger needs less. That was wrong twice over: the
+ * person being shown this is the player IN the footage, so they want the video
+ * and the drills more than the owner does, and a second hand-maintained copy
+ * of the analysis layout is a copy that drifts. Every improvement to the real
+ * page would have had to be made twice, and would not have been.
  *
- * IT IS OUTSIDE /dashboard ON PURPOSE. Authentication is enforced in
- * dashboard/layout.tsx, so anything under it is private by construction and
- * anything outside it is not. Putting a public page inside that tree and
- * poking a hole in the layout would make the rule "private unless excepted",
- * which is the shape that eventually leaks something.
+ * SO THE DIFFERENCE IS PERMISSION, NOT CONTENT. AnalysisWorkspace,
+ * CoachingReadPanel and the rest already treat `analysisId` as optional and
+ * hide every control that writes when it is absent -- the feedback buttons,
+ * the blueprint builder. Omitting it is the whole of read-only, and it is
+ * enforced by those components rather than by this page remembering to leave
+ * things out.
  *
- * The service-role client is used BECAUSE there is no user: row-level security
- * keys off the signed-in account and there is not one. The signature is
- * therefore the only thing standing between this and somebody else's video,
- * which is why it is verified before a single query runs.
+ * WHAT IS STILL MISSING ON PURPOSE: no tagging, no re-running, no route to the
+ * owner's other games, and no share button of its own.
+ *
+ * It sits outside /dashboard deliberately. Auth is enforced in that layout, so
+ * everything under it is private by construction and everything outside is
+ * not. A public page inside that tree with a hole in the layout would make the
+ * rule "private unless excepted", which is the shape that eventually leaks.
+ *
+ * The service-role client is used BECAUSE there is no user for row-level
+ * security to key off. The signature is therefore the only thing between this
+ * and somebody else's video, which is why it is verified before a query runs.
  */
 export const dynamic = "force-dynamic";
 
@@ -39,13 +55,11 @@ export async function generateMetadata(
   { params }: { params: Promise<{ token: string }> }
 ): Promise<Metadata> {
   const { token } = await params;
-  const id = analysisIdFromToken(token);
-  if (!id) return { title: "Not found" };
+  if (!analysisIdFromToken(token)) return { title: "Not found" };
   return {
     title: "A Baseline coaching read",
-    // NOT INDEXED. A share link is for one person who was handed it, not for
-    // anybody who searches for a name — and the page holds video of people who
-    // never agreed to be on the open web.
+    // NOT INDEXED. A share link is for one person who was handed it, and the
+    // page holds video of people who never agreed to be on the open web.
     robots: { index: false, follow: false },
   };
 }
@@ -56,72 +70,84 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   if (!analysisId) notFound();
 
   const supabase = createServiceRoleClient();
-  const { data: analysis } = await supabase
+  const { data: row } = await supabase
     .from("analyses")
-    .select("id, title, status, created_at, videos(storage_path, duration_seconds)")
+    .select("*, videos(*)")
     .eq("id", analysisId)
     .maybeSingle();
-  if (!analysis || analysis.status !== "completed") notFound();
+  if (!row || row.status !== "completed") notFound();
 
-  const coaching = await getCoachingData(supabase, analysisId);
-  if (!coaching.read) notFound();
+  const video = Array.isArray(row.videos) ? row.videos[0] : row.videos;
+  const analysis = { ...row, video } as AnalysisWithVideo;
 
-  const video = Array.isArray(analysis.videos) ? analysis.videos[0] : analysis.videos;
+  const [coachingData, view, drills, practice] = await Promise.all([
+    getCoachingData(supabase, analysisId),
+    getAnalysisView(supabase, analysis),
+    getAllDrills(supabase),
+    getPracticePlan(supabase, analysisId),
+  ]);
+
+  const drillNames: Record<string, string> = {};
+  for (const d of drills) drillNames[d.slug] = d.name;
+  const hero = topPriorityObservation(coachingData.observations);
+
   const videoUrl = video?.storage_path
     ? await getSignedDownloadUrl(video.storage_path).catch(() => null)
     : null;
-  const evidence = await evidenceForObservations(supabase, analysisId, coaching.observations, videoUrl);
-  const hero = topPriorityObservation(coaching.observations);
-  const rest = coaching.observations.filter((o: CoachingObservationRow) => o.id !== hero?.id);
+  const evidence = await evidenceForObservations(
+    supabase, analysisId, coachingData.observations, videoUrl
+  );
 
   return (
-    <div className="sec stack g6" style={{ maxWidth: 860, margin: "0 auto", padding: "var(--a5) var(--a4)" }}>
+    <div className="sec stack g6" style={{ maxWidth: 1100, margin: "0 auto", padding: "var(--a5) var(--a4)" }}>
       <div className="stack g1">
-        <span className="eyebrow">Coaching read</span>
+        <span className="eyebrow">Shared with you</span>
         <h1 className="h1">{analysis.title || "Your game, read back"}</h1>
         <p className="sm measure" style={{ color: "var(--ink-2)" }}>
-          Someone ran this game through Baseline and shared the result with you. Nothing here
-          needs an account, and this link only opens this one game.
+          Someone ran this game through Baseline and sent you the result. Everything here is
+          read-only, and the link only opens this one game.
         </p>
       </div>
 
-      {coaching.skills.length > 0 ? (
-        <div className="card stack g2">
-          <span className="eyebrow">The shape of this game</span>
-          <SkillRadar skills={coaching.skills} />
-        </div>
-      ) : null}
-
-      {hero ? (
-        <CoachingInsight
-          observation={hero}
-          hero
-          eyebrow="The one thing to work on first"
-          clipUrl={evidence.get(hero.id)?.clipUrl ?? null}
-          fallbackUrl={evidence.get(hero.id)?.fallbackUrl ?? null}
-          startSeconds={evidence.get(hero.id)?.startSeconds ?? null}
-          windowStartSeconds={evidence.get(hero.id)?.windowStartSeconds ?? null}
-          windowEndSeconds={evidence.get(hero.id)?.windowEndSeconds ?? null}
-          technique={evidence.get(hero.id)?.technique ?? null}
+      {videoUrl ? (
+        <AnalysisWorkspace
+          view={view}
+          videoUrl={videoUrl}
+          drillNames={drillNames}
+          heroObservationId={hero?.id ?? null}
+          evidence={evidence}
+          skills={coachingData.skills}
+          /* No analysisId: that is what makes every write control disappear. */
         />
+      ) : (
+        <ErrorState
+          title="The video for this clip couldn't be loaded"
+          body="Everything Baseline measured is still below, but the film itself is unavailable right now. This is usually temporary — reloading the page often fixes it."
+        />
+      )}
+
+      <PlaystyleMatchPanel
+        matches={playstyleMatches(coachingData.read?.coaching_json ?? null)}
+        hasRead={coachingData.read !== null}
+      />
+
+      {coachingData.read ? (
+        <section className="stack g4">
+          <CoachingReadPanel
+            read={coachingData.read}
+            observations={coachingData.observations}
+            hero={hero}
+            heroEvidence={hero ? evidence.get(hero.id) ?? null : null}
+            drillName={hero?.drill_slug ? drillNames[hero.drill_slug] : null}
+          />
+        </section>
       ) : null}
 
-      {rest.length > 0 ? (
-        <div className="stack g4">
-          <h2 className="h2">The rest of the read</h2>
-          {rest.map((o: CoachingObservationRow) => (
-            <CoachingInsight
-              key={o.id}
-              observation={o}
-              clipUrl={evidence.get(o.id)?.clipUrl ?? null}
-              fallbackUrl={evidence.get(o.id)?.fallbackUrl ?? null}
-              startSeconds={evidence.get(o.id)?.startSeconds ?? null}
-              windowStartSeconds={evidence.get(o.id)?.windowStartSeconds ?? null}
-              windowEndSeconds={evidence.get(o.id)?.windowEndSeconds ?? null}
-              technique={evidence.get(o.id)?.technique ?? null}
-            />
-          ))}
-        </div>
+      {practice?.plan && practice.blocks.length > 0 ? (
+        <section className="stack g4">
+          <h2 className="h2">What to practise</h2>
+          <PracticeSessionPanel plan={practice.plan} blocks={practice.blocks} drillNames={drillNames} />
+        </section>
       ) : null}
 
       <div className="card stack g2">

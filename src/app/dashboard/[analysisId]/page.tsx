@@ -17,6 +17,7 @@ import { feedbackForAnalysis } from "@/lib/db/feedback";
 import { evidenceForObservations } from "@/lib/db/evidence";
 import { getBlueprintsForAnalysis } from "@/lib/db/blueprints";
 import { getPracticePlan } from "@/lib/db/practice-plan";
+import { playstyleMatches } from "@/lib/coaching/playstyle-match";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { ProcessingControls } from "@/components/dashboard/ProcessingControls";
 import { AnalysisResultPanel } from "@/components/dashboard/AnalysisResultPanel";
@@ -33,7 +34,6 @@ import { env } from "@/lib/env";
 import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
 import { PracticeSessionPanel } from "@/components/dashboard/PracticeSessionPanel";
 import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel";
-import type { PlaystyleMatch } from "@/lib/coaching/pro-playstyles";
 import { ShotsPanel } from "@/components/dashboard/ShotsPanel";
 import { AnalysisWorkspace } from "@/components/analysis/AnalysisWorkspace";
 import { EmptyState } from "@/components/analysis/EmptyState";
@@ -745,23 +745,6 @@ function formatDuration(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-/**
- * The stored playstyle matches, or none.
- *
- * Read defensively because coaching_json is a text blob written by a previous
- * version of the pipeline as often as the current one: every read produced
- * before this feature existed has no `playstyle_match` key at all, and that is
- * a normal state rather than a corrupt row.
- */
-function playstyleMatches(coachingJson: string | null): PlaystyleMatch[] {
-  if (!coachingJson) return [];
-  try {
-    const parsed = JSON.parse(coachingJson) as { playstyle_match?: PlaystyleMatch[] };
-    return Array.isArray(parsed.playstyle_match) ? parsed.playstyle_match : [];
-  } catch {
-    return [];
-  }
-}
 
 /** "doubles_match" -> "Doubles match". */
 function prettyKind(kind: string): string {

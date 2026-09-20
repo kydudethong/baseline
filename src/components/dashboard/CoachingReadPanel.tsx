@@ -182,11 +182,19 @@ export function CoachingReadPanel({
                   <span className="k">Do</span>
                   <span className="v">{coaching.drill_recommendation.reps_duration}</span>
                 </div>
-                <div className="row g2">
-                  <Link href="/dashboard/drills" className="btn btn-primary btn-sm">
-                    Browse all drills
-                  </Link>
-                </div>
+                {/* HIDDEN FOR A SHARED VIEWER. /dashboard/drills is behind
+                    auth, so somebody who opened a share link and pressed this
+                    lands on a login wall — a button that goes nowhere is worse
+                    than no button. `analysisId` is absent exactly when this is
+                    a shared read, which is the same signal every other write
+                    control uses. */}
+                {analysisId ? (
+                  <div className="row g2">
+                    <Link href="/dashboard/drills" className="btn btn-primary btn-sm">
+                      Browse all drills
+                    </Link>
+                  </div>
+                ) : null}
               </div>
             </div>
           </section>
