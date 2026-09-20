@@ -5,6 +5,7 @@ import SetupCanvas from "@/components/setup/SetupCanvas";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { formatBytes, validateVideoFile, UPLOAD_PART_SIZE_BYTES } from "@/lib/video/validation";
+import { mapWithConcurrency } from "@/lib/coaching/concurrency";
 
 type Phase = "idle" | "creating" | "uploading" | "attaching" | "done" | "error";
 
@@ -14,6 +15,15 @@ interface UploadPart {
   partNumber: number;
   url: string;
 }
+
+/**
+ * How many parts go up at once.
+ *
+ * Four. One stream does not fill a mobile uplink; past four a phone competes
+ * with itself for radio and the curve flattens, while each extra stream is
+ * another thing to abort on cancel.
+ */
+const UPLOAD_CONCURRENCY = 4;
 
 /** Uploads one part with XHR (not fetch) so we get real upload-progress events. */
 function uploadPart(
@@ -107,7 +117,15 @@ export function VideoUploader({ linkFetchWorks = true }: { linkFetchWorks?: bool
   // Lets cancel() abort whatever part is in flight and stop the loop before
   // the next one starts.
   const cancelledRef = useRef(false);
-  const inFlightXhrAbort = useRef<(() => void) | null>(null);
+  /**
+   * Every part currently in flight, so cancel stops all of them.
+   *
+   * A SET, NOT ONE HANDLE. It held a single abort function back when parts
+   * went up one at a time; with several in flight that handle is whichever
+   * part started most recently, and pressing cancel aborted that one while the
+   * rest kept uploading -- a cancel button that does not cancel.
+   */
+  const inFlightAborts = useRef(new Set<() => void>());
 
   const onFileChange = useCallback((selected: File | null) => {
     setError(null);
@@ -125,7 +143,8 @@ export function VideoUploader({ linkFetchWorks = true }: { linkFetchWorks?: bool
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;
-    inFlightXhrAbort.current?.();
+    for (const abort of inFlightAborts.current) abort();
+    inFlightAborts.current.clear();
     setPhase("idle");
     setProgress(0);
   }, []);
@@ -177,28 +196,71 @@ export function VideoUploader({ linkFetchWorks = true }: { linkFetchWorks?: bool
         setProgress(Math.round((loaded / file.size) * 100));
       };
 
-      const completedParts: Array<{ ETag: string; PartNumber: number }> = [];
-      for (const part of init.parts) {
+      /*
+       * SEVERAL PARTS AT ONCE, which is most of why this was slow on a phone.
+       *
+       * The parts went up strictly one after another: await, then start the
+       * next. One connection rarely saturates a mobile uplink -- latency and
+       * packet loss hold a single stream well below what the link can carry --
+       * so three or four in flight is commonly two to four times faster on
+       * cellular for the same bytes. Nothing else changes: each part still
+       * goes direct to R2 on its own presigned URL, and still retries on its
+       * own.
+       *
+       * Not more than four. Past that a phone is competing with itself for
+       * radio and the gain flattens, while every extra stream is another thing
+       * to abort on cancel and another way to stall a slow connection.
+       */
+      /*
+       * SEVERAL PARTS AT ONCE, which is most of why this was slow on a phone.
+       *
+       * They went up strictly one after another: await, then start the next.
+       * One connection rarely saturates a mobile uplink -- latency and packet
+       * loss hold a single stream well below what the link can carry -- so
+       * three or four in flight is commonly two to four times faster on
+       * cellular for the same bytes. Nothing else changes: each part still
+       * goes direct to R2 on its own presigned URL and still retries on its
+       * own.
+       *
+       * mapWithConcurrency rather than a hand-rolled pool, and specifically
+       * because it returns results in INPUT order. Parts now finish out of
+       * order, and R2 rejects a completion whose part list is not ascending --
+       * collecting ETags as they landed would break any upload of more than
+       * one part, intermittently, depending on which happened to finish first.
+       */
+      const etags = await mapWithConcurrency(init.parts, UPLOAD_CONCURRENCY, async (part) => {
         if (cancelledRef.current) throw new UploadCancelledError();
         const start = (part.partNumber - 1) * UPLOAD_PART_SIZE_BYTES;
         const end = Math.min(start + UPLOAD_PART_SIZE_BYTES, file.size);
         const blob = file.slice(start, end);
-        const etag = await uploadPartWithRetry(
-          part.url,
-          blob,
-          (loaded) => {
-            loadedByPart[part.partNumber - 1] = loaded;
-            reportProgress();
-          },
-          (abort) => {
-            inFlightXhrAbort.current = abort;
-          }
-        );
-        inFlightXhrAbort.current = null;
-        loadedByPart[part.partNumber - 1] = blob.size;
-        reportProgress();
-        completedParts.push({ ETag: etag, PartNumber: part.partNumber });
-      }
+        // Each attempt registers its own abort, and they are all removed once
+        // this part is done however it ends -- otherwise the set grows for the
+        // whole upload and cancel calls a pile of dead handles.
+        const mine = new Set<() => void>();
+        try {
+          const etag = await uploadPartWithRetry(
+            part.url,
+            blob,
+            (loaded) => {
+              loadedByPart[part.partNumber - 1] = loaded;
+              reportProgress();
+            },
+            (abort) => {
+              mine.add(abort);
+              inFlightAborts.current.add(abort);
+            }
+          );
+          loadedByPart[part.partNumber - 1] = blob.size;
+          reportProgress();
+          return etag;
+        } finally {
+          for (const a of mine) inFlightAborts.current.delete(a);
+        }
+      });
+      const completedParts = init.parts.map((part, i) => ({
+        ETag: etags[i],
+        PartNumber: part.partNumber,
+      }));
 
       const completeRes = await fetch(`/api/analyses/${analysis.id}/video/upload-complete`, {
         method: "POST",

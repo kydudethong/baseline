@@ -1038,15 +1038,38 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       <video
         ref={videoRef}
         src={videoUrl}
-        preload="auto"
+        /*
+         * METADATA, NOT AUTO. On a phone this is the difference between a
+         * usable screen and a spinner.
+         *
+         * `preload="auto"` asks the browser to fetch as much of the file as it
+         * can before anything happens. A phone clip of a pickleball game is
+         * commonly half a gigabyte, so on a cellular connection that is a
+         * multi-minute download of footage this screen never displays. What it
+         * actually needs is the video's dimensions, its duration, and ONE
+         * frame about five seconds in -- metadata plus a seek, which fetches a
+         * few hundred kilobytes by range request instead of the whole film.
+         *
+         * Reported as "the website takes forever to load the video when I
+         * upload on mobile", which is exactly what this was.
+         */
+        preload="metadata"
         playsInline
         muted
         crossOrigin={videoUrl.startsWith("blob:") ? undefined : "anonymous"}
         style={{ display: "none" }}
-        onLoadedData={() => {
-          setVideoReady(true);
+        /*
+         * SIZING AT METADATA, which is when the dimensions are known and long
+         * before any frame exists. This used to live in onLoadedData, which
+         * worked only because preload="auto" meant a frame arrived at nearly
+         * the same moment. With metadata-only that event comes after the seek
+         * below, so leaving the layout there would leave the canvas the wrong
+         * shape until a frame decoded.
+         */
+        onLoadedMetadata={() => {
           const v = videoRef.current;
           const box = frameBoxRef.current;
+          setDuration(v?.duration ?? 0);
           if (v?.videoWidth) {
             const pad = Math.round(Math.min(v.videoWidth, v.videoHeight) * PAD_FRAC);
             const inset = pad / (v.videoWidth + pad * 2);
@@ -1060,8 +1083,16 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             const offset = -inset * (box?.clientWidth ?? 0) * base;
             setPan({ x: offset, y: offset });
           }
-          setDuration(videoRef.current?.duration ?? 0);
+          // The seek is what fetches a frame now. Five seconds in rather than
+          // zero, because the first moment of a clip is usually somebody still
+          // holding the phone.
           seek(time || 5);
+        }}
+        onLoadedData={() => {
+          // Fires once a frame is decodable, which with metadata-only preload
+          // is after the seek above rather than on load.
+          setVideoReady(true);
+          draw();
         }}
         onSeeked={() => { setTime(videoRef.current?.currentTime ?? 0); draw(); }}
         onError={() => setError(
