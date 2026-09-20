@@ -20,18 +20,27 @@ export async function generateMetadata({
 }
 
 /**
- * Setup before processing: confirm the court sits on the painted lines.
+ * Setup before processing: the court, and who you are.
  *
- * ONE QUESTION, AND IT IS REQUIRED. This screen used to ask for three things --
- * the court, the players, and which player is you -- and it was optional,
- * because the pipeline could fall back on its own detection for all of them.
- * Two of the three moved to after the analysis, where the pipeline has already
- * found the players and can show real boxes to point at.
+ * TWO QUESTIONS, BOTH REQUIRED, and they are required for different reasons.
  *
- * What is left cannot move, because everything measured in feet depends on it
- * and nothing downstream can tell a court in the wrong place from one in the
- * right place. A bad court does not produce missing numbers, it produces
- * confident wrong ones -- so this is now a gate rather than a suggestion.
+ * The court, because everything measured in feet depends on it and nothing
+ * downstream can tell one in the wrong place from one in the right place. A
+ * bad court does not produce missing numbers, it produces confident wrong
+ * ones.
+ *
+ * The identity, because the coaching pass cannot be addressed to anybody
+ * without it. That question briefly lived AFTER the analysis, on the theory
+ * that the pipeline's own boxes make it an easier thing to answer -- and they
+ * do, but it cost a whole Gemini pass: the run either skipped the read and
+ * needed re-running once somebody tagged themselves, or wrote a read about
+ * whoever the pipeline guessed. Asking here means the expensive part happens
+ * once, already knowing who it is about.
+ *
+ * Tagging a PARTNER is offered here too and stays optional. It is the only
+ * thing that produces the partnership read -- how the two of you work as a
+ * pair rather than how each of you plays -- and there is no way to infer it:
+ * on a doubles court the teammate is one of three candidates.
  */
 export default async function SetupPage({
   params,
@@ -71,12 +80,11 @@ export default async function SetupPage({
       <p className="sm measure" style={{ margin: "0 0 20px" }}>
         This page opens by scanning the clip for a frame with all four players
         on court and fitting the court lines on it, so most of the time there is
-        nothing to do but check the blue lines sit on the paint and click the
-        player you want analysed. Correct anything it got wrong — dragging a
-        corner moves the kitchen line and net with it, which is the fastest way
-        to see whether the geometry is right. Both parts are optional, but a
-        court fitted wrongly is worse than none, so if the overlay on a previous
-        run looked off, this is the fix.
+        nothing to do but check the blue lines sit on the paint and tap
+        yourself. Correct anything it got wrong — dragging a corner moves the
+        kitchen line and net with it, which is the fastest way to see whether
+        the geometry is right. Tap your partner too if you want a read on how
+        the two of you play together; that part is optional.
       </p>
 
       {videoUrl ? (
@@ -98,6 +106,7 @@ export default async function SetupPage({
                     : null,
                   lineColorHex: setup.lineColorHex,
                   matchMode: setup.matchMode,
+                  players: setup.players,
                 }
               : null
           }

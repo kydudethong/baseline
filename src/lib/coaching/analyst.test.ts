@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { OVERLAY_LEGEND } from "./overlay-legend";
-import { ANALYST_FPS, auditAnalysis, analystSchema, analystPrompt, type AnalystInput, type AnalystOutput, analystOutputBudget, THINKING_ALLOWANCE, MAX_OUTPUT_TOKENS } from "./analyst";
+import { ANALYST_FPS, auditAnalysis, analystSchema, analystPrompt, PARTNERSHIP_DIMENSIONS, type AnalystInput, type AnalystOutput, analystOutputBudget, THINKING_ALLOWANCE, MAX_OUTPUT_TOKENS } from "./analyst";
 import { sanitiseSchema } from "./gemini";
 import { COACHING_DIMENSIONS, COACHING_DIMENSION_LABELS } from "./types";
 
@@ -10,6 +10,7 @@ function input(over: Partial<AnalystInput> = {}): AnalystInput {
   return {
     clipSeconds: 101.3,
     subjectPlayerId: "player_2",
+    partnerPlayerId: null,
     ballCoverage: 0.28,
     courtConfidence: 0.735,
     contacts: [
@@ -402,4 +403,188 @@ test("every coaching dimension has a label", () => {
     assert.ok(COACHING_DIMENSION_LABELS[d], `no label for ${d}`);
     assert.doesNotMatch(COACHING_DIMENSION_LABELS[d], /_/, `${d}'s label is the raw key`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// The partnership section.
+// ---------------------------------------------------------------------------
+
+const withPartner = () => input({ partnerPlayerId: "player_3" });
+
+test("no partner tagged means the model is told to omit the section, not to guess", () => {
+  // The worst available outcome is a confident partnership read about an
+  // opponent: on a doubles court, guessing the partner is a one-in-three shot.
+  const p = analystPrompt(input(), "LEGEND", null, true, false);
+  assert.match(p, /NO PARTNER WAS TAGGED/);
+  assert.match(p, /OMIT/);
+  assert.doesNotMatch(p, /THE PARTNERSHIP SECTION/);
+});
+
+test("a tagged partner gets the brief, and every dimension is named in it", () => {
+  const p = analystPrompt(withPartner(), "LEGEND", null, true, true);
+  assert.match(p, /THE PARTNERSHIP SECTION/);
+  for (const key of PARTNERSHIP_DIMENSIONS) {
+    assert.ok(p.includes(key), `${key} is in the schema enum but never explained to the model`);
+  }
+});
+
+test("the cyan mark is described only when it was actually drawn", () => {
+  // The gold-box mistake, exactly: the prompt described a mark that had been
+  // removed, so the model hunted for it and reported the absence as a finding
+  // about the video. Tagging a partner is NOT the same as their being visible
+  // on the one frame that got marked.
+  const drawn = analystPrompt(withPartner(), "LEGEND", null, true, true);
+  assert.match(drawn, /CYAN/);
+  const notDrawn = analystPrompt(withPartner(), "LEGEND", null, true, false);
+  assert.doesNotMatch(notDrawn, /CYAN/);
+  assert.match(notDrawn, /THE PARTNERSHIP SECTION/,
+    "the section is still wanted — the partner is tagged, just not on this still");
+});
+
+test("the model is told to follow the people, not the side they stood on", () => {
+  // A stacked pair swap sides constantly. A still is one instant.
+  const p = analystPrompt(withPartner(), "LEGEND", null, true, true);
+  assert.match(p, /follow the PEOPLE/);
+});
+
+test("the partnership brief forbids writing about what it cannot hear", () => {
+  // "Good communication" is the single most tempting thing to write about a
+  // doubles pair and the one thing a silent overlay cannot support.
+  const p = analystPrompt(withPartner(), "LEGEND", null, true, true);
+  assert.match(p, /do not\s*\n?write about talking/);
+});
+
+test("partnership is not a required field in the schema", () => {
+  // Most clips have no tagged partner. Requiring it would make a singles read
+  // invent a teammate rather than leave the field out.
+  const schema = analystSchema() as { required: string[]; properties: Record<string, unknown> };
+  assert.ok(schema.properties.partnership, "the field has to exist to be fillable");
+  assert.ok(!schema.required.includes("partnership"));
+});
+
+test("every partnership dimension the schema accepts is one the prompt defines", () => {
+  // The enum and the brief are two lists of the same thing in two places. A
+  // key in the schema that the prompt never explains gets rated on a guess at
+  // what its name means.
+  const schema = analystSchema() as {
+    properties: { partnership: { properties: { dimensions: { items: {
+      properties: { key: { enum: string[] } } } } } } };
+  };
+  assert.deepEqual(
+    schema.properties.partnership.properties.dimensions.items.properties.key.enum,
+    [...PARTNERSHIP_DIMENSIONS]
+  );
+});
+
+test("the partnership schema survives Gemini's schema sanitiser", () => {
+  // nullable and nested objects are where sanitiseSchema has bitten before.
+  const clean = sanitiseSchema(analystSchema()) as {
+    properties: { partnership?: { properties?: Record<string, unknown> } };
+  };
+  assert.ok(clean.properties.partnership?.properties?.dimensions);
+  assert.ok(clean.properties.partnership?.properties?.friction);
+});
+
+const partnership = (): NonNullable<AnalystOutput["partnership"]> => ({
+  compatibility: 6.5,
+  summary: "You cover the middle; they hold the line.",
+  dimensions: [
+    { key: "spacing", rating: 7, basis: "held about nine feet apart through rally 1" },
+    { key: "middle_balls", rating: 4, basis: "both left the middle at 12.4s" },
+  ],
+  works_well: [{ pattern: "You both reset after a speed-up", why_it_works: "", evidence: "", at_s: 9.0 }],
+  friction: [{ pattern: "Middle ball left", cost: "", fix: "", evidence: "", at_s: 12.4 }],
+  role_split: { you: "covers middle", partner: "holds line", imbalance: null },
+  fix_together: { change: "Call the middle by default", how_to_practise: "", at_s: 12.4 },
+});
+
+const withPship = () => {
+  const out = structuredClone(clean);
+  out.partnership = partnership();
+  return out;
+};
+
+test("a well-formed partnership read produces no problems", () => {
+  assert.deepEqual(auditAnalysis(withPship(), withPartner()), []);
+});
+
+test("a partnership read with nobody tagged as the partner is called out", () => {
+  // The model picked the teammate itself, out of three candidates on court.
+  // The section may be fluent and about entirely the wrong person.
+  const problems = auditAnalysis(withPship(), input());
+  assert.ok(problems.some((p) => /nobody was tagged as your partner/.test(p)));
+});
+
+test("a partnership anchored outside the clip is caught like a rally is", () => {
+  const out = withPship();
+  out.partnership!.friction[0].at_s = 400;
+  assert.ok(auditAnalysis(out, withPartner()).some((p) => /outside a 101.3s clip/.test(p)));
+});
+
+test("fix_together is anchored too, not just the lists", () => {
+  // Easy to miss: it is the one anchor that is not inside an array.
+  const out = withPship();
+  out.partnership!.fix_together.at_s = -5;
+  assert.ok(auditAnalysis(out, withPartner()).some((p) => /fix_together/.test(p)));
+});
+
+test("a null anchor is allowed — it says so rather than pointing nowhere", () => {
+  const out = withPship();
+  out.partnership!.works_well[0].at_s = null;
+  out.partnership!.friction[0].at_s = null;
+  out.partnership!.fix_together.at_s = null;
+  assert.deepEqual(auditAnalysis(out, withPartner()), []);
+});
+
+test("a rating off the 0-10 scale is caught, for the overall and per dimension", () => {
+  const overall = withPship();
+  overall.partnership!.compatibility = 87;
+  assert.ok(auditAnalysis(overall, withPartner()).some((p) => /compatibility is 87/.test(p)));
+
+  const dim = withPship();
+  dim.partnership!.dimensions[0].rating = -2;
+  assert.ok(auditAnalysis(dim, withPartner()).some((p) => /spacing is -2/.test(p)));
+});
+
+test("rating the same dimension twice is caught", () => {
+  // Two ratings for one thing: whichever the UI draws second silently wins.
+  const out = withPship();
+  out.partnership!.dimensions.push({ key: "spacing", rating: 2, basis: "" });
+  assert.ok(auditAnalysis(out, withPartner()).some((p) => /rates "spacing" twice/.test(p)));
+});
+
+test("claims about what the pair SAID are caught — the footage is silent", () => {
+  // The most tempting sentence in doubles coaching, and unsupportable twice
+  // over: the overlay never had audio and the upload now strips the track.
+  for (const phrase of ["communication broke down", "you called it late", "you shouted"]) {
+    const out = withPship();
+    out.partnership!.summary = phrase;
+    assert.ok(
+      auditAnalysis(out, withPartner()).some((p) => /no sound/.test(p)),
+      `"${phrase}" should be flagged`
+    );
+  }
+});
+
+test("no partnership section at all is not a problem", () => {
+  // The normal case: most clips have no tagged partner.
+  assert.deepEqual(auditAnalysis(clean, input()), []);
+});
+
+test("ADVICE to call the ball is not mistaken for a claim about hearing one", () => {
+  // The sharpest edge in the audio check, and one this got wrong first time.
+  // "Call the middle by default" is the most useful sentence a partnership fix
+  // can contain; "you called it late" is a claim about a sound nobody
+  // recorded. Flagging the first would fire the audit on the best advice in
+  // the section.
+  const out = withPship();
+  out.partnership!.fix_together.change = "Call the middle by default — say it before the ball crosses";
+  out.partnership!.friction[0].fix = "Whoever is cross-court calls the ball";
+  assert.deepEqual(auditAnalysis(out, withPartner()), []);
+});
+
+test("but a claim that they DID talk is still caught", () => {
+  const out = withPship();
+  out.partnership!.summary = "Their communication was excellent all match";
+  assert.ok(auditAnalysis(out, withPartner()).some((p) => /no sound/.test(p)));
 });

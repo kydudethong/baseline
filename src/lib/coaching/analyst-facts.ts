@@ -159,6 +159,8 @@ function thinEvenly<T>(xs: T[], n: number): T[] {
 export function buildAnalystInput(opts: {
   clipSeconds: number;
   subjectPlayerId: string | null;
+  /** Track label of the partner, when one was tagged on the setup frame. */
+  partnerPlayerId?: string | null;
   shots: AnalysisShotRow[];
   ballTrack: BallTrackRow | null;
   movement: MovementMetricRow[];
@@ -213,6 +215,7 @@ export function buildAnalystInput(opts: {
   return {
     clipSeconds: Math.round(opts.clipSeconds * 10) / 10,
     subjectPlayerId: opts.subjectPlayerId,
+    partnerPlayerId: opts.partnerPlayerId ?? null,
     ballCoverage: coverage,
     courtConfidence: opts.courtConfidence,
     contacts,

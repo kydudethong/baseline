@@ -253,19 +253,34 @@ export async function computeAppearanceSignaturesViaPython(
  * the extra process. See scripts/cv/mark_frame.py for why the mark is a ring,
  * a chevron and a chip rather than a box.
  */
-export async function markPlayerOnFrameViaPython(opts: {
+export interface FrameMark {
+  box: { x: number; y: number; width: number; height: number };
+  /** YOU or PARTNER — mark_frame.py picks the colour from this. */
+  label: string;
+}
+
+/**
+ * Mark the tagged players on one still.
+ *
+ * Plural since the partnership read: that section is about two people, and a
+ * model shown one mark has to infer the other, which on a doubles court means
+ * picking between three candidates. Marking both is the difference between
+ * "your partner drifted off the line" being an observation and a guess.
+ */
+export async function markPlayersOnFrameViaPython(opts: {
   imagePath: string;
   outPath: string;
-  box: { x: number; y: number; width: number; height: number };
-  label?: string;
+  marks: FrameMark[];
 }): Promise<void> {
-  const { x, y, width, height } = opts.box;
-  await runPython("mark_frame.py", [
-    path.resolve(opts.imagePath),
-    "--out", path.resolve(opts.outPath),
-    "--box", [x, y, width, height].map((v) => v.toFixed(5)).join(","),
-    "--label", opts.label ?? "YOU",
-  ], { timeoutMs: 60_000 });
+  if (opts.marks.length === 0) throw new PythonCvError("markPlayersOnFrameViaPython: nothing to mark");
+  const args = [path.resolve(opts.imagePath), "--out", path.resolve(opts.outPath)];
+  for (const m of opts.marks) {
+    const { x, y, width, height } = m.box;
+    // Colon-separated because a normalised box is four decimals and a label is
+    // a word: nothing in either can contain a colon, so the split is safe.
+    args.push("--mark", `${[x, y, width, height].map((v) => v.toFixed(5)).join(",")}:${m.label}`);
+  }
+  await runPython("mark_frame.py", args, { timeoutMs: 60_000 });
 }
 
 export interface RawPoseResult {

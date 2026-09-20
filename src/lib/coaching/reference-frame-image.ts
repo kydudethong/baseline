@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Database } from "@/lib/db/types";
-import { markPlayerOnFrameViaPython } from "@/lib/vision/cv-scripts";
+import { markPlayersOnFrameViaPython, type FrameMark } from "@/lib/vision/cv-scripts";
 import { pickReferenceFrame } from "@/lib/vision/reference-frame";
 
 export interface ReferenceFrameImage {
@@ -29,6 +29,17 @@ export interface ReferenceFrameImage {
   /** For the log line, so a wrong subject is diagnosable from a run. */
   timestampSeconds: number;
   playerLabel: string;
+  /**
+   * Whether a PARTNER mark was actually drawn on this image.
+   *
+   * REPORTED, NOT INFERRED FROM THE TAG. Having tagged a partner and having a
+   * cyan ring on this frame are different facts: the frame is picked for
+   * having the most players in it, not all of them. The prompt is written from
+   * THIS, because a prompt that describes a mark which is not there sends the
+   * model looking for it and gets its absence reported back as a finding about
+   * the footage -- which has already happened once here, with the gold box.
+   */
+  markedPartner: boolean;
 }
 
 /**
@@ -56,6 +67,15 @@ export async function buildReferenceFrameImage(opts: {
   userId: string;
   /** Comma-separated labels as stored on the analysis; the first is used. */
   selfPlayerLabel: string | null;
+  /**
+   * The partner's track label, when they tagged one on the setup frame.
+   *
+   * Marked in a different colour rather than left to inference. The
+   * partnership read is about two named people, and a model given one mark on
+   * a doubles court has to pick the partner out of three candidates -- which
+   * it will do, silently, and write a confident section about the wrong one.
+   */
+  partnerPlayerLabel?: string | null;
   onLog?: (line: string) => void;
 }): Promise<ReferenceFrameImage | null> {
   const log = opts.onLog ?? (() => {});
@@ -81,6 +101,10 @@ export async function buildReferenceFrameImage(opts: {
     return null;
   }
   const mine = picked.boxes.find((b) => b.playerLabel === label);
+  const partnerLabel = opts.partnerPlayerLabel?.trim() || null;
+  const theirs = partnerLabel
+    ? picked.boxes.find((b) => b.playerLabel === partnerLabel)
+    : undefined;
   if (!mine) {
     // THE FRAME AND THE TAG DISAGREE, which is a real possibility rather than a
     // defensive branch: the frame is chosen for having the MOST players in it,
@@ -102,7 +126,17 @@ export async function buildReferenceFrameImage(opts: {
     const inPath = path.join(dir, "frame.jpg");
     const outPath = path.join(dir, "marked.jpg");
     await writeFile(inPath, Buffer.from(await data.arrayBuffer()));
-    await markPlayerOnFrameViaPython({ imagePath: inPath, outPath, box: mine.box, label: "YOU" });
+    const marks: FrameMark[] = [{ box: mine.box, label: "YOU" }];
+    // ONLY WHEN THEY ARE ACTUALLY ON THIS FRAME. The frame is chosen for
+    // having the most players in it, not all of them, so a partner standing
+    // behind somebody at that instant has no box -- and a mark drawn from a
+    // stale box would point the partnership read at empty court.
+    if (theirs) marks.push({ box: theirs.box, label: "PARTNER" });
+    else if (partnerLabel) {
+      log(`reference frame: partner ${partnerLabel} is not visible at `
+        + `${picked.frame.timestamp_s.toFixed(1)}s, so only you are marked`);
+    }
+    await markPlayersOnFrameViaPython({ imagePath: inPath, outPath, marks });
     const bytes = await readFile(outPath);
     // KEPT, NOT JUST SENT. This image is the whole of what the model is told
     // about who it is coaching, and until it was stored there was no way for
@@ -118,12 +152,14 @@ export async function buildReferenceFrameImage(opts: {
       .from("videos").upload(storagePath, bytes, { contentType: "image/jpeg", upsert: true });
     if (upErr) log(`reference frame: kept in memory but not stored — ${upErr.message}`);
     log(`reference frame: ${label} marked at ${picked.frame.timestamp_s.toFixed(1)}s `
+      + (theirs ? `· partner ${partnerLabel} marked ` : "")
       + `(${picked.boxes.length} player(s) in frame, ${Math.round(bytes.length / 1024)}KB)`);
     return {
       mimeType: "image/jpeg",
       dataBase64: bytes.toString("base64"),
       timestampSeconds: picked.frame.timestamp_s,
       playerLabel: label,
+      markedPartner: Boolean(theirs),
     };
   } catch (e) {
     log(`reference frame: could not be built — ${e instanceof Error ? e.message : String(e)}`);

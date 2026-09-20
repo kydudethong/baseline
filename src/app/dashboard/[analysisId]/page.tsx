@@ -18,6 +18,7 @@ import { evidenceForObservations } from "@/lib/db/evidence";
 import { getBlueprintsForAnalysis } from "@/lib/db/blueprints";
 import { getPracticePlan } from "@/lib/db/practice-plan";
 import { playstyleMatches } from "@/lib/coaching/playstyle-match";
+import { partnershipFrom } from "@/lib/coaching/partnership-read";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { ProcessingControls } from "@/components/dashboard/ProcessingControls";
 import { AnalysisResultPanel } from "@/components/dashboard/AnalysisResultPanel";
@@ -34,6 +35,7 @@ import { env } from "@/lib/env";
 import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
 import { PracticeSessionPanel } from "@/components/dashboard/PracticeSessionPanel";
 import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel";
+import { PartnershipPanel } from "@/components/dashboard/PartnershipPanel";
 import { ShotsPanel } from "@/components/dashboard/ShotsPanel";
 import { AnalysisWorkspace } from "@/components/analysis/AnalysisWorkspace";
 import { EmptyState } from "@/components/analysis/EmptyState";
@@ -372,6 +374,15 @@ async function AnalysisBreakdown({
       <PlaystyleMatchPanel
         matches={playstyleMatches(coachingData.read?.coaching_json ?? null)}
         hasRead={hasRead}
+      />
+
+      {/* HOW THE PAIR WORKS, next to how the player plays. It is a different
+          question from everything else on this page -- most recreational
+          doubles is lost by two people who each play fine and leave the middle
+          open -- and it renders nothing at all unless a partner was tagged on
+          the setup frame, which is the only way to know who it is about. */}
+      <PartnershipPanel
+        partnership={partnershipFrom(coachingData.read?.coaching_json ?? null)}
       />
 
 

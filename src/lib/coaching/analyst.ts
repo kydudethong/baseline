@@ -134,9 +134,40 @@ export interface MeasuredContact {
   body?: Record<string, number | string>;
 }
 
+/**
+ * What the partnership read is scored on.
+ *
+ * Every one of these is a thing two people DO TOGETHER and a camera can see:
+ * where they stand relative to each other, who moves when, who takes the ball
+ * in the middle. Nothing here is about either player's technique -- that is
+ * what the rest of the read is for, and a "partnership" section that graded
+ * the partner's dinks would just be a second individual read on somebody who
+ * never asked for one.
+ */
+export const PARTNERSHIP_DIMENSIONS = [
+  "spacing",
+  "moving_as_a_unit",
+  "middle_balls",
+  "transition_together",
+  "switches_and_stacking",
+  "poaching",
+  "style_fit",
+  "who_gets_targeted",
+  "reset_after_scramble",
+  "workload_balance",
+] as const;
+
 export interface AnalystInput {
   clipSeconds: number;
   subjectPlayerId: string | null;
+  /**
+   * The partner's track label, when one was tagged on the setup frame.
+   *
+   * Null means no partnership read -- not a guessed one. On a doubles court
+   * the other player on your side is one of three candidates, and a model
+   * asked to infer it will infer something rather than decline.
+   */
+  partnerPlayerId: string | null;
   ballCoverage: number | null;
   courtConfidence: number | null;
   contacts: MeasuredContact[];
@@ -145,6 +176,20 @@ export interface AnalystInput {
   /** Slugs that exist, so a cited drill resolves to a real one. */
   drillCatalogue: Array<{ slug: string; name: string; skill: string }>;
   knownLimitations: string[];
+}
+
+export interface PartnershipRead {
+  compatibility: number;
+  summary: string;
+  dimensions: Array<{
+    key: typeof PARTNERSHIP_DIMENSIONS[number];
+    rating: number;
+    basis: string;
+  }>;
+  works_well: Array<{ pattern: string; why_it_works: string; evidence: string; at_s: number | null }>;
+  friction: Array<{ pattern: string; cost: string; fix: string; evidence: string; at_s: number | null }>;
+  role_split: { you: string; partner: string; imbalance: string | null };
+  fix_together: { change: string; how_to_practise: string; at_s: number | null };
 }
 
 export interface AnalystOutput {
@@ -193,6 +238,12 @@ export interface AnalystOutput {
     drill_slug: string | null;
   }>;
   drills: Array<{ slug: string | null; name: string; targets: string; reps_or_duration: string }>;
+  /**
+   * Absent when no partner was tagged, or when the pair was never on court
+   * together long enough to say anything. Not required in the schema for that
+   * reason: a model forced to fill this in on a singles clip would invent it.
+   */
+  partnership?: PartnershipRead | null;
   data_gaps: string | null;
 }
 
@@ -309,8 +360,56 @@ export function analystSchema(): Record<string, unknown> {
           required: ["name", "targets", "reps_or_duration"],
         },
       },
+      partnership: {
+        type: "object",
+        nullable: true,
+        properties: {
+          compatibility: num,
+          summary: str,
+          dimensions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                key: { type: "string", enum: [...PARTNERSHIP_DIMENSIONS] },
+                rating: num, basis: str,
+              },
+              required: ["key", "rating", "basis"],
+            },
+          },
+          works_well: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { pattern: str, why_it_works: str, evidence: str, at_s: numOrNull },
+              required: ["pattern", "why_it_works", "evidence", "at_s"],
+            },
+          },
+          friction: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { pattern: str, cost: str, fix: str, evidence: str, at_s: numOrNull },
+              required: ["pattern", "cost", "fix", "evidence", "at_s"],
+            },
+          },
+          role_split: {
+            type: "object",
+            properties: { you: str, partner: str, imbalance: { type: "string", nullable: true } },
+            required: ["you", "partner", "imbalance"],
+          },
+          fix_together: {
+            type: "object",
+            properties: { change: str, how_to_practise: str, at_s: numOrNull },
+            required: ["change", "how_to_practise", "at_s"],
+          },
+        },
+        required: ["compatibility", "summary", "dimensions", "works_well", "friction", "role_split", "fix_together"],
+      },
       data_gaps: { type: "string", nullable: true },
     },
+    // partnership is NOT required: most clips have no tagged partner, and a
+    // required field on a singles read is an invitation to invent one.
     required: ["rallies", "shots", "playstyle", "skills", "coaching", "observations", "drills"],
   };
 }
@@ -338,7 +437,21 @@ export function analystPrompt(
    * defaulting to false throws away the subject on a call that had one. Making
    * it required means a new caller cannot forget it -- the compiler asks.
    */
-  hasReferenceFrame: boolean
+  hasReferenceFrame: boolean,
+  /**
+   * Whether a PARTNER mark was actually drawn on that still.
+   *
+   * SEPARATE FROM input.partnerPlayerId, and that distinction is the whole
+   * point: having tagged a partner and having a cyan ring on this particular
+   * frame are different facts, because the frame is chosen for holding the
+   * most players rather than all of them. Describing a mark that is not there
+   * is precisely the bug that produced the gold-box episode -- the model went
+   * looking for it and reported its absence as a finding about the footage.
+   *
+   * Defaulted, unlike hasReferenceFrame, because false is the honest answer
+   * for every existing caller: none of them mark a partner.
+   */
+  hasPartnerMark = false
 ): string {
   const contacts = input.contacts.length;
   const withBody = input.contacts.filter((c) => c.body).length;
@@ -365,6 +478,9 @@ You are an expert pickleball coach with a computer-vision assistant.
 You have the assistant's overlay drawn on the footage and a JSON record of what
 it MEASURED.
 
+${hasPartnerMark
+  ? `\nAND WHO THEIR PARTNER IS. The same still carries a SECOND mark in CYAN,\nlabelled PARTNER — that player is the subject's doubles partner, on the\nsubject's own side of the net. The two people across the net are opponents and\nare not marked. Everything in the partnership section is about the magenta\nplayer and the cyan player TOGETHER.\n\nThe marks are on one frame. Players move, and after a switch the subject may\nbe on the other side of their own court — follow the PEOPLE, not the positions\nthey held on the still.\n`
+  : ""}
 ${hasReferenceFrame
   ? `WHO YOU ARE COACHING, said twice. One still frame is attached to this\nrequest, taken from this clip, with ONE player marked — a magenta ring, a\nchevron above their head, the word YOU. The video ALSO carries a box on each\ntracked player, the subject's labelled "You".\n\nThe boxes come from the pipeline's identity tracking, which is good and is not\ninfallible; it fails where two players on the same side overlap. The still is\nfixed and cannot drift. So TRUST THE STILL when they conflict, and report the\nconflict — a stretch where the "You" box is clearly on the wrong person tells\nthe reader which parts of this read to doubt, which is worth more than quietly\npicking one. If you lose the subject entirely, say so for that stretch rather\nthan guessing.`
   : `NO STILL WAS SUPPLIED. The video's boxes are the only claim about who is\nwho, and they carry a role name rather than a confirmed identity — nobody has\nconfirmed which player this read is for. Treat the "You" box as the pipeline's\nbest guess and say so: attribute what you describe to "the player the tracker\nmarks as you", and do not write as though the subject were established.`}
@@ -487,6 +603,73 @@ RULES THAT MATTER MORE THAN COMPLETENESS
   height", "landed deep", "took the pace off", "sat up" — and never in figures.
   A sentence that sounds measured and is not is worse than no sentence, because
   the reader cannot tell which of your sentences are which.
+${input.partnerPlayerId ? `
+THE PARTNERSHIP SECTION
+
+Fill in \`partnership\`. It is about the subject AND THE PLAYER MARKED PARTNER
+as a pair — not two individual reads side by side, and not a report card on the
+partner, who did not ask for one. Everything in it must be something two people
+did together that this camera can see.
+
+Score \`compatibility\` 0-10: how well this pair FUNCTIONS, which is not how
+good they are. Two 3.0 players who move as one and never leave the middle open
+are a better partnership than two 4.0s who both chase every ball.
+
+\`dimensions\` — rate each 0-10 with the evidence in \`basis\`. Skip any you did
+not see enough of; a dimension you rate on one rally is worth less than one you
+leave out.
+  spacing               The gap between them. Too wide opens the middle; too
+                        narrow leaves a whole sideline. Say roughly how many
+                        feet apart they played and whether it held under
+                        pressure.
+  moving_as_a_unit      When one goes up, across or back, does the other go
+                        with them? A pair joined by a rope, or two players
+                        sharing a court.
+  middle_balls          The ball down the centre. Who takes it, do both leave
+                        it, do both go for it. Count what actually happened
+                        rather than describing the principle.
+  transition_together   After the return, do BOTH reach the kitchen line, or
+                        does one arrive and the other get stranded mid-court?
+                        A pair split front-and-back is the single most
+                        attackable shape in doubles.
+  switches_and_stacking Lobs over one player, poaches, any deliberate stacking.
+                        Do they switch cleanly and recover, or end up in each
+                        other's half?
+  poaching              Does either cut across to take a ball that was not
+                        theirs, does it work, and does the other cover behind?
+  style_fit             Do their games complement or duplicate? Two bangers, or
+                        one who resets and one who speeds up. Say which, and
+                        whether it helps them.
+  who_gets_targeted     Opponents pick a target. Say who was attacked more and
+                        whether the pair adjusted to protect them.
+  reset_after_scramble  After a scramble, do they get back to a shape together
+                        or trickle back one at a time?
+  workload_balance      Share of balls struck. A large imbalance is worth
+                        naming either way — being hidden from and taking
+                        everything are both partnership facts.
+
+\`works_well\` and \`friction\`: concrete repeated PATTERNS, each anchored with
+\`at_s\` to a moment it happened. "You both backed off the kitchen on every lob"
+is a pattern; "good communication" is not — you cannot hear them, so do not
+write about talking, calling balls or who said what. What you can see is
+hesitation, two players stopping, or both swinging.
+
+\`role_split\`: what each of them actually did in this pair, in a sentence each,
+and in \`imbalance\` whether the split was lopsided in a way that cost them.
+Null when it was even.
+
+\`fix_together\`: the ONE change that would help them most as a pair, and how to
+practise it together. Addressed to both of them, not to the subject alone.
+
+If they were rarely on court at the same time, or you could not reliably keep
+the two apart, set partnership to null and say why in data_gaps. A partnership
+read built on a pair you kept losing is worse than none.
+` : `
+NO PARTNER WAS TAGGED for this clip, so OMIT \`partnership\` entirely. Do not
+guess which player is the subject's partner: on a doubles court that is a
+one-in-three choice, and a confident section about the wrong person is the
+worst outcome available here.
+`}
 - YOU CANNOT SEE THE PADDLE IN THIS PASS. You are watching at ${analystFps()}
   frames per second, which is plenty to see where people are, who hit the ball
   and when it changed direction -- and nowhere near enough to see a swing,
@@ -596,6 +779,36 @@ const NEVER_VISIBLE = [
 
 const NOT_OUTSIDE_TECHNIQUE = [
   "paddle face", "face was open", "face is open", "paddle angle", "paddle path",
+];
+
+/**
+ * Claims about what the pair SAID.
+ *
+ * New with the partnership section, and the most tempting sentence in doubles
+ * coaching: "communicate more" is the note every rec player has been given,
+ * so a model writing about a pair reaches for it by default.
+ *
+ * It is unsupportable twice over. The overlay never carried audio, and the
+ * client-side transcode now discards the audio track outright -- so the file
+ * the model watches is silent, and a claim about calling the ball is a claim
+ * about a prior. What IS visible is the behaviour: two players stopping, two
+ * players swinging, somebody hesitating. That is what the brief asks for.
+ *
+ * ONLY PHRASINGS THAT CAN ONLY BE CLAIMS. "call the ball" was in this list and
+ * had to come out: as ADVICE it is the single most useful thing a partnership
+ * fix can say, and flagging it would have made the audit fire on the best
+ * sentence in the section. Telling somebody to call the middle is a
+ * recommendation about the future; "you called it late" is a claim about a
+ * sound. The list holds the second kind.
+ */
+const NOT_AUDIBLE = [
+  "communicat", "shouted", "yelled", "talked", "talking to each other",
+  "verbal", "you can hear", "audible", "said \"mine\"", "called \"mine\"",
+  // The past tense of calling a ball. Split out from the bare verb on purpose:
+  // "whoever is cross-court calls the ball" is advice and must stay clean,
+  // while all of these assert that a sound did or did not happen.
+  "called it late", "called it early", "called it too", "never called",
+  "did not call", "didn't call", "no call from", "called for it",
 ];
 
 /**
@@ -838,6 +1051,62 @@ export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[]
       );
     }
   }
+  for (const phrase of NOT_AUDIBLE) {
+    if (everything.includes(phrase)) {
+      problems.push(
+        `The read mentions "${phrase}". The footage has no sound — the audio track is discarded before ` +
+          "upload — so nothing about what the players said to each other was observed. Take that part as " +
+          "a guess rather than something seen."
+      );
+    }
+  }
+
+  // THE PARTNERSHIP SECTION, CHECKED THE SAME WAY AS THE REST.
+  //
+  // A section about two people is the easiest place in this output to write
+  // fluent nonsense: "you complement each other well" is true of almost any
+  // pair, costs nothing to say, and cannot be wrong. The checks below are the
+  // ones a program can make -- is it about a partner who exists, is it anchored
+  // to moments inside this clip, are the numbers on the scale they claim.
+  const pship = out.partnership;
+  if (pship) {
+    if (!input.partnerPlayerId) {
+      problems.push(
+        "The read includes a partnership section, but nobody was tagged as your partner for this clip — " +
+        "so whoever it is about was chosen by the model, not by you. Treat that whole section as a guess."
+      );
+    }
+    const scale = (label: string, v: number) => {
+      if (!Number.isFinite(v) || v < 0 || v > 10) {
+        problems.push(`partnership ${label} is ${v}, which is not a 0-10 rating`);
+      }
+    };
+    scale("compatibility", pship.compatibility);
+    const seen = new Set<string>();
+    for (const d of pship.dimensions ?? []) {
+      scale(d.key, d.rating);
+      // A repeated key is two ratings for one thing, and whichever the UI
+      // renders second silently wins.
+      if (seen.has(d.key)) problems.push(`partnership rates "${d.key}" twice`);
+      seen.add(d.key);
+    }
+    // Every anchor, from every list that carries one. A partnership claim
+    // pointing outside the clip is pointing at nothing, exactly like a rally.
+    const anchors: Array<{ what: string; at: number | null }> = [
+      ...(pship.works_well ?? []).map((w) => ({ what: `works_well "${w.pattern}"`, at: w.at_s })),
+      ...(pship.friction ?? []).map((f) => ({ what: `friction "${f.pattern}"`, at: f.at_s })),
+      { what: "fix_together", at: pship.fix_together?.at_s ?? null },
+    ];
+    for (const a of anchors) {
+      if (a.at === null) continue;
+      if (a.at < 0 || a.at > input.clipSeconds + 0.5) {
+        problems.push(
+          `partnership ${a.what} points at ${a.at.toFixed(1)}s, outside a ${input.clipSeconds.toFixed(1)}s clip`
+        );
+      }
+    }
+  }
+
   return problems;
 }
 
@@ -859,7 +1128,7 @@ export async function runAnalyst(opts: {
    * player was never tagged or the frame could not be built, and the prompt
    * says so rather than letting the model pick somebody.
    */
-  referenceFrame?: { mimeType: string; dataBase64: string } | null;
+  referenceFrame?: { mimeType: string; dataBase64: string; markedPartner?: boolean } | null;
   onLog?: (line: string) => void;
 }): Promise<{ output: AnalystOutput; problems: string[]; model: string; file: UploadedFile | null }> {
   const model = analystModel();
@@ -921,7 +1190,9 @@ export async function runAnalyst(opts: {
         model,
         file,
         prompt: analystPrompt(
-          opts.input, opts.legend, plan.length > 1 ? segment : null, Boolean(opts.referenceFrame)
+          opts.input, opts.legend, plan.length > 1 ? segment : null,
+          Boolean(opts.referenceFrame),
+          Boolean(opts.referenceFrame?.markedPartner)
         ),
         schema: analystSchema(),
         // THE SAME STILL ON EVERY SEGMENT. A long match is several calls, and

@@ -21,6 +21,23 @@ export interface SetupPlayer extends SetupPoint {
 }
 
 /**
+ * The label a seed carries when it marks the user's PARTNER.
+ *
+ * A second flag would have been cleaner than a magic string, except this shape
+ * is already written into every saved setup row in the database and adding a
+ * required field would make old rows unparseable. `label` is optional and has
+ * been there from the start, so a seed that uses it reads as null on rows that
+ * predate it -- which is exactly right, because those rows have no partner.
+ *
+ * NOT `isSelf` FOR BOTH. Several self labels already mean something specific
+ * and different: facts.ts merges them as fragments of ONE person, because the
+ * tracker loses somebody behind an opponent and picks them up under a new id.
+ * Marking a partner as self would fold two players into one and quietly
+ * attribute half their shots to the user.
+ */
+export const PARTNER_SEED_LABEL = "partner";
+
+/**
  * How many people are on court. Pickleball singles and doubles are played on
  * the SAME 20x44 court, with the same lines -- there is no singles sideline as
  * there is in tennis -- so this says nothing about geometry. What it says is
@@ -198,6 +215,8 @@ export interface SetupTrackMatch<T extends TrackLike> {
   keep: T[];
   /** playerId of the track the user marked as themselves, if they marked one. */
   selfPlayerId: string | null;
+  /** playerId of the track the user marked as their partner, if they marked one. */
+  partnerPlayerId: string | null;
   droppedCount: number;
 }
 
@@ -223,7 +242,7 @@ export function matchTracksToSetup<T extends TrackLike>(
   // reference makes `keep` an alias for `tracks`, and any caller that clears
   // `tracks` to replace its contents then finds `keep` empty too.
   if (!setup || setup.players.length === 0 || tracks.length === 0) {
-    return { keep: [...tracks], selfPlayerId: null, droppedCount: 0 };
+    return { keep: [...tracks], selfPlayerId: null, partnerPlayerId: null, droppedCount: 0 };
   }
 
   const t0 = setup.frameTimestampSeconds;
@@ -272,6 +291,7 @@ export function matchTracksToSetup<T extends TrackLike>(
   const claimed = new Map<string, boolean>();
   const keepIds = new Set<string>();
   let selfPlayerId: string | null = null;
+  let partnerPlayerId: string | null = null;
 
   // Closest pair first, so a confident match is never stolen by a marginal one.
   const pairs: Array<{ d: number; seed: number; id: string }> = [];
@@ -289,15 +309,24 @@ export function matchTracksToSetup<T extends TrackLike>(
     usedSeeds.add(seed);
     claimed.set(id, true);
     keepIds.add(id);
-    if (setup.players[seed].isSelf) selfPlayerId = id;
+    const marked = setup.players[seed];
+    if (marked.isSelf) selfPlayerId = id;
+    else if (marked.label === PARTNER_SEED_LABEL) partnerPlayerId = id;
   }
+
+  // NO GUARD HERE AGAINST BEING YOUR OWN PARTNER, and that is checked rather
+  // than assumed: `claimed` above already makes it impossible, because a track
+  // one seed has taken is skipped by every later seed. A second check would
+  // have been unreachable code wearing a confident comment -- which is the
+  // exact shape of the ON_COURT_MARGIN_FT note that described a safety net
+  // nobody had built. The test that marks one person twice pins this.
 
   // Nothing matched at all: the user's frame and the tracks disagree badly
   // enough that filtering would be guesswork. Keep everything and let the
   // caller report it, rather than silently returning an empty court.
   if (keepIds.size === 0) {
-    return { keep: [...tracks], selfPlayerId: null, droppedCount: 0 };
+    return { keep: [...tracks], selfPlayerId: null, partnerPlayerId: null, droppedCount: 0 };
   }
 
-  return { keep: [...tracks], selfPlayerId, droppedCount: 0 };
+  return { keep: [...tracks], selfPlayerId, partnerPlayerId, droppedCount: 0 };
 }

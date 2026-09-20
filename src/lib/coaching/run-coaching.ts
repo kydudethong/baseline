@@ -50,6 +50,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { downloadToFile } from "@/lib/storage/r2";
+import { getSetup, matchTracksToSetup } from "@/lib/db/setup";
 import { cutEvidenceClips } from "./evidence-clips";
 import { OVERLAY_LEGEND } from "./overlay-legend";
 import { buildReferenceFrameImage } from "./reference-frame-image";
@@ -160,6 +161,8 @@ export interface AnalystContext {
   /** Kept for the live path, which still needs the raw tracks for the gate. */
   tracksRes: { data: Array<{ points: unknown }> | null };
   profile: { skill_level: string | null } | null;
+  /** Track label of the user's partner, resolved from the setup seeds. */
+  partnerPlayerId: string | null;
 }
 
 export async function rebuildAnalystContext(
@@ -287,9 +290,47 @@ export async function rebuildAnalystContext(
   // each other. A single call cannot contradict itself, and the rallies and
   // ratings now come from the same reading of the same video as the prose
   // about them.
+  /*
+   * WHO THE PARTNER IS, RESOLVED FROM THE SETUP RATHER THAN A COLUMN.
+   *
+   * The user taps their partner on the setup frame, which stores a POINT, not
+   * a track label -- tracks do not exist yet when they tap. Resolving it here,
+   * from the setup row and the tracks that now do exist, means one answer for
+   * both callers: the run that follows processing, and a re-run triggered from
+   * the tag picker days later. A column would have needed a migration and
+   * would have gone stale the moment the clip was re-analysed and the tracker
+   * handed out different labels.
+   *
+   * NOT FOLDED INTO self_player_label. Several self labels already mean one
+   * specific thing -- facts.ts merges them as fragments of the same person
+   * after the tracker loses them behind an opponent -- so a partner in that
+   * list would have half their shots counted as the user's.
+   */
+  let partnerPlayerId: string | null = null;
+  try {
+    const setup = await getSetup(supabase, analysisId);
+    if (setup) {
+      partnerPlayerId = matchTracksToSetup(
+        ((tracksRes.data ?? []) as PlayerTrackRow[]).map((t) => ({
+          playerId: t.player_label,
+          points: ((t.points as Array<{
+            timestampSeconds: number;
+            boxImageNorm: { x: number; y: number; width: number; height: number };
+          }> | null) ?? []).filter((pt) => pt.boxImageNorm),
+        })),
+        setup
+      ).partnerPlayerId;
+    }
+  } catch {
+    // A partnership read is an extra section, not the read. Losing it to an
+    // unreadable setup row must not cost somebody their coaching.
+    partnerPlayerId = null;
+  }
+
   const analystInput = buildAnalystInput({
     clipSeconds: Number(analysis.video?.duration_seconds ?? 0),
     subjectPlayerId: analysis.self_player_label ?? null,
+    partnerPlayerId,
     shots: (shotsRes.data ?? []) as AnalysisShotRow[],
     ballTrack: (ballRes.data as BallTrackRow | null) ?? null,
     movement: (movementRes.data ?? []) as MovementMetricRow[],
@@ -307,6 +348,7 @@ export async function rebuildAnalystContext(
     model: analystModel(),
     tracksRes,
     profile: profile ?? null,
+    partnerPlayerId,
   };
 }
 
@@ -399,6 +441,7 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       analysisId,
       userId: analysis.user_id,
       selfPlayerLabel: analysis.self_player_label ?? null,
+      partnerPlayerLabel: ctx.partnerPlayerId,
       onLog: (line) => console.error(`[coaching] ${line}`),
     });
     analyst = await runAnalyst({
@@ -690,6 +733,18 @@ export async function persistCoachingOutput(opts: {
           top_priority_fix: out.coaching.top_priority_fix,
           secondary_observations: out.coaching.secondary,
           playstyle: out.playstyle,
+          // IN THE BLOB RATHER THAN A TABLE OF ITS OWN, because it is prose
+          // about one analysis that nothing aggregates over time. The things
+          // that DID get tables -- observations, skill ratings -- earned them
+          // by being tracked across analyses for progress and weakness
+          // ranking. A partnership read is read once, next to the rest of the
+          // read, and a table for it would be a migration and five joins
+          // bought with nothing.
+          //
+          // Absent, not null, when there is no tagged partner: readers already
+          // treat a missing key as "no section", and null would have to be
+          // special-cased in each of them.
+          ...(out.partnership ? { partnership: out.partnership } : {}),
           drills: out.drills,
           data_gaps: out.data_gaps,
           // Which pros this player's game most resembles, by the SHAPE of the

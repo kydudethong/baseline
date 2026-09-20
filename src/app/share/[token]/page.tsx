@@ -11,10 +11,12 @@ import { evidenceForObservations } from "@/lib/db/evidence";
 import { getAllDrills } from "@/lib/coaching/drills";
 import { topPriorityObservation } from "@/lib/coaching/ranking";
 import { playstyleMatches } from "@/lib/coaching/playstyle-match";
+import { partnershipFrom } from "@/lib/coaching/partnership-read";
 import { getSignedDownloadUrl } from "@/lib/storage/r2";
 import { AnalysisWorkspace } from "@/components/analysis/AnalysisWorkspace";
 import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
 import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel";
+import { PartnershipPanel } from "@/components/dashboard/PartnershipPanel";
 import { PracticeSessionPanel } from "@/components/dashboard/PracticeSessionPanel";
 import { ErrorState } from "@/components/analysis/ErrorState";
 import type { AnalysisWithVideo } from "@/lib/db/analyses";
@@ -129,6 +131,13 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
       <PlaystyleMatchPanel
         matches={playstyleMatches(coachingData.read?.coaching_json ?? null)}
         hasRead={coachingData.read !== null}
+      />
+
+      {/* The shared page shows everything the owner sees. No onSeek here --
+          the timestamps read as text rather than as buttons, because the
+          read-only view has no player to drive. */}
+      <PartnershipPanel
+        partnership={partnershipFrom(coachingData.read?.coaching_json ?? null)}
       />
 
       {coachingData.read ? (

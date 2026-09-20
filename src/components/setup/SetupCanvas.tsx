@@ -29,6 +29,8 @@
 
 import { CornerGuide } from "./CornerGuide";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PARTNER_SEED_LABEL } from "@/lib/db/setup";
+import { nearestPlayerFeet, samePoint } from "@/lib/vision/tap-target";
 import { useRouter } from "next/navigation";
 
 import CourtPresetBar from "./CourtPresetBar";
@@ -186,6 +188,8 @@ export interface SetupCanvasProps {
     court: SetupCourt | null;
     lineColorHex?: string | null;
     matchMode?: MatchMode;
+    /** Seeds from a previous visit, so re-opening this page keeps the answer. */
+    players?: Array<{ x: number; y: number; isSelf: boolean; label?: string }>;
   } | null;
   /**
    * Rendered inside the upload flow rather than on its own page. The canvas
@@ -223,19 +227,45 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     initial?.court?.quadKind ?? "full"
   );
   /**
-   * Who the detector found, drawn but not editable.
+   * Who the detector found. Drawn, and now tappable.
    *
-   * SHOWN, NOT ASKED ABOUT. Marking players by hand moved to after the
-   * analysis, where the pipeline's own boxes exist to point at. But seeing
-   * WHAT WAS FOUND still belongs here, because it is the only check on the
-   * court that has consequences in it: a quad drawn one court over, or one
-   * swallowing the queue behind the fence, both look plausible as an outline
-   * and both give themselves away the moment you see who ended up inside.
+   * ASKED ABOUT AGAIN, and the reason it came back is cost rather than taste.
+   * Tagging moved to after the analysis because that is where the pipeline's
+   * own boxes exist -- but the coaching read cannot be written without knowing
+   * who the subject is, so the run had to either skip it and be re-run once
+   * tagged, or write a read about a guess. Tagging HERE means the Gemini pass
+   * happens once, already knowing who it is about.
    *
-   * Nothing here is clickable. These are the detector's opinion, not an answer
-   * being collected.
+   * Seeing what was found still does its old job as well: it is the only check
+   * on the court that has consequences in it. A quad drawn one court over, or
+   * one swallowing the queue behind the fence, both look plausible as an
+   * outline and both give themselves away the moment you see who is inside.
    */
   const [detected, setDetected] = useState<AutoPlayer[]>([]);
+  /**
+   * Where the user says they are, in video pixels at their own feet.
+   *
+   * A POINT, NOT A TRACK ID, because tracks do not exist yet -- the CV run has
+   * not happened. matchTracksToSetup turns it into an identity afterwards by
+   * finding whichever track's feet were nearest at this timestamp. Feet
+   * specifically: they are the only part of a person on the court plane, so it
+   * is the one place where a click and a track agree about where somebody is.
+   */
+  const [selfPoint, setSelfPoint] = useState<{ x: number; y: number } | null>(
+    () => initial?.players?.find((pl) => pl.isSelf) ?? null
+  );
+  const [partnerPoint, setPartnerPoint] = useState<{ x: number; y: number } | null>(
+    () => initial?.players?.find((pl) => !pl.isSelf && pl.label === PARTNER_SEED_LABEL) ?? null
+  );
+  /**
+   * Which of the two the next tap fills.
+   *
+   * Starts on whichever is still missing, so re-opening a half-finished setup
+   * carries on rather than overwriting the answer already given.
+   */
+  const [tagging, setTagging] = useState<"self" | "partner">(
+    () => (initial?.players?.some((pl) => pl.isSelf) ? "partner" : "self")
+  );
   const [offCourt, setOffCourt] = useState(0);
   const [videoReady, setVideoReady] = useState(false);
   // The margin the canvas adds around the video, as a fraction of the canvas
@@ -696,6 +726,64 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       ctx.stroke();
     }
 
+    /*
+     * THE PEOPLE, so they can be tapped.
+     *
+     * Faint until one is chosen and solid once it is: the boxes are a target
+     * here, not information, and nine green rectangles competing with the
+     * court lines is how the last version of this screen ended up being asked
+     * to take them off. The one that is YOU is the only one that shouts.
+     */
+    for (const d of detected) {
+      const [bx, by, bw, bh] = d.boxPx;
+      const [fx, fy] = d.feetPx;
+      const isSelf = samePoint(selfPoint, { x: fx, y: fy });
+      const isPartner = samePoint(partnerPoint, { x: fx, y: fy });
+      ctx.strokeStyle = isSelf ? "#ffd23a" : isPartner ? "#37d0e0" : "rgba(120,220,150,.55)";
+      ctx.lineWidth = Math.max(2, (isSelf || isPartner ? 4 : 2) * s);
+      ctx.strokeRect(bx, by, bw, bh);
+      if (isSelf || isPartner) {
+        const label = isSelf ? "YOU" : "PARTNER";
+        ctx.font = `${Math.max(12, 20 * s)}px system-ui, sans-serif`;
+        const tw = ctx.measureText(label).width;
+        ctx.fillStyle = isSelf ? "#ffd23a" : "#37d0e0";
+        ctx.fillRect(bx, by - Math.max(16, 26 * s), tw + 12 * s, Math.max(16, 26 * s));
+        ctx.fillStyle = "#0B1220";
+        ctx.fillText(label, bx + 6 * s, by - Math.max(4, 7 * s));
+      }
+    }
+
+    /*
+     * A HAND-PLACED MARK, when the tap matched nobody.
+     *
+     * Drawn differently from a snapped box on purpose. A cross on bare court
+     * says "this is where you told me you were", which is the truth: there was
+     * no detection under it, and the match to a real track will be made later
+     * from this position alone. Showing it as a box would claim a detection
+     * that does not exist.
+     */
+    for (const [pt, colour, label] of [
+      [selfPoint, "#ffd23a", "YOU"] as const,
+      [partnerPoint, "#37d0e0", "PARTNER"] as const,
+    ]) {
+      if (!pt) continue;
+      const onBox = detected.some((d) => samePoint({ x: d.feetPx[0], y: d.feetPx[1] }, pt));
+      if (onBox) continue;
+      const r = Math.max(8, 14 * s);
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = Math.max(2, 3 * s);
+      ctx.beginPath();
+      ctx.moveTo(pt.x - r, pt.y); ctx.lineTo(pt.x + r, pt.y);
+      ctx.moveTo(pt.x, pt.y - r); ctx.lineTo(pt.x, pt.y + r);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.font = `${Math.max(12, 18 * s)}px system-ui, sans-serif`;
+      ctx.fillStyle = colour;
+      ctx.fillText(label, pt.x + r + 4 * s, pt.y - r);
+    }
+
     corners.forEach((c, i) => {
       ctx.fillStyle = "#ffd23a";
       ctx.beginPath();
@@ -763,7 +851,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     }
 
     ctx.restore();
-  }, [corners, courtLines, showLines, dragging]);
+  }, [corners, courtLines, showLines, dragging, detected, selfPoint, partnerPoint]);
 
   useEffect(() => { draw(); }, [draw, time, videoReady]);
 
@@ -803,10 +891,42 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    * a release that has not travelled far enough to be a drag commits it.
    */
   const placeAt = (client: { clientX: number; clientY: number }) => {
-    // A tap only ever adds a missing corner. In practice there is always a
-    // court on the frame when this screen opens, so this is the escape hatch
-    // for somebody who cleared it rather than the normal path.
-    if (corners.length < 4) { commit(); setCorners([...corners, toImage(client)]); }
+    const p = toImage(client);
+    /*
+     * THE COURT FIRST, ALWAYS. While a corner is missing a tap places it, and
+     * only once the quad is closed does a tap mean "that is me".
+     *
+     * Ordering it the other way round would be ambiguous exactly when it
+     * matters: a half-drawn court with people standing in it, where the same
+     * tap could plausibly mean either. In practice a court is always fitted
+     * when this screen opens, so the corner branch is the escape hatch for
+     * somebody who cleared it and the tagging branch is the normal path.
+     */
+    if (corners.length < 4) { commit(); setCorners([...corners, p]); return; }
+
+    /*
+     * SNAP TO A PLAYER IF THERE IS ONE, OTHERWISE TAKE THE TAP.
+     *
+     * The fallback is what makes "you must tag yourself" a rule somebody can
+     * always satisfy rather than a trap. The detector finds nobody on plenty
+     * of real frames -- a dark court, an unusual angle, everyone bunched -- and
+     * a required step with no way to complete it would leave the user on this
+     * page with no route forward at all. A hand-placed point is exactly as
+     * good an input as a snapped one: matchTracksToSetup takes a position
+     * either way and never sees which it was.
+     */
+    const at = nearestPlayerFeet(p, detected) ?? p;
+    if (tagging === "self") {
+      setSelfPoint(at);
+      // Clear a partner that the new self mark has just landed on, rather than
+      // leaving somebody tagged as both -- which the matcher resolves by
+      // silently dropping one, in an order nobody can predict.
+      if (samePoint(partnerPoint, at)) setPartnerPoint(null);
+      setTagging("partner");
+    } else {
+      if (samePoint(selfPoint, at)) return;
+      setPartnerPoint(at);
+    }
   };
 
   const onDown = (ev: React.PointerEvent<HTMLCanvasElement>) => {
@@ -964,11 +1084,26 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
               quadKind,
             }
           : null,
-      // ALWAYS EMPTY, and the field is kept so an older saved setup still
-      // parses. Who is who is decided after the analysis now, against the
-      // pipeline's own boxes on the frame where most of the roster is visible
-      // -- not by clicking strangers' feet before anything has been detected.
-      players: [],
+      /*
+       * WHO YOU ARE, AND WHO YOU ARE PLAYING WITH.
+       *
+       * Two seeds at most, and only ones the user actually tapped. The old
+       * version of this screen seeded EVERY detected player automatically,
+       * which read downstream as deliberate intent -- four marks meant the
+       * detector found four people, not that anybody chose them -- and
+       * matchTracksToSetup had to grow a comment explaining why it must not
+       * filter on them. Nothing is sent here that a person did not point at.
+       *
+       * Positions, not identities: the tracks these become do not exist yet.
+       * matchTracksToSetup resolves them after the CV run by finding whichever
+       * track's feet were nearest at this timestamp.
+       */
+      players: [
+        ...(selfPoint ? [{ x: selfPoint.x, y: selfPoint.y, isSelf: true }] : []),
+        ...(partnerPoint
+          ? [{ x: partnerPoint.x, y: partnerPoint.y, isSelf: false, label: PARTNER_SEED_LABEL }]
+          : []),
+      ],
       // Null means white, which is what the fitter assumes on its own.
       lineColorHex: lineColor,
       matchMode,
@@ -1031,7 +1166,20 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    * sensible default otherwise. The work is looking at it, and dragging a
    * corner only if it is off.
    */
-  const ready = courtDone;
+  /**
+   * BOTH, NOW. The court, and which player is you.
+   *
+   * Tagging used to be optional here and happened after the analysis instead.
+   * That cost a whole Gemini pass: the run either skipped the coaching read
+   * and needed re-running once somebody tagged themselves, or wrote a read
+   * about whoever the pipeline guessed. Asking the one question only the user
+   * can answer BEFORE the expensive part means it is paid for once.
+   *
+   * Always satisfiable, which is what makes it fair to require: when the
+   * detector found nobody, a tap on bare court is a valid answer and produces
+   * exactly the same kind of seed.
+   */
+  const ready = courtDone && selfPoint !== null;
 
   return (
     <div className="stack g4">
@@ -1225,22 +1373,22 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             <span className="eyebrow">Set up this clip</span>
             <span className={`pill ${ready ? "p-good" : "p-warn"}`}>
               <span className="dot" />
-              {ready ? "Ready to analyse" : "Place the court to start"}
+              {ready
+                ? "Ready to analyse"
+                : !courtDone ? "Place the court to start" : "Tap yourself to finish"}
             </span>
           </div>
 
           {/*
-            ONE TILE, because there is one thing to do.
+            TWO TILES: the court, and who you are.
 
-            It used to be "tap the player who is you", and before that it was
-            that plus the court plus a preset bar. Picking yourself moved to
-            after the analysis -- by then the pipeline has found the players
-            and can show you real boxes on the frame where most of them are
-            visible, which is a far easier question than clicking four
-            strangers' feet on a frame nothing has looked at yet.
-
-            What is left is the one answer the software cannot supply and
-            cannot recover from getting wrong.
+            Both are answers the software cannot supply and cannot recover from
+            getting wrong, and both are cheap to give HERE and expensive to give
+            anywhere else. The court because every distance in the read hangs
+            off it; the identity because the coaching pass cannot be written
+            without it -- and asking afterwards meant either skipping that pass
+            and re-running it, or writing a read about whoever the pipeline
+            guessed. One Gemini call instead of two.
           */}
           <div
             className="stack g2"
@@ -1306,12 +1454,85 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             ) : null}
           </div>
 
+          {/* --- step 2: who is you ---------------------------------- */}
+          <div
+            className="stack g2"
+            style={{
+              padding: "var(--a4)",
+              borderRadius: "var(--r3)",
+              background: selfPoint ? "var(--good-wash)" : "var(--warn-wash)",
+              border: `1px solid ${selfPoint ? "var(--good)" : "var(--warn)"}`,
+            }}
+          >
+            <div className="row g2" style={{ alignItems: "center" }}>
+              <span style={{
+                width: 22, height: 22, borderRadius: "50%", display: "grid", placeItems: "center",
+                background: selfPoint ? "var(--good)" : "var(--warn)", color: "#fff",
+                fontSize: 12, fontWeight: 700, flex: "none",
+              }}>
+                {selfPoint ? "\u2713" : "2"}
+              </span>
+              <strong style={{ fontSize: 15 }}>Which player is you?</strong>
+            </div>
+            <p className="sm" style={{ margin: 0, color: selfPoint ? "var(--good)" : "var(--warn)" }}>
+              {!courtDone
+                ? "Place the court first — while a corner is missing, a tap adds one."
+                : !selfPoint
+                  ? (detected.length > 0
+                      ? "Tap yourself on the frame. Tap a green box, or anywhere at your feet if the box is missing."
+                      : "Nobody was detected on this frame, so tap the spot on the court where you are standing.")
+                  : tagging === "partner" && !partnerPoint
+                    ? "Got you. Now tap your partner if you want a read on how you two play together — or skip it and analyse."
+                    : "You and your partner are marked. Tap either one again to move it."}
+            </p>
+            {(selfPoint || partnerPoint) ? (
+              <div className="row g2" style={{ flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${tagging === "self" ? "btn-soft" : "btn-ghost"}`}
+                  onClick={() => setTagging("self")}
+                >
+                  {selfPoint ? "Re-tap me" : "Tap me"}
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${tagging === "partner" ? "btn-soft" : "btn-ghost"}`}
+                  disabled={!selfPoint}
+                  onClick={() => setTagging("partner")}
+                >
+                  {partnerPoint ? "Re-tap partner" : "Tap my partner"}
+                </button>
+                {partnerPoint ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => { setPartnerPoint(null); setTagging("partner"); }}
+                  >
+                    Remove partner
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {/*
+              WHAT THE PARTNER TAG BUYS, said rather than implied. It is
+              optional and it is the only way to get the partnership section,
+              so somebody who skips it should know what they skipped -- and
+              somebody who cannot tell which player is their partner should not
+              feel obliged to guess.
+            */}
+            <p className="sm measure" style={{ margin: 0, color: "var(--ink-3)" }}>
+              Tagging your partner is optional. It is what unlocks the read on
+              how well the two of you work together — spacing, who takes the
+              middle, whether you get to the kitchen line as a pair.
+            </p>
+          </div>
+
           <div className="row g2" style={{ alignItems: "center", flexWrap: "wrap" }}>
             <button
               type="button"
               className="btn btn-primary"
               disabled={saving || !ready}
-              title={ready ? undefined : "Finish both steps above first"}
+              title={ready ? undefined : (courtDone ? "Tap yourself on the frame first" : "Place the court first")}
               onClick={() => save(true)}
             >
               {saving ? "Saving…" : "Looks right — analyse"}
@@ -1340,7 +1561,8 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             <div className="stack g2" style={{ marginTop: "var(--a2)" }}>
               <p className="sm measure" style={{ margin: 0, color: "var(--ink-2)" }}>
                 Blue lines are the court. Pink is the net, drawn at its real height.
-                Green boxes are tracked players; the one you pick turns yellow.
+                Green boxes are detected players; the one you tap as yourself turns
+                yellow, and your partner turns cyan.
               </p>
               <p className="sm measure" style={{ margin: 0, color: "var(--ink-2)" }}>
                 If a corner sits outside the video, click out in the dark margin where

@@ -27,6 +27,7 @@ import { describeError } from "@/lib/analysis/describe-error";
 import type { RawPoseResult } from "./cv-scripts";
 import {
   matchTracksToSetup,
+  PARTNER_SEED_LABEL,
   type PreAnalysisSetup,
 } from "@/lib/db/setup";
 import type {
@@ -113,6 +114,16 @@ export interface VisionPipelineOutput {
   providerName: string;
   /** Track the user identified as themselves during setup, if they did. */
   selfPlayerId: string | null;
+  /**
+   * Track the user identified as their PARTNER during setup, if they did.
+   *
+   * Separate from selfPlayerId rather than a second entry in it, because
+   * several self labels already mean one specific thing downstream: facts.ts
+   * merges them as fragments of the SAME person, reassembled after the tracker
+   * loses somebody behind an opponent. Putting a partner in there would
+   * attribute half their shots to the user.
+   */
+  partnerPlayerId: string | null;
   courtCalibration: CourtCalibration;
   perFrameDetections: FrameDetectionSet[];
   tracks: PlayerTrack[];
@@ -480,6 +491,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // and every one of those tracked as a player corrupts the activity signal
   // the rally logic leans on.
   let selfPlayerId: string | null = null;
+  let partnerPlayerId: string | null = null;
   let tracksToUse = tracks;
   if (input.selfPlayerId) {
     // Named directly. Checked against the tracks that exist rather than
@@ -501,13 +513,26 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
     const matched = matchTracksToSetup(tracks, input.setup);
     tracksToUse = matched.keep;
     selfPlayerId = matched.selfPlayerId;
+    partnerPlayerId = matched.partnerPlayerId;
     // Matching no longer drops anyone, so the only thing that can fail here is
     // working out which track is you -- and that only matters if you actually
     // marked yourself. Reporting "we could not match your players" whenever
     // selfPlayerId was null told users matching had failed when it had
     // succeeded and they simply had not tagged themselves.
     const markedSelf = input.setup.players.some((pl) => pl.isSelf);
-    log(`setup: ${tracks.length} track(s)` + (selfPlayerId ? ` · you are ${selfPlayerId}` : ""));
+    log(`setup: ${tracks.length} track(s)`
+      + (selfPlayerId ? ` · you are ${selfPlayerId}` : "")
+      + (partnerPlayerId ? ` · partner is ${partnerPlayerId}` : ""));
+    // SAID OUT LOUD RATHER THAN LEFT BLANK. A partnership read is the one part
+    // of this that simply cannot be written without both subjects, and a
+    // missing section with no explanation reads as the feature being broken.
+    const markedPartner = input.setup.players.some((pl) => pl.label === PARTNER_SEED_LABEL);
+    if (markedPartner && !partnerPlayerId) {
+      knownLimitations.push(
+        "The player you marked as your partner could not be matched to any tracked player, "
+        + "so there is no partnership read in this run."
+      );
+    }
     if (markedSelf && !selfPlayerId) {
       knownLimitations.push(
         "The player you marked as yourself could not be matched to any tracked player — " +
@@ -1076,6 +1101,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   return {
     providerName: provider.name,
     selfPlayerId,
+    partnerPlayerId,
     courtCalibration,
     perFrameDetections,
     tracks,
