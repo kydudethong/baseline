@@ -671,3 +671,69 @@ test("build breaks ties without overruling where somebody actually is", () => {
       "a single frame of swapped build readings moved a stationary player across the court");
   }
 });
+
+test("bystanders beside the court do not claim the slots", () => {
+  // REPORTED FROM REAL FOOTAGE: two of the four tagged players were off the
+  // court, and not the two who were playing.
+  //
+  // The clip opens with two people standing beside the near sideline — waiting
+  // for the next game, which is what a public court looks like — and the real
+  // players walk on a second later. Seeding took the first frame with anybody
+  // in it and the MOST CONFIDENT detections in it, and a bystander near the
+  // camera is large, sharp and far more confident than a player at the far
+  // baseline. They then held the slot for the whole clip, because a seeded
+  // slot only ever goes to whoever is nearest it.
+  const rows = [];
+  // Well outside the sideline: x = -4ft and x = 24ft on a 20ft court.
+  for (let i = 0; i < 4; i++) {
+    rows.push({ t: i * 0.2, people: [at(-4, 8), at(24, 8)] });
+  }
+  // Then the actual game, four people inside the lines.
+  for (let i = 4; i < 24; i++) {
+    rows.push({ t: i * 0.2, people: [
+      at(-4, 8), at(24, 8),                    // the bystanders are still there
+      at(6, 8), at(14, 8), at(6, 36), at(14, 36),
+    ]});
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet });
+  assert.equal(got.tracks.length, 4);
+  // Every tracked player must have spent their time inside the lines.
+  for (const tr of got.tracks) {
+    const xs = tr.points.map((p) => (p.courtPosition?.x ?? 0));
+    const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+    assert.ok(mean > 0 && mean < 20,
+      `a track sat at x=${mean.toFixed(1)}ft, outside a 20ft court — a bystander took a slot`);
+  }
+});
+
+test("a clip that never shows a full court still produces a roster", () => {
+  // THE FALLBACK, and it has to exist. A drill at one end, or a court marked
+  // badly enough that nobody reads as inside the lines, must still return
+  // tracks — some roster beats none, and refusing to seed would return an
+  // empty list, which is the failure this whole file was written to end.
+  const rows = [];
+  for (let i = 0; i < 20; i++) {
+    rows.push({ t: i * 0.2, people: [at(-5, 8), at(25, 8), at(-5, 36), at(25, 36)] });
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet });
+  assert.ok(got.tracks.length > 0, "seeding waited for a moment that never came");
+});
+
+test("waiting to seed does not lose players who start off court mid-rally", () => {
+  // The guard on the guard. Once seeded, the loose six-foot margin still
+  // applies — a player chasing a lob behind the baseline must keep their slot,
+  // which is the reason that margin is generous in the first place.
+  const rows = [];
+  for (let i = 0; i < 10; i++) {
+    rows.push({ t: i * 0.2, people: [at(6, 8), at(14, 8), at(6, 36), at(14, 36)] });
+  }
+  // One player chases a lob four feet behind the baseline.
+  for (let i = 10; i < 20; i++) {
+    rows.push({ t: i * 0.2, people: [at(6, -3), at(14, 8), at(6, 36), at(14, 36)] });
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet });
+  assert.equal(got.tracks.length, 4);
+  for (const tr of got.tracks) {
+    assert.equal(tr.points.length, 20, `${tr.playerId} was dropped when they stepped out`);
+  }
+});

@@ -105,6 +105,27 @@ export const NET_Y_FT = 22;
 export const ON_COURT_MARGIN_FT = 6;
 
 /**
+ * How far outside the lines a SEED may be.
+ *
+ * THE COMMENT ABOVE PROMISED A SAFETY NET THAT DID NOT EXIST. It says the cost
+ * of a loose margin is that "somebody standing just off the sideline survives
+ * to be rejected later by the slot assignment anyway" -- and the assignment
+ * did no such thing. It seeded on the first frame containing anybody, taking
+ * the most confident detections, so a bystander near the camera (large, sharp,
+ * very confident) beat a real player at the far baseline (small, blurry) and
+ * then held that slot for the whole clip.
+ *
+ * Reported from real footage: two of the four tagged players were off the
+ * court and not the two who were playing.
+ *
+ * So seeding uses a foot and a half instead of six. That is the width of
+ * homography error from slightly-off corners, not standing room: a player
+ * whose court was marked a little wrong is inside it, and somebody waiting
+ * beside the sideline for the next game is not.
+ */
+export const SEED_MARGIN_FT = 1.5;
+
+/**
  * How far a player can be from where a slot expected them and still be them.
  *
  * Sixteen feet, which is most of the width of a court. That sounds enormous
@@ -212,6 +233,16 @@ interface Plane {
   unit(box: BoundingBoxNorm): number;
   /** False for a body that is not in this game at all. */
   inPlay(p: CourtPoint): boolean;
+  /**
+   * Inside the painted lines, near enough that this is somebody PLAYING.
+   *
+   * Stricter than inPlay on purpose. inPlay is deliberately loose -- six feet
+   * outside the lines -- because a player chasing a lob really does stand well
+   * behind the baseline and losing them mid-rally is invisible and ruinous.
+   * Seeding is the opposite problem: the four bodies that claim the slots
+   * should be the four on the court, not whoever the detector saw first.
+   */
+  onCourtStrict(p: CourtPoint): boolean;
   /** Which group this position belongs to, or null when there is no line. */
   side(p: CourtPoint): Side | null;
   /** Both in body units, so they mean the same thing on either plane. */
@@ -261,6 +292,12 @@ function courtPlane(
     inPlay: (p) =>
       p.x >= -margin && p.x <= COURT_W_FT + margin
       && p.y >= -margin && p.y <= COURT_L_FT + margin,
+    // A FOOT AND A HALF, which is homography error rather than standing room.
+    // Somebody beside the sideline waiting for the next game is outside this;
+    // a player whose corner-marking is slightly off is not.
+    onCourtStrict: (p) =>
+      p.x >= -SEED_MARGIN_FT && p.x <= COURT_W_FT + SEED_MARGIN_FT
+      && p.y >= -SEED_MARGIN_FT && p.y <= COURT_L_FT + SEED_MARGIN_FT,
     side: (p) => (p.y < NET_Y_FT ? "near" : "far"),
     maxJump: MAX_SLOT_JUMP_FT,
     maxPredict: 8,
@@ -291,6 +328,9 @@ function imagePlane(
     // There are no lines to be outside of. A spectator gets in only by winning
     // a slot against a real player on motion and appearance, every frame.
     inPlay: () => true,
+    // No lines to be inside of. Every candidate is equally plausible, which is
+    // the honest answer without a court and the reason the court is required.
+    onCourtStrict: () => true,
     side: (p) => {
       if (!split) return null;
       const v = split.axis === "y" ? p.y : p.x;
@@ -522,6 +562,24 @@ export function buildRoster(perFrame: FrameDetectionSet[], opts: RosterOptions):
     }
   }
 
+  /**
+   * When each group may start claiming slots: the first moment enough of its
+   * people are inside the lines.
+   *
+   * Computed up front rather than decided in the loop, because the loop only
+   * moves forward and "no frame ever qualifies" has to fall back to the FIRST
+   * frame, not the last. A badly marked court, or a drill happening at one end
+   * only, should still produce a roster -- some roster beats none.
+   */
+  const seedFrom = new Map<string, number>();
+  for (const group of groupKeys) {
+    const want = (hasSides ? slotsPerSide : slotsPerSide * 2);
+    const qualifying = byFrame.find(
+      (f) => (f.groups.get(group) ?? []).filter((c) => plane.onCourtStrict(c.pos)).length >= want
+    );
+    seedFrom.set(group, qualifying ? qualifying.t : -Infinity);
+  }
+
   for (const frame of byFrame) {
     for (const group of groupKeys) {
       const mine = slots.filter((s) => s.group === group);
@@ -531,12 +589,33 @@ export function buildRoster(perFrame: FrameDetectionSet[], opts: RosterOptions):
         .sort((a, b) => b.confidence - a.confidence);
       if (cands.length === 0) continue;
 
-      // Seed: the first frame with people in this group sets the slots, in
-      // left-to-right order so the numbering is stable and meaningful rather
-      // than whatever order the detector happened to emit.
+      // SEED ON PEOPLE WHO ARE ON THE COURT, and wait until there are enough
+      // of them.
+      //
+      // This used to seed on the first frame containing anybody at all, taking
+      // the most confident detections. Confidence is a detector score, not a
+      // statement about who is playing: somebody standing near the camera is
+      // large, sharp and extremely confident, while a real player at the far
+      // baseline is small and blurry. So a clip that opens with people walking
+      // on, or with a queue beside the near sideline, handed its slots to
+      // bystanders -- who then held them for the rest of the clip, because a
+      // seeded slot is only ever reassigned to whoever is nearest it.
+      //
+      // Waiting costs the frames before play starts, which is the warm-up this
+      // is trying not to track. If the clip NEVER shows enough people inside
+      // the lines -- a badly marked court, or a drill at one end -- the old
+      // behaviour is the fallback, because some roster beats none.
       const unseeded = mine.filter((s) => s.last === null);
       if (unseeded.length === mine.length) {
-        const seeds = [...cands].slice(0, mine.length).sort((a, b) => a.pos.x - b.pos.x);
+        // Decided before the loop, so "never enough people on court" falls
+        // back to seeding at the very first frame rather than at the last --
+        // which would track almost nothing at all.
+        if (frame.t < (seedFrom.get(group) ?? -Infinity)) continue;
+        const onCourt = cands.filter((c) => plane.onCourtStrict(c.pos));
+        const pool = onCourt.length >= mine.length ? onCourt : cands;
+        // Left to right, so the numbering is stable and meaningful rather than
+        // whatever order the detector happened to emit.
+        const seeds = [...pool].slice(0, mine.length).sort((a, b) => a.pos.x - b.pos.x);
         seeds.forEach((c, i) => place(mine[i], c, frame.t, plane.kind));
         droppedSurplus += Math.max(0, cands.length - mine.length);
         continue;
