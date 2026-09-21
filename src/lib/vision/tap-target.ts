@@ -8,9 +8,19 @@
  * too loose means tapping an opponent and getting your partner.
  */
 
+import { boxRect, type BoxPx } from "./image-space";
+
 export interface TapCandidate {
-  /** x, y, width, height in the same pixel space as the tap. */
-  boxPx: [number, number, number, number];
+  /**
+   * The detection box as TWO CORNERS, which is what the detector reports.
+   *
+   * Typed rather than left as four numbers because this file read them as
+   * `[x, y, width, height]` -- the shape every drawing API takes -- and the
+   * tests built their fixtures the same way, so both agreed and both were
+   * wrong. Hit-testing then measured distance to a box stretching from the
+   * player to the bottom-right of the frame, which matches almost any tap.
+   */
+  boxPx: BoxPx;
   /** Where this player's feet are. The seed is stored here, not at the tap. */
   feetPx: [number, number];
 }
@@ -30,12 +40,10 @@ export interface TapCandidate {
 export const TAP_SNAP_HEIGHTS = 0.6;
 
 /** Distance from a point to the nearest edge of a box; 0 when inside it. */
-function distanceToBox(
-  p: { x: number; y: number },
-  [bx, by, bw, bh]: [number, number, number, number]
-): number {
-  const dx = Math.max(bx - p.x, 0, p.x - (bx + bw));
-  const dy = Math.max(by - p.y, 0, p.y - (by + bh));
+function distanceToBox(p: { x: number; y: number }, box: BoxPx): number {
+  const { x, y, width, height } = boxRect(box);
+  const dx = Math.max(x - p.x, 0, p.x - (x + width));
+  const dy = Math.max(y - p.y, 0, p.y - (y + height));
   return Math.hypot(dx, dy);
 }
 
@@ -58,7 +66,7 @@ export function nearestPlayerFeet(
   let best: { distance: number; feet: { x: number; y: number } } | null = null;
   for (const p of players) {
     const distance = distanceToBox(tap, p.boxPx);
-    const height = p.boxPx[3];
+    const height = boxRect(p.boxPx).height;
     if (distance > height * toleranceHeights) continue;
     // NEAREST WINS, not first. Two players overlapping at the net is the
     // normal case on a doubles court, and iterating in detector order would

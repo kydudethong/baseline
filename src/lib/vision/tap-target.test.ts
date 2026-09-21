@@ -2,9 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { nearestPlayerFeet, samePoint, TAP_SNAP_HEIGHTS, type TapCandidate } from "./tap-target";
 
-/** A player 200px tall standing with their feet at (cx, footY). */
+/**
+ * A player `h` px tall standing with their feet at (cx, footY).
+ *
+ * CORNERS, matching what the detector actually sends. This fixture used to
+ * build `[x, y, width, height]` -- the same misreading the code had -- so
+ * every test here passed against a box that in production stretched from the
+ * player to the bottom-right of the frame. A fixture that shares the code's
+ * assumption tests nothing about that assumption.
+ */
 const player = (cx: number, footY: number, h = 200): TapCandidate => ({
-  boxPx: [cx - h * 0.2, footY - h, h * 0.4, h],
+  boxPx: [cx - h * 0.2, footY - h, cx + h * 0.2, footY],
   feetPx: [cx, footY],
 });
 
@@ -85,4 +93,28 @@ test("samePoint stops one person being tagged as both you and your partner", () 
   assert.equal(samePoint({ x: 10, y: 10 }, { x: 40, y: 10 }), false);
   assert.equal(samePoint(null, { x: 10, y: 10 }), false);
   assert.equal(samePoint({ x: 10, y: 10 }, null), false);
+});
+
+test("a box is two corners, not an origin and a size", () => {
+  // THE REPORTED BUG, pinned at the level it actually broke. Read as
+  // [x, y, width, height], this player's box would stretch from (460, 700) to
+  // (1000, 1600) -- most of the frame -- and a tap far away in open court
+  // would "hit" them. Read correctly it is 80 x 200 and the tap misses.
+  const p: TapCandidate = { boxPx: [460, 700, 540, 900], feetPx: [500, 900] };
+  assert.equal(nearestPlayerFeet({ x: 500, y: 800 }, [p])?.x, 500, "a tap on the body hits");
+  assert.equal(
+    nearestPlayerFeet({ x: 900, y: 1500 }, [p]), null,
+    "a tap way outside must miss — if this passes, the box is being read as x/y/w/h"
+  );
+});
+
+test("corners given in the other order still describe the same box", () => {
+  // A negative width makes strokeRect draw inside out and makes hit-testing
+  // silently never match, which looks like a dead tap target.
+  const normal: TapCandidate = { boxPx: [460, 700, 540, 900], feetPx: [500, 900] };
+  const flipped: TapCandidate = { boxPx: [540, 900, 460, 700], feetPx: [500, 900] };
+  assert.deepEqual(
+    nearestPlayerFeet({ x: 500, y: 800 }, [flipped]),
+    nearestPlayerFeet({ x: 500, y: 800 }, [normal])
+  );
 });

@@ -37,7 +37,7 @@ import CourtPresetBar from "./CourtPresetBar";
 
 
 import { courtSegments, type CourtLineRole } from "@/lib/vision/court-model";
-import { imageScale, scaleBox, scalePoint } from "@/lib/vision/image-space";
+import { boxRect, imageScale, scaleBox, scalePoint, type BoxPx } from "@/lib/vision/image-space";
 import { type MatchMode } from "@/lib/db/setup";
 import { SetupExamples } from "./SetupExamples";
 
@@ -155,7 +155,8 @@ export interface SetupCourt {
 }
 
 interface AutoPlayer {
-  boxPx: [number, number, number, number];
+  /** Two corners, [x1, y1, x2, y2] — see BoxPx. Not an origin and a size. */
+  boxPx: BoxPx;
   feetPx: [number, number];
   confidence: number;
   side: "near" | "far" | null;
@@ -746,7 +747,11 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
      * to take them off. The one that is YOU is the only one that shouts.
      */
     for (const d of detected) {
-      const [bx, by, bw, bh] = d.boxPx;
+      // TWO CORNERS, converted once. Destructured as [bx, by, bw, bh] this
+      // drew every box from the player's head to a point past the bottom of
+      // the frame -- reported, for the third time, as "the boxes aren't on
+      // the players". boxRect is the only place that reading happens now.
+      const { x: bx, y: by, width: bw, height: bh } = boxRect(d.boxPx);
       const [fx, fy] = d.feetPx;
       const isSelf = samePoint(selfPoint, { x: fx, y: fy });
       const isPartner = samePoint(partnerPoint, { x: fx, y: fy });
@@ -1452,15 +1457,34 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
               never tracked.
             */}
             {detected.length > 0 || offCourt > 0 ? (
+              /*
+                "INSIDE IT" ONLY WHEN THERE IS AN IT.
+                This read "4 people are inside it. That is the same gate the
+                analysis will use." directly under "No court on the frame yet"
+                -- two sentences that cannot both be true, in the same box,
+                four lines apart. With no court nothing was gated, so the
+                count is just how many people the detector found.
+              */
               <p className="sm" style={{ margin: 0, color: "var(--ink-2)" }}>
-                <strong>{detected.length}</strong>
-                {detected.length === 1 ? " person is" : " people are"} inside it
-                {offCourt > 0
-                  ? `, and ${offCourt} ${offCourt === 1 ? "is" : "are"} outside and will be ignored as spectators`
-                  : ""}
-                . {detected.length > 4
-                  ? "More than four inside means the outline is reaching past your court."
-                  : "That is the same gate the analysis will use."}
+                {gated === false ? (
+                  <>
+                    <strong>{detected.length}</strong>
+                    {detected.length === 1 ? " person was" : " people were"} found on this
+                    frame, but with no court there was nothing to rule anyone out of — so
+                    that count includes anyone waiting or walking past.
+                  </>
+                ) : (
+                  <>
+                    <strong>{detected.length}</strong>
+                    {detected.length === 1 ? " person is" : " people are"} inside it
+                    {offCourt > 0
+                      ? `, and ${offCourt} ${offCourt === 1 ? "is" : "are"} outside and will be ignored as spectators`
+                      : ""}
+                    . {detected.length > 4
+                      ? "More than four inside means the outline is reaching past your court."
+                      : "That is the same gate the analysis will use."}
+                  </>
+                )}
               </p>
             ) : null}
           </div>
