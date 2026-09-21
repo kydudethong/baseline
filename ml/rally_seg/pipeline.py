@@ -127,6 +127,52 @@ def _player_gate_polygon(court, cfg, image_size) -> Optional[np.ndarray]:
     ], dtype=np.float32).reshape(-1, 1, 2)
 
 
+def _player_gate_polygon_strict(court, cfg, image_size) -> Optional[np.ndarray]:
+    """Where somebody has to be standing to be PLAYING on this court.
+
+    The loose gate above is deliberately enormous: it extends the sidelines to
+    1.6x the image height so a player near the camera, whose feet are at or
+    past the bottom of the picture, is not rejected.  That is right for KEEPING
+    a player once you know who they are, and wrong for DECIDING who they are --
+    the wedge is at its widest nearest the camera, so it sweeps in the people
+    waiting for the next game, the queue at the fence and anyone walking past.
+
+    Reported from real footage: on a night clip where the rally was at the far
+    end, the two boxes on the setup frame landed on two men standing by the
+    fence with drinks, because the loose gate admitted them and they were
+    larger, sharper and more confident than the actual players.
+
+    So this one is the painted quad plus a little, and nothing else.  Same
+    split as roster.ts, which grew SEED_MARGIN_FT for exactly this reason:
+    strict to choose, loose to follow.
+    """
+    if not hasattr(court, "corners_px"):
+        return None
+    quad = np.asarray(court.corners_px, dtype=np.float32).reshape(4, 2)
+    if not np.all(np.isfinite(quad)):
+        return None
+    near_l, near_r, far_r, far_l = quad
+    m = cfg.players.court_margin_strict_frac
+
+    def widen(a, b, frac):
+        d = b - a
+        return a - d * frac, b + d * frac
+
+    near_l, near_r = widen(near_l, near_r, m)
+    far_l, far_r = widen(far_l, far_r, m)
+    # A little room behind each baseline -- a serve is struck from behind it --
+    # but measured in the court's OWN depth rather than the frame's, so it
+    # cannot run away toward the camera the way the loose gate does.
+    depth_l = near_l - far_l
+    depth_r = near_r - far_r
+    return np.array([
+        near_l + depth_l * m,
+        near_r + depth_r * m,
+        far_r - depth_r * m,
+        far_l - depth_l * m,
+    ], dtype=np.float32).reshape(-1, 1, 2)
+
+
 def _gate_players_to_court(boxes, polygon):
     """Keep only players standing on this court.
 

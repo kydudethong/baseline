@@ -267,6 +267,16 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     () => (initial?.players?.some((pl) => pl.isSelf) ? "partner" : "self")
   );
   const [offCourt, setOffCourt] = useState(0);
+  /**
+   * Whether the boxes were filtered against a fitted court at all.
+   *
+   * Null until a detection pass has run. False is the state worth shouting
+   * about: with no court there is nothing to be off, so every person in the
+   * frame is a candidate and the boxes fall back to whoever the detector was
+   * most confident about -- which is whoever is closest to the camera, which
+   * on a public court is the people waiting for the next game.
+   */
+  const [gated, setGated] = useState<boolean | null>(null);
   const [videoReady, setVideoReady] = useState(false);
   // The margin the canvas adds around the video, as a fraction of the canvas
   // width. Needed in CSS space to work out what "show the video, and nothing
@@ -585,6 +595,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             }))
       );
       setOffCourt(json.frame?.playersOffCourt ?? 0);
+      setGated(json.frame?.courtGated ?? null);
       const bits: string[] = [];
       if (json.frame) bits.push(`Frame at ${json.frame.timestampSeconds.toFixed(1)}s.`);
       if (json.court) bits.push(`Court fitted (${(json.court.confidence * 100).toFixed(0)}% line support) — drag any corner to correct it.`);
@@ -1512,6 +1523,26 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                   </button>
                 ) : null}
               </div>
+            ) : null}
+            {/*
+              THE CASE WHERE THE BOXES ARE PROBABLY WRONG, said plainly and
+              where it will be read.
+
+              With no court fitted nothing can be ruled off it, so the boxes
+              are simply the detector's most confident people -- and confidence
+              tracks how close somebody is to the camera, so on a public court
+              they land on whoever is standing at the fence rather than on the
+              four playing at the far end. That is a real reported failure, and
+              the fix is in the user's hands: fit the court, then re-detect.
+            */}
+            {gated === false && detected.length > 0 ? (
+              <p className="sm measure" style={{ margin: 0, color: "var(--warn)" }}>
+                No court was fitted, so these boxes were not checked against one —
+                they are just the people the detector was surest about, which is
+                usually whoever is nearest the camera rather than whoever is
+                playing. Fit the court above and press “Fit the court” again to
+                re-detect, or just tap yourself directly.
+              </p>
             ) : null}
             {/*
               WHAT THE PARTNER TAG BUYS, said rather than implied. It is

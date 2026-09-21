@@ -251,6 +251,24 @@ async function AnalysisBreakdown({
     .split(",")
     .map((l) => l.trim())
     .filter(Boolean);
+  /*
+   * ASKED ONCE, ON THE SETUP PAGE.
+   *
+   * This step used to appear whenever there was no coaching read, which meant
+   * somebody who had already tapped themselves before the analysis ran was
+   * asked the same question again afterwards -- and asked it against a
+   * DIFFERENT frame, with different boxes, so the two answers could disagree.
+   * Reported as "I don't want it to show this; when I press on the person in
+   * the setup page, that's who I chose".
+   *
+   * It is gated on the tag now rather than on the read. The only people who
+   * still see it are the ones it was built for: analyses from before setup
+   * asked, and any run where the seed never matched a track. Everyone else
+   * changes their mind through the dialog below, which is a choice rather
+   * than a step in the way.
+   */
+  const needsTagging = selfLabels.length === 0;
+
   const tagSection = (
     <TagSection
       supabase={supabase}
@@ -260,13 +278,14 @@ async function AnalysisBreakdown({
       calibration={phase2.calibration}
       profile={profile}
       hasExistingRead={hasRead}
-      frameless={hasRead}
+      frameless={!needsTagging}
     />
   );
 
+
   return (
     <div className="stack g6">
-      {!hasRead ? (
+      {needsTagging ? (
         <div className="stack g4">
           <div className="stepbar">
             <span className="step done">
@@ -293,7 +312,11 @@ async function AnalysisBreakdown({
         </div>
         <div className="row g2">
           <CourtDialog supabase={supabase} analysis={analysis} calibration={phase2.calibration} frames={phase2.frames} />
-          {hasRead && phase2.tracks.length > 0 ? (
+          {/* AVAILABLE WHENEVER SOMEBODY IS TAGGED, not only once a read exists.
+              A run whose coaching pass failed still needs a way to re-tag and
+              try again, and gating this on hasRead left that person with a
+              page full of empty panels and no button on it. */}
+          {!needsTagging && phase2.tracks.length > 0 ? (
             <Dialog
               trigger={
                 <button type="button" className="btn btn-soft btn-sm">

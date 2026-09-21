@@ -274,20 +274,30 @@ def cmd_court(args) -> int:
     return 0
 
 
-def _frame_setup_score(players, court) -> float:
+def _frame_setup_score(players, court, on_court=None) -> float:
     """How good a frame is for asking a person "which one of these is you?".
 
-    Wanted, in order: four people, one in each quadrant of the court, none of
+    Wanted, in order: four people ON THE COURT, one in each quadrant, none of
     them overlapping so badly that a click is ambiguous.  Four is not a
     tie-break -- a frame showing three players cannot answer the question the
     setup step exists to ask, so the count dominates everything else.
+
+    ``on_court`` is the subset standing inside the painted lines.  It is what
+    the count is taken over, because a frame with two players and two men at
+    the fence used to score exactly like a frame with four players: the loose
+    gate passed all four, ``n`` was 4, and the mean-confidence term at the
+    bottom then PREFERRED the frame with the bystanders, since somebody
+    standing still near the camera is detected far more confidently than
+    somebody lunging at the far baseline.
     """
-    n = len(players)
+    counted = players if on_court is None else on_court
+    n = len(counted)
     score = -3.0 * abs(n - 4)
 
-    if court is not None and players:
-        sides = [court.side_of_net(court.to_court(np.array([p.feet]))[0]) for p in players]
+    if court is not None and counted:
+        sides = [court.side_of_net(court.to_court(np.array([p.feet]))[0]) for p in counted]
         near = sum(1 for s in sides if s < 0)
+        n = len(counted)
         # Two a side is what a doubles rally looks like.  A frame with all four
         # detections on one side is usually two players plus two spectators.
         score -= abs(near - (n - near))
@@ -304,8 +314,15 @@ def _frame_setup_score(players, court) -> float:
             if smaller > 0:
                 score -= 2.0 * (inter / smaller)
 
-    if players:
-        score += float(np.mean([p.conf for p in players]))
+    # OVER THE PEOPLE ON THE COURT, not over everybody detected. That is the
+    # whole of the change here: the weight is left at 1.0, because the count
+    # term is 3.0 per player and no confidence swing can buy back a missing
+    # player. Taken over everybody, though, this term actively PREFERRED the
+    # frame full of bystanders -- proximity to the camera and detector
+    # confidence are very nearly the same measurement, and the people nearest
+    # the camera are the ones not playing.
+    if counted:
+        score += float(np.mean([p.conf for p in counted]))
     return score
 
 
@@ -319,7 +336,7 @@ def cmd_setup(args) -> int:
     import cv2
     from .detect.court import CourtDetector, FallbackCourt
     from .detect.players import build_player_detector
-    from .pipeline import _player_gate_polygon
+    from .pipeline import _player_gate_polygon, _player_gate_polygon_strict
     from .video import VideoSource
 
     cfg = _config_from_args(args)
@@ -345,21 +362,40 @@ def cmd_setup(args) -> int:
     player_detector = build_player_detector(cfg.players)
     gate = (_player_gate_polygon(fitted, cfg, image_size)
             if fitted is not None and cfg.players.court_gate else None)
+    # THE SECOND, TIGHTER GATE, which is what decides who the players are.
+    # See _player_gate_polygon_strict: the loose one runs to 1.6x the image
+    # height so a player at the camera is not lost, and that same generosity
+    # admits the queue at the fence.
+    strict_gate = (_player_gate_polygon_strict(fitted, cfg, image_size)
+                   if fitted is not None and cfg.players.court_gate else None)
+
+    def inside(polygon, d) -> bool:
+        return cv2.pointPolygonTest(polygon, (float(d.feet[0]), float(d.feet[1])), False) >= 0
 
     best = None
     for frame in frames:
         found = player_detector.detect(frame.image)
         kept = found
         if gate is not None:
-            kept = [d for d in found
-                    if cv2.pointPolygonTest(gate, (float(d.feet[0]), float(d.feet[1])), False) >= 0]
+            kept = [d for d in found if inside(gate, d)]
         # Counted, not just discarded.  "4 people found, 2 of them off court"
         # is the difference between the gate working and the detector failing,
         # and without the number the setup screen cannot tell the user which
         # one happened.
         dropped = len(found) - len(kept)
-        dets = sorted(kept, key=lambda d: -d.conf)[: cfg.players.max_players]
-        score = _frame_setup_score(dets, fitted)
+
+        on_court = [d for d in kept if inside(strict_gate, d)] if strict_gate is not None else kept
+        on_court_ids = {id(d) for d in on_court}
+        # ON THE COURT FIRST, CONFIDENCE SECOND.  This was confidence alone,
+        # and confidence is very nearly a measure of how close somebody is to
+        # the camera -- so on a clip where the rally is at the far end, two
+        # men standing at the near fence with drinks beat four players and
+        # took every slot.  Ordering this way still fills the remaining slots
+        # from the loose set, so a genuine player standing behind the baseline
+        # is not dropped; they simply queue behind the people on the paint.
+        dets = sorted(kept, key=lambda d: (id(d) not in on_court_ids, -d.conf))[: cfg.players.max_players]
+        chosen_on_court = [d for d in dets if id(d) in on_court_ids]
+        score = _frame_setup_score(dets, fitted, chosen_on_court)
         if best is None or score > best[0]:
             best = (score, frame, dets, dropped)
 

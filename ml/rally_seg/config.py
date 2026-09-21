@@ -117,6 +117,13 @@ class PlayerDetectorConfig:
     #: behind the fence, the neighbours' game.  Tested on the feet.
     court_gate: bool = True
     court_margin_frac: float = 0.15
+    #: The margin used when DECIDING who the players are, rather than when
+    #: following them.  Much tighter than ``court_margin_frac`` on purpose: the
+    #: loose gate runs to 1.6x the image height so a player at the camera is
+    #: not lost, which also admits everyone standing behind the court.  This
+    #: one is the painted quad plus a fourteenth of it, which is standing room
+    #: behind a baseline for a serve and not much else.
+    court_margin_strict_frac: float = 0.07
 
 
 @dataclass
