@@ -17,7 +17,7 @@ import {
 import { LOCAL_BUCKET, R2_BUCKET, debugVideoDir, debugVideoKey, debugVideoObjectKey } from "@/lib/vision/debug-video-store";
 import { isLocalDev } from "@/lib/deployment";
 import type { AnalysisProgress, AnalysisStage } from "@/lib/db/types";
-import { CoachingPipelineError, runCoachingPipeline } from "@/lib/coaching/run-coaching";
+import { CoachingPipelineError, coachingProgress, runCoachingPipeline } from "@/lib/coaching/run-coaching";
 import { startHeartbeat } from "./heartbeat";
 import { withRunSignal } from "./run-registry";
 
@@ -276,11 +276,29 @@ export async function runPipelineV2(
     if (result.selfPlayerId) {
       try {
         await runCoachingPipeline(supabase, userId, analysisId);
+        await coachingProgress(supabase, analysisId, "Coaching read finished.", { done: true });
       } catch (err) {
         const why = err instanceof CoachingPipelineError
           ? err.message
           : describeError(err);
         console.warn(`[pipeline-v2] coaching read skipped for ${analysisId}: ${why}`);
+        /*
+         * RECORDED, NOT JUST LOGGED.
+         *
+         * This branch only wrote to the container's stdout, so a coaching pass
+         * that failed left an analysis marked "completed" with every panel on
+         * it empty and nothing anywhere saying why -- which reads as the
+         * product being broken rather than one step of it having failed. The
+         * reason was in Fly's logs, where the person looking at the blank page
+         * cannot get at it.
+         *
+         * The manual re-run path has always recorded this, in
+         * kickOffCoachingPipeline, into exactly this field: progress.error
+         * exists because "a failed background run is indistinguishable from a
+         * slow one". The automatic run simply never used it. Same slot, same
+         * shape, so the page needs one renderer rather than two.
+         */
+        await coachingProgress(supabase, analysisId, "Coaching read failed.", { error: why });
       }
     }
   } catch (err) {

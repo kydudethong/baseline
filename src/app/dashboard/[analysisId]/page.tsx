@@ -36,6 +36,7 @@ import { BlueprintPanel } from "@/components/dashboard/BlueprintPanel";
 import { PracticeSessionPanel } from "@/components/dashboard/PracticeSessionPanel";
 import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel";
 import { PartnershipPanel } from "@/components/dashboard/PartnershipPanel";
+import { CoachingFailureNote } from "@/components/dashboard/CoachingFailureNote";
 import { ShotsPanel } from "@/components/dashboard/ShotsPanel";
 import { AnalysisWorkspace } from "@/components/analysis/AnalysisWorkspace";
 import { EmptyState } from "@/components/analysis/EmptyState";
@@ -269,6 +270,21 @@ async function AnalysisBreakdown({
    */
   const needsTagging = selfLabels.length === 0;
 
+  /*
+   * WHY THIS PAGE IS EMPTY, when it is empty.
+   *
+   * The coaching read is attempted after the analysis is already marked
+   * completed, so that a failing read cannot turn a good CV run into a failed
+   * one. The cost of that was a page marked Completed with nothing on it and
+   * no way to tell "this clip had no rallies" from "the read never ran".
+   *
+   * Only shown when there is no read to show. A failure recorded on a run that
+   * later succeeded is history, not news.
+   */
+  const coachingFailure = !hasRead
+    ? ((analysis.progress as { error?: string } | null)?.error ?? null)
+    : null;
+
   const tagSection = (
     <TagSection
       supabase={supabase}
@@ -285,6 +301,10 @@ async function AnalysisBreakdown({
 
   return (
     <div className="stack g6">
+      {coachingFailure ? (
+        <CoachingFailureNote analysisId={analysis.id} reason={coachingFailure} />
+      ) : null}
+
       {needsTagging ? (
         <div className="stack g4">
           <div className="stepbar">
