@@ -5,7 +5,7 @@ import { listAnalysisSummariesForUser, listAnalysesForUser } from "@/lib/db/anal
 import { getSignedDownloadUrl } from "@/lib/storage/r2";
 import { getRankedWeaknesses, getSkillProfiles, overallRating } from "@/lib/coaching/stats";
 import { quotaForUser } from "@/lib/db/quota";
-import { entitlementFor, priceLabels, stripeConfigured } from "@/lib/billing/stripe";
+import { entitlementFor, planPriceLabel, stripeConfigured } from "@/lib/billing/stripe";
 import { BillingButton } from "@/components/billing/BillingButton";
 import { getProfile } from "@/lib/db/profiles";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
@@ -60,7 +60,7 @@ export default async function HomePage({
   const { entitlement } = await entitlementFor(user.id, user.email, { fresh: justPaid });
   const quota = await quotaForUser(supabase, user.id, user.email, "", null, entitlement);
   const billing = stripeConfigured() && !quota.unlimited
-    ? { plan: quota.plan, prices: await priceLabels() }
+    ? { plan: quota.plan, planPrice: await planPriceLabel() }
     : null;
 
   if (analyses.length === 0) {
@@ -110,7 +110,7 @@ export default async function HomePage({
               {billing ? (
                 <>
                   {" "}
-                  <BillingButton plan={billing.plan} planPrice={billing.prices?.plan ?? null} />
+                  <BillingButton plan={billing.plan} planPrice={billing.planPrice} />
                 </>
               ) : null}
             </>

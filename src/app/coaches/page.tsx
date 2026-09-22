@@ -4,6 +4,7 @@ import { SiteNav } from "@/components/marketing/SiteNav";
 import { SiteFooter } from "@/components/marketing/SiteFooter";
 import { Photo } from "@/components/marketing/Photo";
 import { marketingAuth } from "@/components/marketing/auth";
+import { MINUTES_PER_MONTH } from "@/lib/db/quota";
 
 export const metadata: Metadata = {
   title: "For coaches — Baseline",
@@ -85,7 +86,7 @@ export default async function CoachesPage() {
         <div className="mk-wrap">
           <div className="mk-band">
             <h2 className="mk-h2" style={{ color: "#fff" }}>Try it on your next lesson.</h2>
-            <p>Film one game from behind the baseline. The first one each month is free.</p>
+            <p>Film from behind the baseline. The first {MINUTES_PER_MONTH} minutes each month are free.</p>
             <Link href={startHref} className="btn btn-optic">Analyze a game free</Link>
           </div>
         </div>

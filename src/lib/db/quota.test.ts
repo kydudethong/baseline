@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   quotaFor, monthStart, monthEnd, isUnlimited,
-  MINUTES_PER_MONTH, PRO_MINUTES_PER_MONTH, GAME_MAX_MINUTES,
+  MINUTES_PER_MONTH, PRO_MINUTES_PER_MONTH,
 } from "./quota";
 
 /** A clip of `m` minutes, already analysed this month. */
@@ -20,18 +20,18 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
   }
 }
 
-test("twenty-five minutes a month free, counted in minutes rather than clips", () => {
+test("ten minutes a month free, counted in minutes rather than clips", () => {
   // MINUTES BECAUSE MINUTES ARE WHAT COST MONEY. Three games meant twelve
   // minutes for one user and ninety for another on the same allowance, and
   // the bill followed the minutes either way.
   withEnv(NO_ENV, () => {
     const q = quotaFor({
-      startedThisMonth: [run("a", 15), run("b", 8)],
-      analysisId: "c", minutes: 5, email: "x@y.com",
+      startedThisMonth: [run("a", 6), run("b", 3)],
+      analysisId: "c", minutes: 2, email: "x@y.com",
     });
-    assert.equal(q.usedMinutes, 23);
-    assert.equal(q.remainingMinutes, 2);
-    assert.equal(q.allowed, false, "a 5 minute clip does not fit in 2 minutes");
+    assert.equal(q.usedMinutes, 9);
+    assert.equal(q.remainingMinutes, 1);
+    assert.equal(q.allowed, false, "a 2 minute clip does not fit in 1 minute");
   });
 });
 
@@ -40,7 +40,7 @@ test("a clip that fits exactly is allowed", () => {
   // would make the number on the page a lie.
   withEnv(NO_ENV, () => {
     const q = quotaFor({
-      startedThisMonth: [run("a", 15)], analysisId: "b", minutes: 10, email: "x@y.com",
+      startedThisMonth: [run("a", 6)], analysisId: "b", minutes: 4, email: "x@y.com",
     });
     assert.equal(q.allowed, true);
   });
@@ -63,17 +63,17 @@ test("re-analysing a clip costs nothing, even with no minutes left", () => {
 test("the same clip started three times is counted once", () => {
   withEnv(NO_ENV, () => {
     const q = quotaFor({
-      startedThisMonth: [run("a", 12), run("a", 12), run("a", 12)],
+      startedThisMonth: [run("a", 4), run("a", 4), run("a", 4)],
       analysisId: "b", minutes: 5, email: "x@y.com",
     });
-    assert.equal(q.usedMinutes, 12);
+    assert.equal(q.usedMinutes, 4);
     assert.equal(q.allowed, true);
   });
 });
 
 test("a clip longer than the whole allowance says so, rather than saying wait", () => {
   // Two different problems. Being out of minutes is fixed by waiting for the
-  // 1st; a 45-minute clip against a 30-minute allowance is never fixed by
+  // 1st; a 45-minute clip against a 10-minute allowance is never fixed by
   // waiting, and telling somebody to come back next month when next month
   // cannot help is worse than saying nothing.
   withEnv(NO_ENV, () => {
@@ -82,7 +82,7 @@ test("a clip longer than the whole allowance says so, rather than saying wait", 
     assert.equal(q.clipExceedsWholeAllowance, true);
   });
   withEnv(NO_ENV, () => {
-    const q = quotaFor({ startedThisMonth: [run("a", 28)], analysisId: "b", minutes: 5, email: "x@y.com" });
+    const q = quotaFor({ startedThisMonth: [run("a", 8)], analysisId: "b", minutes: 5, email: "x@y.com" });
     assert.equal(q.allowed, false);
     assert.equal(q.clipExceedsWholeAllowance, false, "this one IS fixed by waiting");
   });
@@ -93,7 +93,7 @@ test("a duration we never recorded is let through, not charged or refused", () =
   // cannot see punishes them for it; the exploit needs a deliberately broken
   // upload, which is a worse trade than the occasional free clip.
   withEnv(NO_ENV, () => {
-    const q = quotaFor({ startedThisMonth: [run("a", 29)], analysisId: "b", minutes: null, email: "x@y.com" });
+    const q = quotaFor({ startedThisMonth: [run("a", 9)], analysisId: "b", minutes: null, email: "x@y.com" });
     assert.equal(q.allowed, true);
   });
 });
@@ -150,15 +150,16 @@ test("the window is a calendar month in UTC", () => {
 // Plans. What somebody has paid for, as Stripe reports it.
 // ---------------------------------------------------------------------------
 
-const PRO = { plan: "pro" as const, paidAnalysisIds: [] };
+const PRO = { plan: "pro" as const };
 
-test("the free allowance is about one real game and not two", () => {
-  // Ky's own games run 16-19 minutes. One fits; a second does not.
+test("the free allowance is a stretch of a game, not a whole one", () => {
+  // Ky's own games run 16-19 minutes. Ten free minutes is a taste: a whole
+  // game is refused as too long for the plan (not "wait until next month").
   withEnv(NO_ENV, () => {
-    assert.equal(quotaFor({ startedThisMonth: [], analysisId: "a", minutes: 19, email: "x@y.com" }).allowed, true);
-    assert.equal(quotaFor({
-      startedThisMonth: [run("a", 19)], analysisId: "b", minutes: 16, email: "x@y.com",
-    }).allowed, false);
+    assert.equal(quotaFor({ startedThisMonth: [], analysisId: "a", minutes: 10, email: "x@y.com" }).allowed, true);
+    const game = quotaFor({ startedThisMonth: [], analysisId: "a", minutes: 16, email: "x@y.com" });
+    assert.equal(game.allowed, false);
+    assert.equal(game.clipExceedsWholeAllowance, true);
   });
 });
 
@@ -183,59 +184,12 @@ test("the paid plan is not unlimited", () => {
   });
 });
 
-test("a game bought on its own is allowed with no minutes left", () => {
+test("a whole game fits on the paid plan even with free minutes used", () => {
   withEnv(NO_ENV, () => {
     const q = quotaFor({
-      startedThisMonth: [run("a", 25)], analysisId: "b", minutes: 20, email: "x@y.com",
-      entitlement: { plan: "free", paidAnalysisIds: ["b"] },
+      startedThisMonth: [run("a", 10)], analysisId: "b", minutes: 19, email: "x@y.com", entitlement: PRO,
     });
     assert.equal(q.allowed, true);
-  });
-});
-
-test("a bought game is not ALSO taken out of the monthly allowance", () => {
-  // Charged once in money; charging it again in minutes would take somebody's
-  // free game away for having paid for a different one.
-  withEnv(NO_ENV, () => {
-    const q = quotaFor({
-      startedThisMonth: [run("bought", 20)], analysisId: "next", minutes: 18, email: "x@y.com",
-      entitlement: { plan: "free", paidAnalysisIds: ["bought"] },
-    });
-    assert.equal(q.usedMinutes, 0);
-    assert.equal(q.allowed, true, "their free game is still there");
-  });
-});
-
-test("buying one game unlocks THAT game and no other", () => {
-  withEnv(NO_ENV, () => {
-    const q = quotaFor({
-      startedThisMonth: [run("a", 25), run("b", 20)], analysisId: "c", minutes: 20, email: "x@y.com",
-      entitlement: { plan: "free", paidAnalysisIds: ["b"] },
-    });
-    assert.equal(q.allowed, false);
-  });
-});
-
-test("a re-run of a bought game is still free", () => {
-  withEnv(NO_ENV, () => {
-    const q = quotaFor({
-      startedThisMonth: [run("a", 25), run("b", 20)], analysisId: "b", minutes: 20, email: "x@y.com",
-      entitlement: { plan: "free", paidAnalysisIds: ["b"] },
-    });
-    assert.equal(q.allowed, true);
-  });
-});
-
-test("a single game can only be bought for a clip one game long", () => {
-  // One price, one game. Without a ceiling the same $3.99 buys a ninety-minute
-  // session that costs six dollars to read.
-  withEnv(NO_ENV, () => {
-    const ok = quotaFor({ startedThisMonth: [run("a", 25)], analysisId: "b", minutes: GAME_MAX_MINUTES, email: "x@y.com" });
-    assert.equal(ok.canBuyGame, true);
-    const long = quotaFor({ startedThisMonth: [run("a", 25)], analysisId: "b", minutes: GAME_MAX_MINUTES + 1, email: "x@y.com" });
-    assert.equal(long.canBuyGame, false);
-    const unknown = quotaFor({ startedThisMonth: [], analysisId: "b", minutes: null, email: "x@y.com" });
-    assert.equal(unknown.canBuyGame, false, "an unknown length cannot be priced");
   });
 });
 

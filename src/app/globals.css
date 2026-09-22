@@ -1772,3 +1772,7 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .mk-footer-links a,.mk-footer a{color:var(--ink-2)}
 /* An empty photo slot: a quiet court-coloured panel rather than a broken image. */
 .mk-photo-empty{background:linear-gradient(135deg,#15803D 0%,#16A34A 45%,#2563EB 100%);opacity:.9}
+
+/* Two plans, centred rather than stretched across three columns. */
+.mk-prices.two{grid-template-columns:repeat(2,minmax(0,380px));justify-content:center}
+@media (max-width:900px){.mk-prices.two{grid-template-columns:1fr}}

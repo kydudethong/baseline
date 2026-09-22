@@ -16,12 +16,10 @@
 import Stripe from "stripe";
 import type { Entitlement } from "@/lib/db/quota";
 import { FREE_ENTITLEMENT } from "@/lib/db/quota";
-import { entitlementFrom, GAME_KIND } from "./entitlement";
+import { entitlementFrom } from "./entitlement";
 
 export function stripeConfigured(): boolean {
-  return Boolean(
-    process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PRICE_PLAN && process.env.STRIPE_PRICE_GAME
-  );
+  return Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PRICE_PLAN);
 }
 
 let client: Stripe | null = null;
@@ -80,14 +78,8 @@ export async function entitlementFor(
       cache.set(userId, { at: Date.now(), value: FREE_ENTITLEMENT });
       return { entitlement: FREE_ENTITLEMENT, unknown: false };
     }
-    const [subs, sessions] = await Promise.all([
-      stripe().subscriptions.list({ customer: customer.id, status: "all", limit: 20 }),
-      stripe().checkout.sessions.list({ customer: customer.id, limit: 100 }),
-    ]);
-    const value = entitlementFrom(
-      subs.data.map((s) => ({ status: s.status })),
-      sessions.data.map((s) => ({ mode: s.mode, payment_status: s.payment_status, metadata: s.metadata }))
-    );
+    const subs = await stripe().subscriptions.list({ customer: customer.id, status: "all", limit: 20 });
+    const value = entitlementFrom(subs.data.map((s) => ({ status: s.status })));
     cache.set(userId, { at: Date.now(), value });
     return { entitlement: value, unknown: false };
   } catch (err) {
@@ -116,25 +108,6 @@ export async function planCheckoutUrl(opts: {
   return session.url!;
 }
 
-export async function gameCheckoutUrl(opts: {
-  userId: string; email: string; siteUrl: string; analysisId: string;
-}): Promise<string> {
-  const customer = await getOrCreateCustomer(opts.userId, opts.email);
-  const session = await stripe().checkout.sessions.create({
-    mode: "payment",
-    customer,
-    line_items: [{ price: process.env.STRIPE_PRICE_GAME!, quantity: 1 }],
-    // THE GAME IT BUYS IS WRITTEN ON THE PAYMENT, and that is the whole
-    // record. entitlementFrom reads it back; nothing else has to remember.
-    metadata: { kind: GAME_KIND, analysis_id: opts.analysisId, user_id: opts.userId },
-    // Back to setup, where the court and the tag are already saved: one more
-    // press of Analyse and it runs.
-    success_url: `${opts.siteUrl}/dashboard/${opts.analysisId}/setup?paid=1`,
-    cancel_url: `${opts.siteUrl}/dashboard/${opts.analysisId}/setup`,
-  });
-  return session.url!;
-}
-
 export async function portalUrl(opts: { userId: string; email: string; siteUrl: string }): Promise<string> {
   const customer = await getOrCreateCustomer(opts.userId, opts.email);
   const session = await stripe().billingPortal.sessions.create({
@@ -145,26 +118,22 @@ export async function portalUrl(opts: { userId: string; email: string; siteUrl: 
 }
 
 /**
- * The prices as Stripe has them, for the buttons.
+ * The plan's price as Stripe has it, for the buttons.
  *
  * Read from Stripe rather than written into the page, because a price
  * changed in the dashboard and not here would show one number on the button
  * and charge another.
  */
-let priceCache: { at: number; plan: string; game: string } | null = null;
-export async function priceLabels(): Promise<{ plan: string; game: string } | null> {
+let priceCache: { at: number; plan: string } | null = null;
+export async function planPriceLabel(): Promise<string | null> {
   if (!stripeConfigured()) return null;
-  if (priceCache && Date.now() - priceCache.at < 10 * 60_000) return priceCache;
+  if (priceCache && Date.now() - priceCache.at < 10 * 60_000) return priceCache.plan;
   try {
-    const [plan, game] = await Promise.all([
-      stripe().prices.retrieve(process.env.STRIPE_PRICE_PLAN!),
-      stripe().prices.retrieve(process.env.STRIPE_PRICE_GAME!),
-    ]);
-    const fmt = (p: Stripe.Price) =>
-      new Intl.NumberFormat("en-US", { style: "currency", currency: p.currency.toUpperCase() })
-        .format((p.unit_amount ?? 0) / 100);
-    priceCache = { at: Date.now(), plan: fmt(plan), game: fmt(game) };
-    return priceCache;
+    const p = await stripe().prices.retrieve(process.env.STRIPE_PRICE_PLAN!);
+    const plan = new Intl.NumberFormat("en-US", { style: "currency", currency: p.currency.toUpperCase() })
+      .format((p.unit_amount ?? 0) / 100);
+    priceCache = { at: Date.now(), plan };
+    return plan;
   } catch {
     return null;
   }

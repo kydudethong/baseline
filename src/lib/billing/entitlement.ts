@@ -2,8 +2,8 @@
  * What somebody has paid for, derived from Stripe's own records.
  *
  * Pure, and separate from stripe.ts, so the rule can be tested without a
- * network: which subscription states count as paying, and which checkout
- * sessions unlock which game.
+ * network. One plan, so the only question is which subscription states count
+ * as paying.
  */
 import type { Entitlement } from "@/lib/db/quota";
 
@@ -21,30 +21,10 @@ import type { Entitlement } from "@/lib/db/quota";
  */
 export const PAYING_STATUSES = new Set(["active", "trialing", "past_due"]);
 
-/** Tag on every one-off game checkout, so other one-off payments are never mistaken for one. */
-export const GAME_KIND = "game";
-
 export interface SubscriptionLike {
   status: string;
 }
 
-export interface CheckoutSessionLike {
-  mode: string | null;
-  payment_status: string | null;
-  metadata: Record<string, string> | null;
-}
-
-export function entitlementFrom(
-  subscriptions: readonly SubscriptionLike[],
-  sessions: readonly CheckoutSessionLike[]
-): Entitlement {
-  const plan = subscriptions.some((s) => PAYING_STATUSES.has(s.status)) ? "pro" : "free";
-  const paidAnalysisIds = sessions
-    // PAID, NOT MERELY COMPLETED. A session can complete with payment still
-    // pending (bank transfers), and unlocking the game then would be giving it
-    // away on a promise.
-    .filter((s) => s.mode === "payment" && s.payment_status === "paid")
-    .filter((s) => s.metadata?.kind === GAME_KIND && typeof s.metadata.analysis_id === "string")
-    .map((s) => s.metadata!.analysis_id);
-  return { plan, paidAnalysisIds: [...new Set(paidAnalysisIds)] };
+export function entitlementFrom(subscriptions: readonly SubscriptionLike[]): Entitlement {
+  return { plan: subscriptions.some((s) => PAYING_STATUSES.has(s.status)) ? "pro" : "free" };
 }

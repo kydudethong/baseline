@@ -44,13 +44,10 @@ export async function generateMetadata({
  */
 export default async function SetupPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ analysisId: string }>;
-  searchParams?: Promise<{ paid?: string }>;
 }) {
   const { analysisId } = await params;
-  const justPaid = (await searchParams)?.paid === "1";
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) notFound();
@@ -76,15 +73,6 @@ export default async function SetupPage({
     <div>
       <Link href={`/dashboard/${analysisId}`} className="crumb">← Back to analysis</Link>
 
-      {justPaid ? (
-        // Back from Stripe. The only thing left to do is the thing they paid
-        // for, so say that, rather than landing them on a page that looks
-        // exactly like the one that just refused them.
-        <div className="note" style={{ borderLeft: "4px solid var(--good)", marginTop: 18 }}>
-          <strong style={{ color: "var(--ink)" }}>Payment received.</strong>{" "}
-          Your court and your tag are still here — press <strong>Looks right — analyse</strong> to run it.
-        </div>
-      ) : null}
 
       <div className="stack g1" style={{ margin: "18px 0 20px" }}>
         <span className="eyebrow">Before analysing</span>

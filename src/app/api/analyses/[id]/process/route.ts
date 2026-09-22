@@ -3,7 +3,7 @@ import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { getAnalysisForUser } from "@/lib/db/analyses";
 import { getSetup, isCompleteSetup } from "@/lib/db/setup";
 import { quotaForUser } from "@/lib/db/quota";
-import { entitlementFor, forgetEntitlement, priceLabels, stripeConfigured } from "@/lib/billing/stripe";
+import { entitlementFor, forgetEntitlement, planPriceLabel, stripeConfigured } from "@/lib/billing/stripe";
 import { runPipeline } from "@/lib/analysis/pipeline";
 import { kickOffPipelineV2 } from "@/lib/analysis/pipeline-v2";
 import { livenessOf } from "@/lib/analysis/heartbeat";
@@ -66,7 +66,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   // cents a minute.
   const quota = await quotaForUser(
     supabase, user.id, user.email, id, clipMinutes,
-    unknown ? { plan: "pro", paidAnalysisIds: [] } : entitlement
+    unknown ? { plan: "pro" } : entitlement
   );
   if (!quota.allowed) {
     const mins = (n: number) => `${Math.round(n)} minute${Math.round(n) === 1 ? "" : "s"}`;
@@ -79,8 +79,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
         // the 1st when the 1st will not help is worse than saying nothing.
         error: quota.clipExceedsWholeAllowance
           ? `This clip is ${mins(clipMinutes ?? 0)} long and the whole monthly allowance is `
-            + `${mins(quota.limitMinutes)}. Trim it to a stretch you actually want read — `
-            + "the coaching is better on twenty minutes of real rallies than on an hour with the warm-up in it."
+            + `${mins(quota.limitMinutes)}. Trim it to the stretch you most want read `
+            + "(the Photos app does it in seconds), or go monthly to read whole games."
           : `You have ${mins(quota.remainingMinutes)} left this month and this clip is `
             + `${mins(clipMinutes ?? 0)}. Re-analysing a clip you have already run is always free. `
             + `Your ${mins(quota.limitMinutes)} reset on ${resets}.`,
@@ -92,18 +92,13 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
         },
         /*
          * THE WAY OUT, not only the wall. A limit with no route past it reads
-         * as the product being broken; the same limit with "analyse this one
-         * for $3.99" beside it reads as a product with a price. Offered only
-         * what actually applies: the single game when this clip is short
-         * enough to be one, the plan to anybody not already on it.
+         * as the product being broken; the same limit with the plan offered
+         * beside it reads as a product with a price. Only offered to somebody
+         * not already on the plan -- a subscriber who is out of minutes has
+         * nothing left to buy.
          */
-        upgrade: stripeConfigured()
-          ? {
-              analysisId: id,
-              canBuyGame: quota.canBuyGame,
-              canUpgradePlan: quota.plan === "free",
-              prices: await priceLabels(),
-            }
+        upgrade: stripeConfigured() && quota.plan === "free"
+          ? { planPrice: await planPriceLabel() }
           : null,
       },
       { status: 429 }

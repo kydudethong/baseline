@@ -7,13 +7,12 @@
  * Stripe call: CHANGE A PRICE IN STRIPE, CHANGE IT HERE. Inside the app the
  * buttons read the live price from Stripe and cannot drift.
  */
-import { GAME_MAX_MINUTES, MINUTES_PER_MONTH, PRO_MINUTES_PER_MONTH } from "@/lib/db/quota";
+import { MINUTES_PER_MONTH, PRO_MINUTES_PER_MONTH } from "@/lib/db/quota";
 
 export const PLAN_PRICE = "$20";
-export const GAME_PRICE = "$3.99";
 
 export interface PlanCard {
-  key: "free" | "game" | "pro";
+  key: "free" | "pro";
   name: string;
   price: string;
   per: string;
@@ -29,9 +28,9 @@ export const PLANS: PlanCard[] = [
     name: "Free",
     price: "$0",
     per: "every month",
-    summary: "See what a read is, on your own game.",
+    summary: "Try it on part of a game.",
     points: [
-      `${MINUTES_PER_MONTH} minutes a month — about one game`,
+      `${MINUTES_PER_MONTH} minutes a month — a stretch of one game`,
       "The full read: rallies, technique, what to fix first",
       "Drills matched to what it found",
       "Your partner read, if you tag your partner",
@@ -46,25 +45,12 @@ export const PLANS: PlanCard[] = [
     per: "a month",
     summary: "For people who play every week.",
     points: [
-      `${PRO_MINUTES_PER_MONTH} minutes a month — about six games`,
-      "Everything in Free, on every game",
+      `${PRO_MINUTES_PER_MONTH} minutes a month — about six full games`,
+      "Everything in Free, on whole games",
       "Enough games to see your progress week to week",
       "Cancel any time from your account",
     ],
     cta: "Get the monthly plan",
     featured: true,
-  },
-  {
-    key: "game",
-    name: "One game",
-    price: GAME_PRICE,
-    per: "per game",
-    summary: "Out of free minutes and just want this one read.",
-    points: [
-      `One game up to ${GAME_MAX_MINUTES} minutes`,
-      "Doesn't touch your monthly minutes",
-      "No subscription",
-    ],
-    cta: "Start free, buy a game when you need one",
   },
 ];

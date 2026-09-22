@@ -71,7 +71,7 @@ export default async function HomePage() {
           <div className="mk-band">
             <h2 className="mk-h2" style={{ color: "#fff" }}>Try it on your next game.</h2>
             <p>
-              One game a month is free. If you play every week, the monthly plan is {PLAN_PRICE} for
+              Your first {MINUTES_PER_MONTH} minutes each month are free. If you play every week, the monthly plan is {PLAN_PRICE} for
               {" "}{PRO_MINUTES_PER_MONTH} minutes — about six games.
             </p>
             <div className="mk-cta">

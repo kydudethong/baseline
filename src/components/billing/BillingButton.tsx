@@ -16,7 +16,6 @@ export function BillingButton({ plan, planPrice }: { plan: "free" | "pro"; planP
       const res = await fetch(plan === "pro" ? "/api/billing/portal" : "/api/billing/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: plan === "pro" ? undefined : JSON.stringify({ kind: "plan" }),
       });
       const j = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
       if (!res.ok || !j.url) throw new Error(j.error ?? "Could not open billing.");

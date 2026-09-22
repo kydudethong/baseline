@@ -4,16 +4,16 @@ import { SiteNav } from "@/components/marketing/SiteNav";
 import { SiteFooter } from "@/components/marketing/SiteFooter";
 import { Photo } from "@/components/marketing/Photo";
 import { marketingAuth } from "@/components/marketing/auth";
-import { PLANS, GAME_PRICE, PLAN_PRICE } from "@/lib/billing/plans";
-import { GAME_MAX_MINUTES, MINUTES_PER_MONTH, PRO_MINUTES_PER_MONTH } from "@/lib/db/quota";
+import { PLANS, PLAN_PRICE } from "@/lib/billing/plans";
+import { MINUTES_PER_MONTH, PRO_MINUTES_PER_MONTH } from "@/lib/db/quota";
 
 export const metadata: Metadata = {
   title: "Pricing — Baseline",
-  description: `One game a month free. ${PLAN_PRICE}/month for about six games, or ${GAME_PRICE} a game.`,
+  description: `${MINUTES_PER_MONTH} minutes a month free. ${PLAN_PRICE}/month for about six games.`,
 };
 
 /**
- * Three options, and the FAQ answers the questions a person has at the moment
+ * Two options, and the FAQ answers the questions a person has at the moment
  * of paying: what counts as a minute, what happens when I run out, can I
  * leave. Every allowance on this page comes from quota.ts -- the same
  * constants the run gate enforces -- so the page cannot promise a minute the
@@ -31,17 +31,17 @@ export default async function PricingPage() {
       <section className="mk-hero" style={{ paddingBottom: "var(--a6)" }}>
         <div className="mk-wrap stack g3" style={{ maxWidth: 760 }}>
           <span className="mk-kicker">Pricing</span>
-          <h1 className="mk-h1">Pay for the games you play.</h1>
+          <h1 className="mk-h1">One plan. Try it free first.</h1>
           <p className="mk-lead">
-            Priced by minutes of gameplay, because that&apos;s what a read costs to make. A short
-            game uses less; a long one uses more. Re-running a game you&apos;ve already analysed is
-            always free.
+            Start with {MINUTES_PER_MONTH} free minutes a month to see what a read finds. When you
+            want every game read, it&apos;s {PLAN_PRICE} a month. Re-running a game you&apos;ve already
+            analysed is always free.
           </p>
         </div>
       </section>
 
       <section style={{ paddingBottom: "var(--a8)" }}>
-        <div className="mk-wrap mk-prices">
+        <div className="mk-wrap mk-prices two">
           {PLANS.map((p) => (
             <div key={p.key} className={`mk-price${p.featured ? " featured" : ""}`}>
               {p.featured ? <span className="tag">Most players</span> : null}
@@ -76,21 +76,27 @@ export default async function PricingPage() {
                 <summary>What counts as a minute?</summary>
                 <p>
                   The length of the video you analyse. A 17-minute game uses 17 minutes. Trim the
-                  warm-up off before uploading and it costs less — and the read is better for it.
+                  warm-up off before uploading and it uses less — and the read is better for it.
+                </p>
+              </details>
+              <details>
+                <summary>Can I use the free minutes on a whole game?</summary>
+                <p>
+                  Only a short one. {MINUTES_PER_MONTH} minutes is a stretch of most games — trim your
+                  video to the part you most want read (your phone&apos;s Photos app can trim it) and
+                  upload that.
                 </p>
               </details>
               <details>
                 <summary>What happens when I run out?</summary>
                 <p>
-                  You can buy the game you&apos;re on for {GAME_PRICE} (games up to {GAME_MAX_MINUTES} minutes),
-                  or move to the monthly plan. Free minutes come back on the 1st of each month.
+                  Move to the monthly plan, or wait — free minutes come back on the 1st of each month.
                 </p>
               </details>
               <details>
                 <summary>How many games is {PRO_MINUTES_PER_MONTH} minutes?</summary>
                 <p>
-                  About six. Most recreational games are 12 to 20 minutes. The free {MINUTES_PER_MONTH} minutes
-                  cover about one.
+                  About six. Most recreational games are 12 to 20 minutes.
                 </p>
               </details>
               <details>
