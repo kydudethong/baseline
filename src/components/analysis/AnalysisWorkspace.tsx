@@ -366,8 +366,9 @@ function Overview({ view, observations }: { view: AnalysisView; observations: Co
   if (observations.length === 0) {
     return (
       <p className="sm">
-        No coaching read yet for this clip. Tag which player is you and Baseline
-        will write one.
+        {view.analysis.selfPlayerLabels.length > 0
+          ? "No coaching read was saved for this clip. The top of the page says why, and lets you run it again."
+          : "No coaching read yet for this clip. Tag which player is you and Baseline will write one."}
       </p>
     );
   }

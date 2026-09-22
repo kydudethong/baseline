@@ -522,6 +522,26 @@ What they mean:
   resetSeconds                how long they took to get back to their own ready
                               position. Absent means they had not by the next ball.
 
+The SWING ITSELF, from the hitting wrist, all in the player's shoulder widths:
+  backswingShoulders          how far the wrist got from the body in the wind-up.
+                              Big is a full take-back; small is a compact block
+                              or punch. Neither is wrong -- it is wrong for the
+                              shot: a big take-back on a dink or a block is the
+                              classic cause of a pop-up.
+  wristSpeedIntoContact       hand speed into the ball, shoulder widths/second.
+                              Compare shots of the same type: a drive slower
+                              than their own dinks is a decelerating swing.
+  followThroughShoulders      how far the wrist travelled AFTER contact. This IS
+                              the follow-through. Short on a drive or a drop
+                              means they stopped at the ball ("jabbing"); long
+                              on a dink or a reset means they swung through a
+                              shot that wanted a soft, short finish.
+  shoulderRotationDeg         how far the shoulders turned from wind-up to
+                              contact -- the body in the swing versus all arm.
+  contactHeightTorsos         wrist height at contact: 0 = shoulders, -1 = hips.
+  contactReachShoulders       how far from the body contact was. Large means
+                              reaching; they were late or out of position.
+
 The assistant did NOT decide which rally a contact belongs to, or what kind of
 shot it was, and the overlay does not show rallies or net crossings. Those are
 your judgments to make, and they are why you have the video.
@@ -670,14 +690,35 @@ guess which player is the subject's partner: on a doubles court that is a
 one-in-three choice, and a confident section about the wrong person is the
 worst outcome available here.
 `}
-- YOU CANNOT SEE THE PADDLE IN THIS PASS. You are watching at ${analystFps()}
-  frames per second, which is plenty to see where people are, who hit the ball
-  and when it changed direction -- and nowhere near enough to see a swing,
-  which lasts about a third of a second. A separate pass re-watches the
-  subject's own shots closely and writes the technique notes. So: describe
-  position, timing, shot type, patterns and decisions. Do NOT describe the
-  paddle's face, its path, spin, contact height or swing size. A claim about
-  those here is a claim about something you did not see.
+- TECHNIQUE COMES FROM THE MEASUREMENTS, AND IT IS YOUR JOB. You are
+  watching at ${analystFps()} frames per second, so you cannot see the PADDLE
+  itself -- a swing lasts about a third of a second -- so never describe the
+  paddle's face, its angle, its
+  path or spin. But you do not need to see it: the body measurements above
+  were taken from a pose model at every contact, and they describe the swing
+  exactly -- the take-back, the hand speed, the follow-through, the turn, the
+  contact point, the knees. Nobody else writes technique for this read; if
+  you leave it out, the player gets none.
+
+  So technique is at least a THIRD of your observations, whenever contacts
+  with body measurements exist. Cover, where the numbers support it:
+    follow-through      short and stopped at the ball, or swinging through a
+                        soft shot -- say which shot types, and the number.
+    swing size          take-back too big for dinks and blocks, or too small
+                        to drive with.
+    preparation         turn started late (rotationLeadSeconds), or all arm
+                        with no shoulder turn.
+    contact point       behind the lead foot, too low, reaching.
+    base and balance    straight legs at contact, narrow stance, drifting
+                        backwards through the ball.
+    ready position      paddle dropped between shots, slow to reset.
+  Each one names the SHOT TYPE it happens on and quotes the measurement --
+  "your follow-through on third-shot drops averaged 0.4 shoulder widths, about
+  half your dinks" beats "follow through more". Compare a player with
+  themselves across shot types; that is what the numbers are best at.
+
+  Where no body measurements exist for a shot, say nothing about its
+  mechanics rather than inventing them from the video.
 - WRITE IT THE WAY YOU WOULD SAY IT ON A COURT. No abbreviations the reader
   has to decode: say "the kitchen line", never "NVZ" or "the NVZ line"; say
   "the non-volley zone" only if you have already said kitchen. Same for any
@@ -1045,7 +1086,7 @@ export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[]
   for (const phrase of NOT_OUTSIDE_TECHNIQUE) {
     if (everything.includes(phrase)) {
       problems.push(
-        `The read mentions "${phrase}". This pass watches at 5 frames per second and low resolution — ` +
+        `The read mentions "${phrase}". This pass watches at ${analystFps()} frames per second and low resolution — ` +
           "enough to see where people are and when the ball changed direction, and nowhere near enough " +
           "to see a paddle. Take that part as a guess rather than something observed."
       );

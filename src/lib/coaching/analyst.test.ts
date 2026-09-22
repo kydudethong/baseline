@@ -588,3 +588,50 @@ test("but a claim that they DID talk is still caught", () => {
   out.partnership!.summary = "Their communication was excellent all match";
   assert.ok(auditAnalysis(out, withPartner()).some((p) => /no sound/.test(p)));
 });
+
+// ---------------------------------------------------------------------------
+// Technique. The read was thin on it because the prompt said a separate pass
+// wrote technique notes -- a pass that was never wired in -- and forbade
+// "contact height or swing size" while handing over measurements of both.
+// ---------------------------------------------------------------------------
+
+test("the prompt no longer hands technique to a pass that does not run", () => {
+  const p = analystPrompt(input(), "LEGEND", null, true);
+  assert.doesNotMatch(p, /separate pass re-watches/i,
+    "technique-pass.ts is not wired in; telling the model it is means nobody writes technique");
+  assert.match(p, /Nobody else writes technique/);
+});
+
+test("every swing measurement the model receives is defined for it", () => {
+  // A number with no definition is a number the model guesses the meaning of.
+  // These reach the model via COACHABLE_MECHANICS and were previously undefined.
+  const p = analystPrompt(input(), "LEGEND", null, true);
+  for (const field of [
+    "backswingShoulders", "wristSpeedIntoContact", "followThroughShoulders",
+    "shoulderRotationDeg", "contactHeightTorsos", "contactReachShoulders",
+  ]) {
+    assert.ok(p.includes(field), `${field} is sent to the model but never explained`);
+  }
+});
+
+test("follow-through is named as something to coach, with the number", () => {
+  const p = analystPrompt(input(), "LEGEND", null, true);
+  assert.match(p, /follow-through/i);
+  assert.match(p, /quotes the measurement/);
+});
+
+test("the paddle itself is still off limits — the measurements are of the body", () => {
+  // Loosening technique must not loosen this: at 10fps the paddle face, angle
+  // and spin are not visible, and the audit still flags them.
+  const p = analystPrompt(input(), "LEGEND", null, true);
+  assert.match(p, /never describe the\s+paddle.s face, its angle, its\s+path or spin/);
+  const out = structuredClone(clean);
+  out.coaching.summary = "Your paddle face was open on every drop.";
+  assert.ok(auditAnalysis(out, input()).some((pr) => /paddle face/.test(pr)));
+});
+
+test("technique talk about the follow-through is not mistaken for paddle talk", () => {
+  const out = structuredClone(clean);
+  out.coaching.summary = "Your follow-through on drives stopped at the ball — 0.4 shoulder widths.";
+  assert.deepEqual(auditAnalysis(out, input()), []);
+});

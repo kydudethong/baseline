@@ -442,9 +442,16 @@ async function AnalysisBreakdown({
           />
         </section>
       ) : (
+        /* WHICH empty this is. "Tag which player is you" was shown to people
+           who had already tagged themselves in setup, whose read had FAILED --
+           sending them to look for a step that no longer exists. */
         <EmptyState
-          title="Your coaching read goes here"
-          body="Tag which player is you above and Baseline will write it — strengths, the one fix that matters most, and a drill to start with."
+          title={needsTagging ? "Your coaching read goes here" : "The coaching read didn't run"}
+          body={needsTagging
+            ? "Tag which player is you above and Baseline will write it — strengths, the one fix that matters most, and a drill to start with."
+            : coachingFailure
+              ? "The reason is in the red box at the top of this page, with a button to try again."
+              : "You're tagged, but no read was saved for this clip. Use “Change who you are” at the top to run it again."}
         />
       )}
 
