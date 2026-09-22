@@ -294,6 +294,69 @@ const SAME_FINDING_OVERLAP = 0.4;
  * four paraphrases is a fifth paraphrase.
  */
 function dedupe(all: Observation[], onLog?: (line: string) => void): Observation[] {
+  return byWording(collapseFamilies(all, onLog), onLog);
+}
+
+/**
+ * ONE WEAKNESS PER KIND OF FAULT, whatever shot it happened on.
+ *
+ * THE CASE THIS IS FOR, reported from a real read: "straight-leg contact on
+ * return of serve", "straight-legged third shot drop", "straight-legged
+ * posture on low dinks", "straight-legged posture on low contact", "stiff-
+ * legged kitchen ready position". Five entries, one habit. The wording pass
+ * below could not touch them because each carried a DIFFERENT skill key --
+ * return, third shot, dinking, ready position -- and it only ever compares
+ * findings filed under the same skill, for the good reason that two findings
+ * about different parts of the game usually are two findings.
+ *
+ * The fault family cuts the other way: it says what KIND of thing is wrong,
+ * independently of where it showed up. Two weaknesses in one family are the
+ * same correction, so the costliest one is kept and the others become a line
+ * inside it naming where else it appeared -- which is more useful than four
+ * entries anyway, because "on your return, your drops AND your dinks" is the
+ * fact that makes a habit worth fixing.
+ *
+ * Strengths are left alone: "steady contact point" and "good ready position"
+ * being related is not a reason to print only one of them.
+ */
+function collapseFamilies(all: Observation[], onLog?: (line: string) => void): Observation[] {
+  const out: Observation[] = [];
+  const families = new Map<string, Observation[]>();
+  for (const o of all) {
+    const fam = o.valence === "weakness" ? (o.fault_family ?? null) : null;
+    if (!fam || fam === "other") { out.push(o); continue; }
+    const list = families.get(fam);
+    if (list) list.push(o);
+    else { families.set(fam, [o]); out.push(o); }   // keeps clip order
+  }
+  if (families.size === 0) return out;
+  let collapsed = 0;
+  const merged = new Map<Observation, Observation>();
+  for (const [fam, list] of families) {
+    if (list.length < 2) continue;
+    const ranked = [...list].sort((a, b) => (b.severity ?? 0) - (a.severity ?? 0));
+    const head = { ...ranked[0] };
+    const elsewhere = ranked.slice(1)
+      .map((o) => (o.title ?? "").trim())
+      .filter((t) => t && !(head.detail ?? "").toLowerCase().includes(t.toLowerCase()))
+      .slice(0, 3);
+    if (elsewhere.length > 0) {
+      head.detail = `${(head.detail ?? "").trim()} The same fault showed up elsewhere in the clip: `
+        + `${elsewhere.join("; ")}.`;
+    }
+    merged.set(ranked[0], head);
+    for (const o of ranked.slice(1)) merged.set(o, head);
+    collapsed += list.length - 1;
+    onLog?.(`analyst: ${list.length} weaknesses were all ${fam} — kept the costliest and folded the rest in`);
+  }
+  if (collapsed === 0) return out;
+  const seen = new Set<Observation>();
+  return out
+    .map((o) => merged.get(o) ?? o)
+    .filter((o) => (seen.has(o) ? false : (seen.add(o), true)));
+}
+
+function byWording(all: Observation[], onLog?: (line: string) => void): Observation[] {
   type Cluster = { obs: Observation; prints: Array<Set<string>> };
   const clusters: Cluster[] = [];
   for (const o of all) {

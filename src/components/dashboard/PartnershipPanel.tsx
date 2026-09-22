@@ -1,5 +1,6 @@
 import type { PartnershipRead } from "@/lib/coaching/analyst";
 import { PARTNERSHIP_DIMENSIONS } from "@/lib/coaching/analyst";
+import { clock } from "@/lib/format/duration";
 
 /**
  * How the pair works, rather than how each of them plays.
@@ -31,12 +32,6 @@ const DIMENSION_LABELS: Record<typeof PARTNERSHIP_DIMENSIONS[number], string> = 
 };
 
 /** Seconds as m:ss, because a coaching clip is something you scrub to. */
-function stamp(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
 /**
  * A timestamp, clickable when there is a player to drive.
  *
@@ -47,9 +42,9 @@ function stamp(seconds: number): string {
  */
 function At({ at, onSeek }: { at: number | null; onSeek?: (seconds: number) => void }) {
   if (at === null) return null;
-  if (!onSeek) return <span className="crumb">{stamp(at)}</span>;
+  if (!onSeek) return <span className="crumb">{clock(at)}</span>;
   return (
-    <button type="button" className="crumb" onClick={() => onSeek(at)}>{stamp(at)}</button>
+    <button type="button" className="crumb" onClick={() => onSeek(at)}>{clock(at)}</button>
   );
 }
 

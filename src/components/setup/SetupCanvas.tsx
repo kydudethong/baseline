@@ -41,6 +41,7 @@ import { courtSegments, type CourtLineRole } from "@/lib/vision/court-model";
 import { boxRect, imageScale, scaleBox, scalePoint, type BoxPx } from "@/lib/vision/image-space";
 import { type MatchMode } from "@/lib/db/setup";
 import { SetupExamples } from "./SetupExamples";
+import { clock } from "@/lib/format/duration";
 
 type Corner = { x: number; y: number };
 /**
@@ -632,7 +633,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       setOffCourt(json.frame?.playersOffCourt ?? 0);
       setGated(json.frame?.courtGated ?? null);
       const bits: string[] = [];
-      if (json.frame) bits.push(`Frame at ${json.frame.timestampSeconds.toFixed(1)}s.`);
+      if (json.frame) bits.push(`Frame at ${clock(json.frame.timestampSeconds)}.`);
       if (json.court) bits.push(`Court fitted (${(json.court.confidence * 100).toFixed(0)}% line support) — drag any corner to correct it.`);
       else if (json.courtReason) bits.push(`Court not fitted: ${json.courtReason}`);
       // THE PLAYER COUNT AS A CHECK ON THE COURT. Whether the people standing
@@ -1430,7 +1431,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
           style={{ flex: 1, minWidth: 160 }}
         />
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => seek(time + 1)}>1s →</button>
-        <span className="num sm" style={{ opacity: 0.7, minWidth: 54, textAlign: "right" }}>{time.toFixed(1)}s</span>
+        <span className="num sm" style={{ opacity: 0.7, minWidth: 54, textAlign: "right" }}>{clock(time)}</span>
       </div>
 
       {/* --- the verdict ----------------------------------------------- */}

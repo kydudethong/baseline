@@ -3,6 +3,7 @@
 import type { ViewRally, ViewShot } from "@/lib/db/analysis-view";
 import { ShotBadge, shotName } from "./ShotBadge";
 import { ConfidenceIndicator } from "./ConfidenceIndicator";
+import { clock } from "@/lib/format/duration";
 
 /**
  * A rally read top to bottom, the way somebody would describe it out loud:
@@ -41,7 +42,7 @@ export function ShotSequence({
             <button type="button" className="seq-btn" onClick={() => onSelectShot(s)}>
               <div className="row g1" style={{ justifyContent: "space-between", gap: 8 }}>
                 <span className="seq-name">{shotName(s.type)}</span>
-                <span className="seq-t">{s.t.toFixed(1)}s</span>
+                <span className="seq-t">{clock(s.t)}</span>
               </div>
               <div className="seq-meta">
                 {s.isSelf ? "You" : s.playerLabel ? "Opponent" : "Unattributed"}

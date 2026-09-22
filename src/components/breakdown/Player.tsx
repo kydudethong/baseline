@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Ball, PlayIcon } from "@/components/motifs/Motifs";
+import { clock, secs } from "@/lib/format/duration";
 
 export interface RallyMark {
   idx: number;
@@ -14,10 +15,7 @@ export interface RallyMark {
 }
 
 function mmss(seconds: number): string {
-  if (!Number.isFinite(seconds)) return "0:00";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
+  return Number.isFinite(seconds) ? clock(seconds) : "0:00";
 }
 
 const SPEEDS = [1, 1.5, 2, 0.5];
@@ -183,7 +181,7 @@ export default function Player({
                 left: `${(r.start_s / total) * 100}%`,
                 width: `${Math.max(0.7, ((r.end_s - r.start_s) / total) * 100)}%`,
               }}
-              title={`Rally ${r.idx} — ${(r.end_s - r.start_s).toFixed(1)}s, ${r.shots} contacts${r.note ? ` — ${r.note}` : ""}`}
+              title={`Rally ${r.idx} — ${secs(r.end_s - r.start_s, 1)}, ${r.shots} contacts${r.note ? ` — ${r.note}` : ""}`}
               aria-label={`Rally ${r.idx}`}
               onClick={(e) => { e.stopPropagation(); goToRally(i); }}
             />
@@ -224,7 +222,7 @@ export default function Player({
           <div className="rmeta">
             <div className="stack" style={{ gap: 2 }}>
               <span className="k">Length</span>
-              <span className="v">{(rally.end_s - rally.start_s).toFixed(1)}s</span>
+              <span className="v">{secs(rally.end_s - rally.start_s, 1)}</span>
             </div>
             <div className="stack" style={{ gap: 2 }}>
               <span className="k">Contacts</span><span className="v">{rally.shots}</span>

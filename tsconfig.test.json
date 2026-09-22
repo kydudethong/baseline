@@ -22,6 +22,7 @@
     "src/lib/practice/**/*.ts",
     "src/lib/billing/**/*.ts",
     "src/lib/notify/**/*.ts",
+    "src/lib/format/**/*.ts",
     "src/components/analysis/DrillCards.tsx"
   ]
 }

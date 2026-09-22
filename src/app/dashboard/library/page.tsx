@@ -6,6 +6,7 @@ import { listAnalysesForUser, type AnalysisWithVideo } from "@/lib/db/analyses";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { PlayIcon } from "@/components/motifs/Motifs";
 import { LibraryCardMenu } from "@/components/dashboard/LibraryCardMenu";
+import { clock } from "@/lib/format/duration";
 
 export const metadata: Metadata = { title: "Library — Baseline" };
 export const dynamic = "force-dynamic";
@@ -29,9 +30,7 @@ async function withVideoUrls(
 
 function formatDuration(seconds: number | null | undefined): string | null {
   if (!seconds || seconds <= 0) return null;
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
+  return clock(seconds);
 }
 
 export default async function LibraryPage({

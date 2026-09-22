@@ -47,6 +47,7 @@ import { getAnalysisView, type ViewRally } from "@/lib/db/analysis-view";
 import { getAllDrills } from "@/lib/coaching/drills";
 import { topPriorityObservation } from "@/lib/coaching/ranking";
 import type { AnalysisFrameRow, PlayerTrackRow } from "@/lib/db/types";
+import { clock, secs } from "@/lib/format/duration";
 
 export const dynamic = "force-dynamic";
 
@@ -840,7 +841,7 @@ function totalContacts(rallies: ViewRally[]): number {
 function longestRally(rallies: ViewRally[]): string {
   if (rallies.length === 0) return "—";
   const longest = Math.max(...rallies.map((r) => r.endS - r.startS));
-  return `${longest.toFixed(1)}s`;
+  return secs(longest, 1);
 }
 
 function median(values: number[]): number {
@@ -851,9 +852,7 @@ function median(values: number[]): number {
 }
 
 function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
+  return clock(seconds);
 }
 
 

@@ -1,4 +1,5 @@
 import type { AnalysisView } from "@/lib/db/analysis-view";
+import { secs } from "@/lib/format/duration";
 
 /**
  * The four numbers worth putting at the top of an analysis, as gradient tiles
@@ -52,8 +53,8 @@ export function buildTiles(view: AnalysisView): Tile[] {
       label: `${view.rallies.length} rall${view.rallies.length === 1 ? "y" : "ies"}`,
       value: String(view.rallies.length),
       caption: clip && clip > 0
-        ? `${Math.round(liveS)}s of play in a ${Math.round(clip)}s clip`
-        : `${Math.round(liveS)}s of play`,
+        ? `${secs(liveS)} of play in a ${secs(clip)} clip`
+        : `${secs(liveS)} of play`,
       ratio: clip && clip > 0 ? Math.min(1, liveS / clip) : null,
       ratioLabel: clip && clip > 0 ? "of the clip was live play" : null,
     });

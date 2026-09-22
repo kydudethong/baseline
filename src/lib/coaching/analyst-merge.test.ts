@@ -271,3 +271,46 @@ test("two real findings that happen to share words are not merged", () => {
   assert.equal(out.observations.length, 2,
     "two separate corrections were collapsed into one — the threshold is too loose");
 });
+
+test("five straight-leg findings filed under five skills become one", () => {
+  // REPORTED FROM A REAL READ, verbatim titles. Each carried a different skill
+  // key, so the wording pass could never touch them: it only compares findings
+  // within one skill. The family is what says these are one correction.
+  const titles = [
+    "Straight-leg contact on return of serve",
+    "Straight-Legged Third Shot Drop",
+    "Straight-Legged Posture on Low Dink Contacts",
+    "Straight-Legged Posture on Low Contact",
+    "Stiff-Legged Kitchen Ready Position",
+  ];
+  const skills = ["return", "third_shot", "dinking", "net_play", "ready_position"];
+  const parts = [base({ observations: titles.map((title, i) => obs({
+    title, skill_key: skills[i], fault_family: "posture_and_base",
+    severity: i === 1 ? 5 : 3, detail: `${title} detail`,
+  })) })];
+  const out = mergeAnalystOutputs(parts);
+  assert.equal(out.observations.length, 1, out.observations.map((o) => o.title).join(" | "));
+  assert.equal(out.observations[0].title, "Straight-Legged Third Shot Drop", "the costliest one leads");
+  // And the others are not simply lost: where else it happened is the useful part.
+  assert.match(out.observations[0].detail, /same fault showed up elsewhere/i);
+  assert.match(out.observations[0].detail, /return of serve/i);
+});
+
+test("different families stay, even when they share a skill", () => {
+  const parts = [base({ observations: [
+    obs({ title: "Straight legs on low dinks", skill_key: "dinking", fault_family: "posture_and_base" }),
+    obs({ title: "Driving balls that should be reset", skill_key: "dinking", fault_family: "shot_selection" }),
+    obs({ title: "Standing a metre off the kitchen line", skill_key: "dinking", fault_family: "court_position" }),
+  ] })];
+  const out = mergeAnalystOutputs(parts);
+  assert.equal(out.observations.length, 3);
+});
+
+test("strengths in one family are not collapsed into each other", () => {
+  // Two good things about the same part of the game are two good things.
+  const parts = [base({ observations: [
+    obs({ title: "Balanced at contact on drives", valence: "strength", skill_key: "drives", fault_family: "posture_and_base" }),
+    obs({ title: "Low and steady through dink exchanges", valence: "strength", skill_key: "dinking", fault_family: "posture_and_base" }),
+  ] })];
+  assert.equal(mergeAnalystOutputs(parts).observations.length, 2);
+});

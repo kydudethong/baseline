@@ -19,6 +19,7 @@ import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { EmptyState } from "./EmptyState";
 import { StatTiles } from "./StatTiles";
 import { shotName } from "./ShotBadge";
+import { clock, secs } from "@/lib/format/duration";
 
 /**
  * One workspace instead of six tabs.
@@ -279,7 +280,7 @@ export function AnalysisWorkspace({
                   <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
                     <h3 className="h3" style={{ margin: 0 }}>Rally {rally.idx}</h3>
                     <span className="xs num">
-                      {rally.startS.toFixed(1)}s – {rally.endS.toFixed(1)}s
+                      {clock(rally.startS)} – {clock(rally.endS)}
                     </span>
                   </div>
                   <RallyFacts rally={rally} />
@@ -433,7 +434,7 @@ function RallyFacts({ rally }: { rally: ViewRally }) {
   bits.push(`${rally.contactCount} contact${rally.contactCount === 1 ? "" : "s"}`);
   if (rally.extendedSeconds > 0) {
     // Worth saying out loud: this rally would have been cut short before.
-    bits.push(`held open ${rally.extendedSeconds.toFixed(1)}s through continued back-and-forth`);
+    bits.push(`held open ${secs(rally.extendedSeconds, 1)} through continued back-and-forth`);
   }
   return (
     <div className="stack" style={{ gap: 4 }}>
@@ -464,7 +465,7 @@ function ShotDetail({ shot }: { shot: ViewShot }) {
     <section className="card stack g3">
       <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
         <h3 className="h3" style={{ margin: 0 }}>
-          {shotName(shot.type)} <span className="xs num">at {shot.t.toFixed(1)}s</span>
+          {shotName(shot.type)} <span className="xs num">at {clock(shot.t)}</span>
         </h3>
         <ConfidenceIndicator value={shot.confidence} label="Classification" />
       </div>

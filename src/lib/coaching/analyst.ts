@@ -226,6 +226,8 @@ export interface AnalystOutput {
   };
   observations: Array<{
     rally_idx: number | null;
+    /** Which kind of fault this is, so one habit cannot fill a whole read. */
+    fault_family?: FaultFamily | null;
     shot_t: number | null;
     skill_key: string;
     coaching_dimension: CoachingDimension;
@@ -246,6 +248,38 @@ export interface AnalystOutput {
   partnership?: PartnershipRead | null;
   data_gaps: string | null;
 }
+
+/**
+ * The KINDS of thing that can be wrong, as distinct from which shot it
+ * happened on.
+ *
+ * WHY THIS EXISTS. A read came back with five weaknesses: straight-leg contact
+ * on the return, straight-legged third-shot drop, straight-legged posture on
+ * low dinks, straight-legged posture on low contact, and a stiff-legged
+ * kitchen ready position. That is one habit written five times, and because
+ * each one was tagged with a different SKILL -- return, third shot, dinking,
+ * ready position -- nothing downstream could tell they were the same thing.
+ * The player reads it as the system having exactly one thing to say.
+ *
+ * So every observation names its family, the model is held to one weakness per
+ * family, and the merge collapses any that slip through no matter which skill
+ * they were filed under. The families are the answer to "what is wrong", where
+ * skills answer "in which part of the game".
+ */
+export const FAULT_FAMILIES = [
+  "posture_and_base",        // knees, hips, height at contact, stance width
+  "contact_point",           // in front or late, high or low, reaching
+  "swing_and_follow_through",// take-back size, swinging through or stopping
+  "preparation_and_reset",   // paddle up, early turn, back to ready
+  "footwork_and_recovery",   // split step, moving the feet, recovering
+  "court_position",          // kitchen line, transition zone, standing back
+  "shot_selection",          // the wrong ball for the situation
+  "ball_quality",            // depth, height over the net, placement
+  "defense_under_pressure",  // blocks, resets, handling speed-ups
+  "partner_and_middle",      // spacing, the middle, moving as a pair
+  "other",
+] as const;
+export type FaultFamily = (typeof FAULT_FAMILIES)[number];
 
 export function analystSchema(): Record<string, unknown> {
   const num = { type: "number" };
@@ -341,12 +375,13 @@ export function analystSchema(): Record<string, unknown> {
             skill_key: { type: "string", enum: SKILLS.map((s) => s.key) },
             coaching_dimension: { type: "string", enum: COACHING_DIMENSIONS },
             valence: { type: "string", enum: ["strength", "weakness"] },
+            fault_family: { type: "string", enum: [...FAULT_FAMILIES] },
             title: str, detail: str, severity: num,
             why_it_matters: { type: "string", nullable: true },
             what_to_change: { type: "string", nullable: true },
             drill_slug: { type: "string", nullable: true },
           },
-          required: ["skill_key", "coaching_dimension", "valence", "title", "detail", "severity"],
+          required: ["skill_key", "coaching_dimension", "valence", "fault_family", "title", "detail", "severity"],
         },
       },
       drills: {
@@ -609,10 +644,21 @@ YOUR JOB
    say in evidence why -- that is honest, and it is better than a number that
    sends somebody to the wrong four seconds.
 6. OBSERVATIONS — the same findings as structured records, one per finding,
-   each tagged with a skill and a coaching dimension, severity 1-5 (5 being
-   the most costly), and where it is about one identifiable moment, the
-   shot_t of that contact -- which must be one of the contact timestamps you
-   were given, not a time you chose.
+   each tagged with a skill, a coaching dimension and a FAULT FAMILY, with
+   severity 1-5 (5 being the most costly), and where it is about one
+   identifiable moment, the shot_t of that contact -- which must be one of the contact
+   timestamps you were given, not a time you chose.
+
+   ONE WEAKNESS PER FAMILY. IN THE WHOLE ANSWER. The families are:
+     ${FAULT_FAMILIES.join(", ")}
+   The family says WHAT is wrong; the skill says WHERE in the game it showed.
+   A habit that appears on four shot types is ONE observation in ONE family --
+   name the four shots inside it, with the measurement for each -- and NOT
+   four observations that happen to carry different skill tags. A read whose
+   weaknesses come from one or two families has looked at one joint rather
+   than at the match; three or more different families, where the footage
+   supports them, is what a real read looks like. If the footage only
+   supports two, write two and say why rather than padding with paraphrases.
 7. DRILLS — what to practise, tied to the priority fix. Where one of the
    catalogue drills fits, cite its slug; otherwise leave slug null and name it.
 

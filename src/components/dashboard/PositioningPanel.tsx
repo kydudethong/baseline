@@ -1,6 +1,7 @@
 import type { MovementMetricRow } from "@/lib/db/types";
 import type { PlayerPositioning } from "@/lib/vision/positioning";
 import { assignRoles, roleNameMap } from "@/lib/vision/player-roles";
+import { secs } from "@/lib/format/duration";
 
 /**
  * Where you stood — kitchen-line time, time to the kitchen, partner gap.
@@ -80,13 +81,13 @@ export function PositioningPanel({
 
               <div className="posgrid">
                 <div>
-                  <div className="num">{p.kitchenSeconds}s</div>
+                  <div className="num">{secs(p.kitchenSeconds)}</div>
                   <div className="lbl">At the kitchen</div>
-                  <div className="sub">of {p.trackedSeconds}s tracked</div>
+                  <div className="sub">of {secs(p.trackedSeconds)} tracked</div>
                 </div>
                 <div>
                   <div className={`num${p.secondsToKitchenMedian === null ? " empty" : ""}`}>
-                    {p.secondsToKitchenMedian === null ? "—" : `${p.secondsToKitchenMedian}s`}
+                    {p.secondsToKitchenMedian === null ? "—" : secs(p.secondsToKitchenMedian, 1)}
                   </div>
                   <div className="lbl">To the kitchen after a return</div>
                   <div className="sub">

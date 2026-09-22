@@ -1,6 +1,7 @@
 "use client";
 
 import type { ViewRally } from "@/lib/db/analysis-view";
+import { secs } from "@/lib/format/duration";
 
 /**
  * The rallies, as a scrollable rail.
@@ -58,10 +59,7 @@ export function RallyTimeline({
             title={showVerdict && r.verdictReason ? r.verdictReason : undefined}
           >
             <span className="rchip-n">Rally {r.idx}</span>
-            <span className="rchip-d">
-              {r.durationS < 10 ? r.durationS.toFixed(1) : Math.round(r.durationS)}
-              <span className="metric-u">s</span>
-            </span>
+            <span className="rchip-d">{secs(r.durationS, r.durationS < 10 ? 1 : 0)}</span>
             <span className="rchip-s">
               {showVerdict ? (
                 <>

@@ -11,6 +11,7 @@ import { getProfile } from "@/lib/db/profiles";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { PlayIcon } from "@/components/motifs/Motifs";
 import { EmptyState } from "@/components/analysis/EmptyState";
+import { clock } from "@/lib/format/duration";
 
 export const metadata: Metadata = { title: "Home — Baseline" };
 export const dynamic = "force-dynamic";
@@ -281,7 +282,5 @@ function firstName(displayName: string | null | undefined, email: string | undef
 }
 
 function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
+  return clock(seconds);
 }

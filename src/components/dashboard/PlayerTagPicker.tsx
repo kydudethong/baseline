@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { colorForPlayer, playerDisplayName } from "@/lib/vision/player-colors";
 import { useDialog } from "@/components/ui/Dialog";
+import { clock, secs } from "@/lib/format/duration";
 
 export interface TagPickerFrame {
   url: string;
@@ -385,7 +386,7 @@ function ReferenceFrame({
   return (
     <div className="frame" style={{ aspectRatio: `${width} / ${height}` }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={frame.url} alt={`Frame at ${frame.timestampSeconds.toFixed(1)}s`} />
+      <img src={frame.url} alt={`Frame at ${clock(frame.timestampSeconds)}`} />
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
         {frame.boxes.map(({ playerLabel, box }) => {
           const color = colorForPlayer(playerLabel, colorIndex.get(playerLabel) ?? 0);
@@ -415,7 +416,7 @@ function ReferenceFrame({
           );
         })}
       </svg>
-      <span className="ts">{frame.timestampSeconds.toFixed(1)}s</span>
+      <span className="ts">{clock(frame.timestampSeconds)}</span>
     </div>
   );
 }
@@ -438,11 +439,7 @@ function stageFor(seconds: number): string {
   return "Writing your read and practice plan";
 }
 
-function formatElapsed(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return m > 0 ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
-}
+const formatElapsed = (seconds: number) => secs(seconds);
 
 /** How often the page asks whether the background run has finished. */
 const POLL_MS = 3000;

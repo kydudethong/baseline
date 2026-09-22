@@ -1,5 +1,6 @@
 import type { CoachingObservationRow, CoachingShotTechniqueRow } from "@/lib/db/types";
 import { EvidenceVideo } from "./EvidenceVideo";
+import { clock } from "@/lib/format/duration";
 
 /**
  * The footage behind a coaching point, ALWAYS VISIBLE.
@@ -123,9 +124,8 @@ export function EvidenceClip({
 }
 
 /** 41.2 -> 0:41. The form a player reads off a scrubber. */
+/** Kept as the name the rest of the page imports; the shape lives in one place now. */
 export function timecode(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
+  if (!Number.isFinite(seconds)) return "0:00";
+  return clock(seconds);
 }
