@@ -37,13 +37,7 @@ export default async function CoachesPage() {
               <Link href="/pricing" className="btn btn-soft">Pricing</Link>
             </div>
           </div>
-          <Photo
-            src="/marketing/stock-coach.jpg"
-            fallback="/marketing/low-ball.jpg"
-            alt="A player at the kitchen line during a game"
-            ratio="4 / 3"
-            priority
-          />
+          <Photo src="/marketing/stock-coach.jpg" alt="A player holding a ball at the net" ratio="4 / 3" priority />
         </div>
       </section>
 
@@ -83,12 +77,7 @@ export default async function CoachesPage() {
               way. Until then, one account can analyse any game you film.
             </p>
           </div>
-          <Photo
-            src="/marketing/tracking.jpg"
-            fallback="/marketing/tracking.jpg"
-            alt="Every player's body and the ball measured through a rally"
-            caption="What your student gets: their game, measured"
-          />
+          <Photo src="/marketing/stock-gear.jpg" alt="Pickleball paddles and balls on an outdoor court" ratio="4 / 3" />
         </div>
       </section>
 

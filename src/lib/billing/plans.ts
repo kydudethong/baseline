@@ -9,7 +9,7 @@
  */
 import { GAME_MAX_MINUTES, MINUTES_PER_MONTH, PRO_MINUTES_PER_MONTH } from "@/lib/db/quota";
 
-export const PLAN_PRICE = "$14.99";
+export const PLAN_PRICE = "$20";
 export const GAME_PRICE = "$3.99";
 
 export interface PlanCard {

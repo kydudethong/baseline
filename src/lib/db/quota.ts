@@ -41,7 +41,7 @@ export const MINUTES_PER_MONTH = 25;
  *
  * Priced in Stripe, not here -- this is only the allowance the price buys. At
  * roughly 6.6 cents a minute all-in, a fully used month costs about $6 against
- * $14.99, and most people will not use all of it.
+ * $20, and most people will not use all of it.
  */
 export const PRO_MINUTES_PER_MONTH = 90;
 

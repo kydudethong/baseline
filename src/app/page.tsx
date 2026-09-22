@@ -18,8 +18,7 @@ export const metadata: Metadata = {
  * one button. Everything else has its own page now, where it used to be one
  * long scroll that asked the reader to find the part they cared about.
  *
- * Every photo is real: stills from real games, faces blurred, or licensed
- * stock where a stock file has been dropped in. No generated imagery.
+ * Every photo is licensed stock (Unsplash / Pexels). No generated imagery.
  */
 export default async function HomePage() {
   const { isAuthed, startHref } = await marketingAuth();
@@ -45,24 +44,13 @@ export default async function HomePage() {
               Your first {MINUTES_PER_MONTH} minutes every month are free. No card needed.
             </p>
           </div>
-          <Photo
-            src="/marketing/stock-hero.jpg"
-            fallback="/marketing/night-game.jpg"
-            alt="A doubles game of pickleball under the lights"
-            ratio="4 / 3"
-            priority
-          />
+          <Photo src="/marketing/stock-hero.jpg" alt="A player mid-rally on a pickleball court" ratio="4 / 3" priority />
         </div>
       </section>
 
       <section className="mk-section alt">
         <div className="mk-wrap mk-split">
-          <Photo
-            src="/marketing/tracking.jpg"
-            fallback="/marketing/tracking.jpg"
-            alt="Baseline's view of a game: the court lines, the net, each player's skeleton and the ball's path"
-            caption="What Baseline sees: the court, every player's body, the ball"
-          />
+          <Photo src="/marketing/stock-play.jpg" alt="A player hitting a pickleball outdoors" ratio="4 / 3" />
           <div className="stack g4">
             <h2 className="mk-h2">It watches the game the way a coach would.</h2>
             <ul className="mk-list">

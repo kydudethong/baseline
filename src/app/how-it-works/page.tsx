@@ -44,13 +44,7 @@ export default async function HowItWorksPage() {
             </p>
             <FilmingGuide />
           </div>
-          <Photo
-            src="/marketing/stock-ball.jpg"
-            fallback="/marketing/night-game.jpg"
-            alt="A game filmed from behind the baseline, showing the whole court"
-            caption="Behind the baseline, whole court in frame"
-            ratio="4 / 3"
-          />
+          <Photo src="/marketing/stock-court.jpg" alt="An empty pickleball court and net in the sun" ratio="4 / 3" />
         </div>
       </section>
 
@@ -65,12 +59,7 @@ export default async function HowItWorksPage() {
               how you play together. That&apos;s the only thing only you can tell it.
             </p>
           </div>
-          <Photo
-            src="/marketing/court-found.jpg"
-            fallback="/marketing/court-found.jpg"
-            alt="The court lines and net found automatically on a game"
-            caption="Court and net, found automatically"
-          />
+          <Photo src="/marketing/stock-aerial.jpg" alt="Pickleball courts seen from above" />
         </div>
       </section>
 
@@ -88,12 +77,7 @@ export default async function HowItWorksPage() {
               <li><strong>A link to share it</strong> with a partner or coach. They don&apos;t need an account.</li>
             </ul>
           </div>
-          <Photo
-            src="/marketing/tracking.jpg"
-            fallback="/marketing/tracking.jpg"
-            alt="Each player's skeleton and the ball's path, measured through a rally"
-            caption="Every player's body, measured at every shot it can see"
-          />
+          <Photo src="/marketing/stock-woman.jpg" alt="A player focused on the ball during a game" ratio="4 / 3" />
         </div>
       </section>
 

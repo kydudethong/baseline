@@ -113,12 +113,7 @@ export default async function PricingPage() {
               </details>
             </div>
           </div>
-          <Photo
-            src="/marketing/stock-paddle.jpg"
-            fallback="/marketing/low-ball.jpg"
-            alt="A pickleball player reaching for a low ball at the kitchen line"
-            ratio="4 / 5"
-          />
+          <Photo src="/marketing/stock-paddle.jpg" alt="A pickleball paddle and balls on a court" ratio="4 / 5" />
         </div>
       </section>
 

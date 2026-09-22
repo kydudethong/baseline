@@ -2,16 +2,20 @@ import Link from "next/link";
 import { hasPublicFile } from "./Photo";
 
 /**
- * Photo credits appear only for stock photos that are actually on the site.
- * Unsplash's licence does not require them; crediting the photographers is
- * still the decent thing, and a credit for a photo that is not shown would be
- * a small lie.
+ * Credits appear only for photos actually on the site. Neither the Unsplash
+ * nor the Pexels licence requires them; crediting photographers is still the
+ * decent thing, and a credit for a photo that is not shown would be a small
+ * lie. Keep this list in step with the slots the pages use.
  */
 const CREDITS = [
-  { file: "/marketing/stock-hero.jpg", who: "eedgar ivann", url: "https://unsplash.com/photos/tn98VMfWXEs" },
-  { file: "/marketing/stock-paddle.jpg", who: "Brendan Sapp", url: "https://unsplash.com/photos/l5UX-BuRc3E" },
-  { file: "/marketing/stock-ball.jpg", who: "Laura Tang", url: "https://unsplash.com/photos/9AwSPN41C8U" },
-  { file: "/marketing/stock-coach.jpg", who: "Venti Views", url: "https://unsplash.com/photos/q97_OyjWS1U" },
+  { file: "/marketing/stock-hero.jpg", who: "eedgar ivann", site: "Unsplash", url: "https://unsplash.com/photos/tn98VMfWXEs" },
+  { file: "/marketing/stock-paddle.jpg", who: "Brendan Sapp", site: "Unsplash", url: "https://unsplash.com/photos/l5UX-BuRc3E" },
+  { file: "/marketing/stock-coach.jpg", who: "Venti Views", site: "Unsplash", url: "https://unsplash.com/photos/q97_OyjWS1U" },
+  { file: "/marketing/stock-play.jpg", who: "sanketgraphy", site: "Pexels", url: "https://www.pexels.com/photo/34618472/" },
+  { file: "/marketing/stock-court.jpg", who: "Franki Frank", site: "Pexels", url: "https://www.pexels.com/photo/29820786/" },
+  { file: "/marketing/stock-aerial.jpg", who: "Franki Frank", site: "Pexels", url: "https://www.pexels.com/photo/29821186/" },
+  { file: "/marketing/stock-woman.jpg", who: "hson", site: "Pexels", url: "https://www.pexels.com/photo/32975182/" },
+  { file: "/marketing/stock-gear.jpg", who: "kadiravsarr", site: "Pexels", url: "https://www.pexels.com/photo/36513707/" },
 ];
 
 export function SiteFooter() {
@@ -32,13 +36,12 @@ export function SiteFooter() {
       </div>
       <div className="mk-wrap">
         <p className="xs" style={{ color: "var(--ink-3)", margin: "var(--a4) 0 0" }}>
-          Game photos are real games filmed for Baseline, with faces blurred.
           {shown.length > 0 ? (
             <>
-              {" "}Additional photos from Unsplash by{" "}
+              Photos by{" "}
               {shown.map((c, i) => (
                 <span key={c.file}>
-                  <a href={c.url} rel="noopener noreferrer" target="_blank">{c.who}</a>
+                  <a href={c.url} rel="noopener noreferrer" target="_blank">{c.who}</a> ({c.site})
                   {i < shown.length - 1 ? ", " : "."}
                 </span>
               ))}
