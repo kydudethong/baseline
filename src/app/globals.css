@@ -1689,3 +1689,84 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
      against whichever edge the avatar is nearest. */
   .acct-menu{left:16px !important;right:16px;bottom:16px !important;width:auto}
 }
+
+/* ==========================================================================
+   Marketing site (/, /how-it-works, /pricing, /coaches).
+   Light, photo-led, built on the same tokens as the app so the step from the
+   site into the dashboard does not feel like changing products.
+   ========================================================================== */
+.mk{background:var(--paper);color:var(--ink);min-height:100vh}
+.mk-wrap{max-width:1140px;margin:0 auto;padding:0 var(--a5)}
+@media (max-width:640px){.mk-wrap{padding:0 16px}}
+.mk-nav{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--paper) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.mk-nav-in{display:flex;align-items:center;gap:var(--a5);height:64px}
+.mk-links{display:flex;gap:var(--a5);margin-right:auto}
+.mk-links a{color:var(--ink-2);font-size:15px;text-decoration:none}
+.mk-links a:hover,.mk-links a[aria-current=page]{color:var(--ink)}
+.mk-links a[aria-current=page]{font-weight:600}
+/* ON A PHONE THE LINKS DROP TO THEIR OWN ROW rather than disappearing. They
+   were display:none with nothing in their place, which left the footer as the
+   only way to find Pricing -- on the device most people open a shared link on. */
+@media (max-width:760px){
+  .mk-nav-in{flex-wrap:wrap;height:auto;padding-top:10px;padding-bottom:6px;row-gap:6px}
+  .mk-nav-in>.row{margin-left:auto}
+  .mk-links{order:3;width:100%;margin:0;gap:var(--a4);overflow-x:auto;padding-bottom:4px}
+  .mk-links a{font-size:14px;white-space:nowrap}
+}
+
+.mk-hero{padding:var(--a8) 0 var(--a7)}
+.mk-hero-grid{display:grid;grid-template-columns:1.05fr 1fr;gap:var(--a7);align-items:center}
+@media (max-width:900px){.mk-hero-grid{grid-template-columns:1fr;gap:var(--a6)}}
+.mk-h1{font-family:var(--display);font-size:clamp(34px,5vw,56px);line-height:1.05;letter-spacing:-.02em;margin:0;font-weight:800}
+.mk-h2{font-family:var(--display);font-size:clamp(26px,3.4vw,38px);line-height:1.12;letter-spacing:-.015em;margin:0;font-weight:750}
+.mk-lead{font-size:18px;line-height:1.6;color:var(--ink-2);margin:0;max-width:52ch}
+.mk-kicker{font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--optic-deep)}
+.mk-cta{display:flex;gap:var(--a3);flex-wrap:wrap}
+
+.mk-photo{margin:0;position:relative;border-radius:var(--r4);overflow:hidden;box-shadow:var(--lift-2);background:var(--night)}
+.mk-photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.mk-photo figcaption{position:absolute;left:12px;bottom:12px;background:rgba(15,23,42,.78);color:#fff;font-size:12px;padding:5px 10px;border-radius:var(--rf)}
+
+.mk-section{padding:var(--a8) 0;border-top:1px solid var(--line)}
+.mk-section.alt{background:var(--card)}
+.mk-split{display:grid;grid-template-columns:1fr 1fr;gap:var(--a7);align-items:center}
+.mk-split.flip>:first-child{order:2}
+@media (max-width:900px){.mk-split,.mk-split.flip{grid-template-columns:1fr}.mk-split.flip>:first-child{order:0}}
+
+.mk-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--a5);margin-top:var(--a6)}
+@media (max-width:900px){.mk-steps{grid-template-columns:1fr}}
+.mk-step{background:var(--card);border:1px solid var(--line);border-radius:var(--r3);padding:var(--a5);display:flex;flex-direction:column;gap:var(--a2)}
+.mk-step .n{width:30px;height:30px;border-radius:50%;background:var(--optic);color:var(--optic-ink);display:grid;place-items:center;font-weight:800;font-size:14px}
+.mk-step h3{margin:0;font-size:18px}
+.mk-step p{margin:0;color:var(--ink-2);font-size:15px;line-height:1.55}
+
+.mk-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:var(--a3)}
+/* BLOCK, NOT FLEX, with the tick positioned. As a flex row every child became
+   its own column, so a bold lead-in and the sentence after it split side by
+   side -- "The one thing to fix | first, with the clip..." on a phone. */
+.mk-list li{position:relative;padding-left:28px;font-size:15px;line-height:1.5;color:var(--ink-2)}
+.mk-list li strong{color:var(--ink)}
+.mk-list li::before{content:"";position:absolute;left:0;top:2px;width:18px;height:18px;border-radius:50%;background:var(--optic) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2304210F' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12 4 4 8-8'/%3E%3C/svg%3E") center/12px no-repeat}
+
+.mk-prices{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--a5);align-items:stretch}
+@media (max-width:900px){.mk-prices{grid-template-columns:1fr}}
+.mk-price{background:var(--card);border:1px solid var(--line);border-radius:var(--r4);padding:var(--a6) var(--a5);display:flex;flex-direction:column;gap:var(--a4)}
+.mk-price.featured{border:2px solid var(--optic);box-shadow:var(--lift-2);position:relative}
+.mk-price .tag{position:absolute;top:-12px;left:var(--a5);background:var(--optic);color:var(--optic-ink);font-size:12px;font-weight:700;padding:3px 10px;border-radius:var(--rf)}
+.mk-price .amt{font-family:var(--display);font-size:40px;font-weight:800;letter-spacing:-.02em;line-height:1}
+.mk-price .per{color:var(--ink-3);font-size:14px}
+.mk-price .btn{margin-top:auto;justify-content:center}
+
+.mk-faq{display:flex;flex-direction:column;gap:var(--a2);max-width:760px}
+.mk-faq details{background:var(--card);border:1px solid var(--line);border-radius:var(--r3);padding:var(--a4) var(--a5)}
+.mk-faq summary{cursor:pointer;font-weight:600;list-style:none}
+.mk-faq summary::-webkit-details-marker{display:none}
+.mk-faq p{margin:var(--a3) 0 0;color:var(--ink-2);line-height:1.6}
+
+.mk-band{background:var(--night);color:#F8FAFC;border-radius:var(--r4);padding:var(--a7) var(--a6);display:flex;flex-direction:column;gap:var(--a4);align-items:flex-start}
+.mk-band p{color:#CBD5E1;margin:0;max-width:56ch}
+
+.mk-footer{border-top:1px solid var(--line);padding:var(--a6) 0 var(--a7);background:var(--card)}
+.mk-footer-in{display:flex;justify-content:space-between;gap:var(--a5);flex-wrap:wrap}
+.mk-footer-links{display:flex;gap:var(--a5);flex-wrap:wrap}
+.mk-footer-links a,.mk-footer a{color:var(--ink-2)}
