@@ -275,6 +275,12 @@ export async function runPipelineV2(
     // analysis page remains the retry.
     if (result.selfPlayerId) {
       try {
+        // SAID BEFORE IT STARTS. The analysis is already "completed" by this
+        // point, and without a coaching stage on the row the page had no way
+        // to tell a read being written from a read that never would be -- it
+        // showed empty panels under a Completed badge for the several minutes
+        // Gemini takes on a full game.
+        await coachingProgress(supabase, analysisId, "Watching the game and writing your read…");
         await runCoachingPipeline(supabase, userId, analysisId);
         await coachingProgress(supabase, analysisId, "Coaching read finished.", { done: true });
       } catch (err) {

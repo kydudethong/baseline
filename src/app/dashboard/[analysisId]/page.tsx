@@ -37,6 +37,7 @@ import { PracticeSessionPanel } from "@/components/dashboard/PracticeSessionPane
 import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel";
 import { PartnershipPanel } from "@/components/dashboard/PartnershipPanel";
 import { CoachingFailureNote } from "@/components/dashboard/CoachingFailureNote";
+import { CoachingInProgress } from "@/components/dashboard/CoachingInProgress";
 import { ShotsPanel } from "@/components/dashboard/ShotsPanel";
 import { AnalysisWorkspace } from "@/components/analysis/AnalysisWorkspace";
 import { EmptyState } from "@/components/analysis/EmptyState";
@@ -281,9 +282,25 @@ async function AnalysisBreakdown({
    * Only shown when there is no read to show. A failure recorded on a run that
    * later succeeded is history, not news.
    */
-  const coachingFailure = !hasRead
-    ? ((analysis.progress as { error?: string } | null)?.error ?? null)
-    : null;
+  const coachingProgressRow = analysis.progress as
+    { stage?: string; error?: string; coachingDone?: boolean; updatedAt?: string } | null;
+  const coachingFailure = !hasRead ? (coachingProgressRow?.error ?? null) : null;
+  /*
+   * STILL BEING WRITTEN, which is different from failed and from never run.
+   * The analysis says "completed" as soon as tracking ends; the read comes
+   * minutes later. Without this the page showed that gap as empty panels.
+   */
+  const coachingRunning = !hasRead && !needsTagging && !coachingFailure
+    && analysis.status === "completed"
+    && coachingProgressRow?.stage === "coaching" && !coachingProgressRow?.coachingDone;
+  /*
+   * Tagged, completed, no read, and nothing says one is coming: an analysis
+   * from before the run recorded its coaching stage, or one whose read was
+   * never attempted. Offered the same retry as a failure, because the fix is
+   * the same.
+   */
+  const coachingNeverRan = !hasRead && !needsTagging && !coachingFailure && !coachingRunning
+    && analysis.status === "completed";
 
   const tagSection = (
     <TagSection
@@ -303,6 +320,15 @@ async function AnalysisBreakdown({
     <div className="stack g6">
       {coachingFailure ? (
         <CoachingFailureNote analysisId={analysis.id} reason={coachingFailure} />
+      ) : null}
+      {coachingRunning ? (
+        <CoachingInProgress analysisId={analysis.id} startedAt={coachingProgressRow?.updatedAt ?? null} />
+      ) : null}
+      {coachingNeverRan ? (
+        <CoachingFailureNote
+          analysisId={analysis.id}
+          reason="No coaching read was written for this clip — this analysis finished without starting one."
+        />
       ) : null}
 
       {needsTagging ? (
@@ -398,6 +424,7 @@ async function AnalysisBreakdown({
           evidence={evidence}
           analysisId={analysis.id}
           feedback={feedback}
+          coachingPending={coachingRunning}
           skillKeysWithBlueprint={skillKeysWithBlueprint}
           skills={coachingData.skills}
         />
@@ -446,8 +473,11 @@ async function AnalysisBreakdown({
            who had already tagged themselves in setup, whose read had FAILED --
            sending them to look for a step that no longer exists. */
         <EmptyState
-          title={needsTagging ? "Your coaching read goes here" : "The coaching read didn't run"}
-          body={needsTagging
+          title={needsTagging ? "Your coaching read goes here"
+            : coachingRunning ? "Your coaching read is being written" : "The coaching read didn't run"}
+          body={coachingRunning
+            ? "It usually takes a few minutes on a full game. This page updates by itself when it's ready."
+            : needsTagging
             ? "Tag which player is you above and Baseline will write it — strengths, the one fix that matters most, and a drill to start with."
             : coachingFailure
               ? "The reason is in the red box at the top of this page, with a button to try again."

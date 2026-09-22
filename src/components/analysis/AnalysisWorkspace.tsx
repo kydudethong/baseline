@@ -47,8 +47,14 @@ import { shotName } from "./ShotBadge";
  */
 export function AnalysisWorkspace({
   view, videoUrl, drillNames, heroObservationId = null, heading, evidence,
-  analysisId, feedback, skillKeysWithBlueprint, skills,
+  analysisId, feedback, skillKeysWithBlueprint, skills, coachingPending = false,
 }: {
+  /**
+   * The read is still being written. The empty states below otherwise claim
+   * "no rallies were found", which is a verdict on the clip the page has no
+   * business giving before the pass that decides it has finished.
+   */
+  coachingPending?: boolean;
   /** The ratings, drawn as a chart beside the takeaways. */
   skills?: CoachingSkillRatingRow[];
   /**
@@ -209,10 +215,14 @@ export function AnalysisWorkspace({
               this page is empty for that one reason rather than four.
             */
             <EmptyState
-              title={view.analysis.selfPlayerLabels.length > 0
-                ? "No rallies were found in this clip"
-                : "Tag yourself to get a coaching read"}
-              body={view.analysis.selfPlayerLabels.length > 0
+              title={coachingPending
+                ? "Rallies appear when the read is done"
+                : view.analysis.selfPlayerLabels.length > 0
+                  ? "No rallies were found in this clip"
+                  : "Tag yourself to get a coaching read"}
+              body={coachingPending
+                ? "The coaching pass is watching the game now — rallies, shots and the read all come from it."
+                : view.analysis.selfPlayerLabels.length > 0
                 ? "The coaching pass watched this clip and did not find a point being played. "
                   + "Short clips, warm-ups and practice feeds often have none."
                 : "Baseline needs to know which player is you before it can read anything — "
@@ -256,7 +266,7 @@ export function AnalysisWorkspace({
           </div>
 
           <div className="panel-body">
-            {tab === "overview" ? <Overview view={view} observations={observations} /> : null}
+            {tab === "overview" ? <Overview view={view} observations={observations} coachingPending={coachingPending} /> : null}
 
             {tab === "rally" ? (
               rally ? (
@@ -362,11 +372,15 @@ export function AnalysisWorkspace({
  * deliberately no headline score above it: nothing in this pipeline computes
  * a composite rating, and a number in that slot would be invented.
  */
-function Overview({ view, observations }: { view: AnalysisView; observations: CoachingObservationRow[] }) {
+function Overview({ view, observations, coachingPending = false }: {
+  view: AnalysisView; observations: CoachingObservationRow[]; coachingPending?: boolean;
+}) {
   if (observations.length === 0) {
     return (
       <p className="sm">
-        {view.analysis.selfPlayerLabels.length > 0
+        {coachingPending
+          ? "Your coaching read is being written — this fills in by itself when it's done."
+          : view.analysis.selfPlayerLabels.length > 0
           ? "No coaching read was saved for this clip. The top of the page says why, and lets you run it again."
           : "No coaching read yet for this clip. Tag which player is you and Baseline will write one."}
       </p>
