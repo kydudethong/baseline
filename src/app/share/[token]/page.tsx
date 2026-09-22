@@ -18,6 +18,7 @@ import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
 import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel";
 import { PartnershipPanel } from "@/components/dashboard/PartnershipPanel";
 import { PracticeSessionPanel } from "@/components/dashboard/PracticeSessionPanel";
+import { DrillCards, prescribedDrills } from "@/components/analysis/DrillCards";
 import { ErrorState } from "@/components/analysis/ErrorState";
 import type { AnalysisWithVideo } from "@/lib/db/analyses";
 
@@ -91,6 +92,9 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
 
   const drillNames: Record<string, string> = {};
   for (const d of drills) drillNames[d.slug] = d.name;
+  const drillCatalog = Object.fromEntries(drills.map((d) => [d.slug, d]));
+  const prescribedCount = prescribedDrills(coachingData.observations)
+    .filter((d) => drillCatalog[d.slug]).length;
   const hero = topPriorityObservation(coachingData.observations);
 
   const videoUrl = video?.storage_path
@@ -116,6 +120,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           view={view}
           videoUrl={videoUrl}
           drillNames={drillNames}
+          drillCatalog={drillCatalog}
           heroObservationId={hero?.id ?? null}
           evidence={evidence}
           skills={coachingData.skills}
@@ -152,9 +157,21 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
         </section>
       ) : null}
 
+      {prescribedCount > 0 ? (
+        <section className="stack g3">
+          <div className="stack g1">
+            <h2 className="h2" style={{ margin: 0 }}>Your drills — do these to get better</h2>
+            <p className="sm" style={{ margin: 0, color: "var(--ink-3)" }}>
+              Each one targets something from this game. Start with number 1.
+            </p>
+          </div>
+          <DrillCards observations={coachingData.observations} catalog={drillCatalog} />
+        </section>
+      ) : null}
+
       {practice?.plan && practice.blocks.length > 0 ? (
         <section className="stack g4">
-          <h2 className="h2">What to practise</h2>
+          <h2 className="h2">The full practice session</h2>
           <PracticeSessionPanel plan={practice.plan} blocks={practice.blocks} drillNames={drillNames} />
         </section>
       ) : null}

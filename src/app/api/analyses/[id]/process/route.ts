@@ -3,6 +3,7 @@ import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { getAnalysisForUser } from "@/lib/db/analyses";
 import { getSetup, isCompleteSetup } from "@/lib/db/setup";
 import { quotaForUser } from "@/lib/db/quota";
+import { entitlementFor, forgetEntitlement, priceLabels, stripeConfigured } from "@/lib/billing/stripe";
 import { runPipeline } from "@/lib/analysis/pipeline";
 import { kickOffPipelineV2 } from "@/lib/analysis/pipeline-v2";
 import { livenessOf } from "@/lib/analysis/heartbeat";
@@ -54,7 +55,19 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   const clipMinutes = analysis.video.duration_seconds === null
     ? null
     : analysis.video.duration_seconds / 60;
-  const quota = await quotaForUser(supabase, user.id, user.email, id, clipMinutes);
+  // FRESH, not cached: somebody arriving here straight from Stripe's success
+  // page has just paid, and a thirty-second-old "free" would refuse the very
+  // game they bought.
+  forgetEntitlement(user.id);
+  const { entitlement, unknown } = await entitlementFor(user.id, user.email, { fresh: true });
+  // STRIPE UNREACHABLE COUNTS AS PAID. The two ways to be wrong are not equal:
+  // one free run, or a paying customer refused the thing they pay for because
+  // a third party blinked. The second costs the customer; the first costs six
+  // cents a minute.
+  const quota = await quotaForUser(
+    supabase, user.id, user.email, id, clipMinutes,
+    unknown ? { plan: "pro", paidAnalysisIds: [] } : entitlement
+  );
   if (!quota.allowed) {
     const mins = (n: number) => `${Math.round(n)} minute${Math.round(n) === 1 ? "" : "s"}`;
     const resets = new Date(quota.resetsAt).toLocaleDateString("en-US", { month: "long", day: "numeric" });
@@ -77,6 +90,21 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
           remainingMinutes: quota.remainingMinutes,
           resetsAt: quota.resetsAt,
         },
+        /*
+         * THE WAY OUT, not only the wall. A limit with no route past it reads
+         * as the product being broken; the same limit with "analyse this one
+         * for $3.99" beside it reads as a product with a price. Offered only
+         * what actually applies: the single game when this clip is short
+         * enough to be one, the plan to anybody not already on it.
+         */
+        upgrade: stripeConfigured()
+          ? {
+              analysisId: id,
+              canBuyGame: quota.canBuyGame,
+              canUpgradePlan: quota.plan === "free",
+              prices: await priceLabels(),
+            }
+          : null,
       },
       { status: 429 }
     );

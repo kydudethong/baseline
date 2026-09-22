@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { quotaFor, monthStart, monthEnd, isUnlimited } from "./quota";
+import {
+  quotaFor, monthStart, monthEnd, isUnlimited,
+  MINUTES_PER_MONTH, PRO_MINUTES_PER_MONTH, GAME_MAX_MINUTES,
+} from "./quota";
 
 /** A clip of `m` minutes, already analysed this month. */
 const run = (analysisId: string, m: number) => ({ analysisId, minutes: m });
@@ -17,16 +20,16 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
   }
 }
 
-test("thirty minutes a month, counted in minutes rather than clips", () => {
+test("twenty-five minutes a month free, counted in minutes rather than clips", () => {
   // MINUTES BECAUSE MINUTES ARE WHAT COST MONEY. Three games meant twelve
   // minutes for one user and ninety for another on the same allowance, and
   // the bill followed the minutes either way.
   withEnv(NO_ENV, () => {
     const q = quotaFor({
-      startedThisMonth: [run("a", 20), run("b", 8)],
+      startedThisMonth: [run("a", 15), run("b", 8)],
       analysisId: "c", minutes: 5, email: "x@y.com",
     });
-    assert.equal(q.usedMinutes, 28);
+    assert.equal(q.usedMinutes, 23);
     assert.equal(q.remainingMinutes, 2);
     assert.equal(q.allowed, false, "a 5 minute clip does not fit in 2 minutes");
   });
@@ -37,7 +40,7 @@ test("a clip that fits exactly is allowed", () => {
   // would make the number on the page a lie.
   withEnv(NO_ENV, () => {
     const q = quotaFor({
-      startedThisMonth: [run("a", 20)], analysisId: "b", minutes: 10, email: "x@y.com",
+      startedThisMonth: [run("a", 15)], analysisId: "b", minutes: 10, email: "x@y.com",
     });
     assert.equal(q.allowed, true);
   });
@@ -130,7 +133,7 @@ test("the limit is configurable, and a typo does not mean zero", () => {
   withEnv({ ANALYSIS_MINUTES_PER_MONTH: "not a number", UNLIMITED_ANALYSIS_EMAILS: undefined }, () => {
     assert.equal(quotaFor({
       startedThisMonth: [], analysisId: "b", minutes: 1, email: "x@y.com",
-    }).limitMinutes, 30);
+    }).limitMinutes, MINUTES_PER_MONTH);
   });
 });
 
@@ -140,4 +143,107 @@ test("the window is a calendar month in UTC", () => {
   assert.equal(monthEnd(mid).toISOString(), "2026-04-01T00:00:00.000Z");
   // December has to roll the year, which an off-by-one on the month does not.
   assert.equal(monthEnd(new Date("2026-12-09T00:00:00Z")).toISOString(), "2027-01-01T00:00:00.000Z");
+});
+
+
+// ---------------------------------------------------------------------------
+// Plans. What somebody has paid for, as Stripe reports it.
+// ---------------------------------------------------------------------------
+
+const PRO = { plan: "pro" as const, paidAnalysisIds: [] };
+
+test("the free allowance is about one real game and not two", () => {
+  // Ky's own games run 16-19 minutes. One fits; a second does not.
+  withEnv(NO_ENV, () => {
+    assert.equal(quotaFor({ startedThisMonth: [], analysisId: "a", minutes: 19, email: "x@y.com" }).allowed, true);
+    assert.equal(quotaFor({
+      startedThisMonth: [run("a", 19)], analysisId: "b", minutes: 16, email: "x@y.com",
+    }).allowed, false);
+  });
+});
+
+test("the paid plan raises the allowance to ninety minutes", () => {
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({
+      startedThisMonth: [run("a", 19), run("b", 17), run("c", 18)],
+      analysisId: "d", minutes: 20, email: "x@y.com", entitlement: PRO,
+    });
+    assert.equal(q.limitMinutes, PRO_MINUTES_PER_MONTH);
+    assert.equal(q.allowed, true, "four games is 74 minutes, inside 90");
+    assert.equal(q.plan, "pro");
+  });
+});
+
+test("the paid plan is not unlimited", () => {
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({
+      startedThisMonth: [run("a", 80)], analysisId: "b", minutes: 20, email: "x@y.com", entitlement: PRO,
+    });
+    assert.equal(q.allowed, false);
+  });
+});
+
+test("a game bought on its own is allowed with no minutes left", () => {
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({
+      startedThisMonth: [run("a", 25)], analysisId: "b", minutes: 20, email: "x@y.com",
+      entitlement: { plan: "free", paidAnalysisIds: ["b"] },
+    });
+    assert.equal(q.allowed, true);
+  });
+});
+
+test("a bought game is not ALSO taken out of the monthly allowance", () => {
+  // Charged once in money; charging it again in minutes would take somebody's
+  // free game away for having paid for a different one.
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({
+      startedThisMonth: [run("bought", 20)], analysisId: "next", minutes: 18, email: "x@y.com",
+      entitlement: { plan: "free", paidAnalysisIds: ["bought"] },
+    });
+    assert.equal(q.usedMinutes, 0);
+    assert.equal(q.allowed, true, "their free game is still there");
+  });
+});
+
+test("buying one game unlocks THAT game and no other", () => {
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({
+      startedThisMonth: [run("a", 25), run("b", 20)], analysisId: "c", minutes: 20, email: "x@y.com",
+      entitlement: { plan: "free", paidAnalysisIds: ["b"] },
+    });
+    assert.equal(q.allowed, false);
+  });
+});
+
+test("a re-run of a bought game is still free", () => {
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({
+      startedThisMonth: [run("a", 25), run("b", 20)], analysisId: "b", minutes: 20, email: "x@y.com",
+      entitlement: { plan: "free", paidAnalysisIds: ["b"] },
+    });
+    assert.equal(q.allowed, true);
+  });
+});
+
+test("a single game can only be bought for a clip one game long", () => {
+  // One price, one game. Without a ceiling the same $3.99 buys a ninety-minute
+  // session that costs six dollars to read.
+  withEnv(NO_ENV, () => {
+    const ok = quotaFor({ startedThisMonth: [run("a", 25)], analysisId: "b", minutes: GAME_MAX_MINUTES, email: "x@y.com" });
+    assert.equal(ok.canBuyGame, true);
+    const long = quotaFor({ startedThisMonth: [run("a", 25)], analysisId: "b", minutes: GAME_MAX_MINUTES + 1, email: "x@y.com" });
+    assert.equal(long.canBuyGame, false);
+    const unknown = quotaFor({ startedThisMonth: [], analysisId: "b", minutes: null, email: "x@y.com" });
+    assert.equal(unknown.canBuyGame, false, "an unknown length cannot be priced");
+  });
+});
+
+test("omitting the entitlement means free, never paid", () => {
+  // Every caller that forgets to pass it must fail toward the cheaper plan.
+  withEnv(NO_ENV, () => {
+    const q = quotaFor({ startedThisMonth: [], analysisId: "a", minutes: 1, email: "x@y.com" });
+    assert.equal(q.plan, "free");
+    assert.equal(q.limitMinutes, MINUTES_PER_MONTH);
+  });
 });

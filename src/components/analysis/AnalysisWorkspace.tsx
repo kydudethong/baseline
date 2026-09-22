@@ -1,5 +1,8 @@
 "use client";
 
+import { DrillCards } from "./DrillCards";
+import type { CoachingDrillRow } from "@/lib/db/types";
+
 import { useMemo, useState } from "react";
 import Player from "@/components/breakdown/Player";
 import type { ReactNode } from "react";
@@ -47,8 +50,10 @@ import { shotName } from "./ShotBadge";
  */
 export function AnalysisWorkspace({
   view, videoUrl, drillNames, heroObservationId = null, heading, evidence,
-  analysisId, feedback, skillKeysWithBlueprint, skills, coachingPending = false,
+  analysisId, feedback, skillKeysWithBlueprint, skills, coachingPending = false, drillCatalog,
 }: {
+  /** The drill catalogue, so the tab can say what each drill is rather than only name it. */
+  drillCatalog?: Record<string, CoachingDrillRow>;
   /**
    * The read is still being written. The empty states below otherwise claim
    * "no rallies were found", which is a verdict on the clip the page has no
@@ -330,18 +335,22 @@ export function AnalysisWorkspace({
 
             {tab === "drills" ? (
               prescribed.length > 0 ? (
-                <div className="stack g4">
-                  {prescribed.map((o) => (
-                    <div key={o.id} className="insight-drill" style={{ alignItems: "flex-start" }}>
-                      <span className="stack" style={{ gap: 3, minWidth: 0 }}>
-                        <span style={{ fontWeight: 600, color: "var(--ink)" }}>
-                          {drillNames[o.drill_slug!] ?? o.drill_slug}
+                drillCatalog ? (
+                  <DrillCards observations={observations} catalog={drillCatalog} />
+                ) : (
+                  <div className="stack g4">
+                    {prescribed.map((o) => (
+                      <div key={o.id} className="insight-drill" style={{ alignItems: "flex-start" }}>
+                        <span className="stack" style={{ gap: 3, minWidth: 0 }}>
+                          <span style={{ fontWeight: 600, color: "var(--ink)" }}>
+                            {drillNames[o.drill_slug!] ?? o.drill_slug}
+                          </span>
+                          <span className="xs">For: {o.title}</span>
                         </span>
-                        <span className="xs">For: {o.title}</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                      </div>
+                    ))}
+                  </div>
+                )
               ) : (
                 <p className="sm">
                   No drill was prescribed for this clip. A drill is only attached where the

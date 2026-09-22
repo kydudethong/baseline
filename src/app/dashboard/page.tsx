@@ -5,6 +5,8 @@ import { listAnalysisSummariesForUser, listAnalysesForUser } from "@/lib/db/anal
 import { getSignedDownloadUrl } from "@/lib/storage/r2";
 import { getRankedWeaknesses, getSkillProfiles, overallRating } from "@/lib/coaching/stats";
 import { quotaForUser } from "@/lib/db/quota";
+import { entitlementFor, priceLabels, stripeConfigured } from "@/lib/billing/stripe";
+import { BillingButton } from "@/components/billing/BillingButton";
 import { getProfile } from "@/lib/db/profiles";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { PlayIcon } from "@/components/motifs/Motifs";
@@ -24,7 +26,14 @@ export const dynamic = "force-dynamic";
  * invented would undo the one promise the rest of the product keeps. Every
  * tile below is a count of something real.
  */
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ billing?: string }>;
+}) {
+  // Back from Stripe's success page: ask Stripe again rather than trust a
+  // cached "free" from thirty seconds before they paid.
+  const justPaid = (await searchParams)?.billing === "success";
   const supabase = await createClient();
   const {
     data: { user },
@@ -45,7 +54,14 @@ export default async function HomePage() {
   // process route, which is where the money is; finding out you are out of
   // games only once a 500MB clip has finished uploading would be a bad way to
   // learn it.
-  const quota = await quotaForUser(supabase, user.id, user.email, "", null);
+  // Cached for thirty seconds inside entitlementFor, so this is not a Stripe
+  // call per page view. On error it reads as free, which here only affects
+  // the number shown -- the run gate makes its own, more generous call.
+  const { entitlement } = await entitlementFor(user.id, user.email, { fresh: justPaid });
+  const quota = await quotaForUser(supabase, user.id, user.email, "", null, entitlement);
+  const billing = stripeConfigured() && !quota.unlimited
+    ? { plan: quota.plan, prices: await priceLabels() }
+    : null;
 
   if (analyses.length === 0) {
     return (
@@ -89,8 +105,14 @@ export default async function HomePage() {
               {" "}
               <span style={{ opacity: 0.7 }}>
                 {Math.round(quota.remainingMinutes)} of {Math.round(quota.limitMinutes)} minutes
-                left this month.
+                left this month{quota.plan === "free" ? " on the free plan" : ""}.
               </span>
+              {billing ? (
+                <>
+                  {" "}
+                  <BillingButton plan={billing.plan} planPrice={billing.prices?.plan ?? null} />
+                </>
+              ) : null}
             </>
           ) : null}
           {overall.rating !== null ? (

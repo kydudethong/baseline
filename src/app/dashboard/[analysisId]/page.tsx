@@ -38,6 +38,7 @@ import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel"
 import { PartnershipPanel } from "@/components/dashboard/PartnershipPanel";
 import { CoachingFailureNote } from "@/components/dashboard/CoachingFailureNote";
 import { CoachingInProgress } from "@/components/dashboard/CoachingInProgress";
+import { DrillCards, prescribedDrills } from "@/components/analysis/DrillCards";
 import { ShotsPanel } from "@/components/dashboard/ShotsPanel";
 import { AnalysisWorkspace } from "@/components/analysis/AnalysisWorkspace";
 import { EmptyState } from "@/components/analysis/EmptyState";
@@ -230,6 +231,9 @@ async function AnalysisBreakdown({
   const skillKeysWithBlueprint = new Set(blueprints.map((b) => b.blueprint.skill_key));
   const drillNames: Record<string, string> = {};
   for (const d of drills) drillNames[d.slug] = d.name;
+  const drillCatalog = Object.fromEntries(drills.map((d) => [d.slug, d]));
+  const prescribedCount = prescribedDrills(coachingData.observations)
+    .filter((d) => drillCatalog[d.slug]).length;
   // Computed once and shared, so the workspace and the read below cannot
   // disagree about which point leads — if they did, it would print twice.
   const hero = topPriorityObservation(coachingData.observations);
@@ -425,6 +429,7 @@ async function AnalysisBreakdown({
           analysisId={analysis.id}
           feedback={feedback}
           coachingPending={coachingRunning}
+          drillCatalog={drillCatalog}
           skillKeysWithBlueprint={skillKeysWithBlueprint}
           skills={coachingData.skills}
         />
@@ -508,13 +513,30 @@ async function AnalysisBreakdown({
           block and minute counts, so the offer is specific -- "see the drills"
           with no idea whether that means two minutes or an hour is not an
           offer anyone can take. */}
+      {/* THE DRILLS, OUT IN THE OPEN. They were a tab of names and a collapsed
+          session plan below the fold -- the one part of the page that says
+          what to DO, and it was the hardest part to find. Now a section of its
+          own directly under the read, framed as the answer: each card says
+          what it fixes before it says what it is. */}
+      {prescribedCount > 0 ? (
+        <section className="stack g3">
+          <div className="stack g1">
+            <h2 className="h2" style={{ margin: 0 }}>Your drills — do these to get better</h2>
+            <p className="sm" style={{ margin: 0, color: "var(--ink-3)" }}>
+              Each one targets something from this game. Start with number 1.
+            </p>
+          </div>
+          <DrillCards observations={coachingData.observations} catalog={drillCatalog} />
+        </section>
+      ) : null}
+
       {practice && practice.blocks.length > 0 ? (
         <section className="stack g4">
           <details className="reveal" style={{ "--reveal-accent": "var(--warn)" } as CSSProperties}>
             <summary className="reveal-sum">
               <span className="reveal-ic" aria-hidden="true">◎</span>
               <span className="reveal-txt">
-                <span className="reveal-title">See the drills that fix what this analysis found</span>
+                <span className="reveal-title">The full practice session</span>
                 <span className="reveal-sub">
                   {practice.blocks.length} block{practice.blocks.length === 1 ? "" : "s"}
                   {practiceMinutes(practice.blocks) ? `, ${practiceMinutes(practice.blocks)} minutes` : ""}

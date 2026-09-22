@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import SetupCanvas from "@/components/setup/SetupCanvas";
+import { FilmingGuide } from "@/components/upload/FilmingGuide";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { formatBytes, validateVideoFile, UPLOAD_PART_SIZE_BYTES, partCountFor } from "@/lib/video/validation";
@@ -585,6 +586,10 @@ export function VideoUploader({ linkFetchWorks = true }: { linkFetchWorks?: bool
 
   return (
     <div className="stack g4">
+      {/* Before the file picker, not after: by the time somebody has chosen a
+          file, the game is already filmed. Hidden once a file is chosen so it
+          does not push the upload controls off a phone screen. */}
+      {!file ? <FilmingGuide /> : null}
       <label
         htmlFor="video-file"
         className={`dropzone${dragOver ? " over" : ""}${busy ? " disabled" : ""}`}

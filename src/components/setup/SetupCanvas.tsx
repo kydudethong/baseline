@@ -31,6 +31,7 @@ import { CornerGuide } from "./CornerGuide";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PARTNER_SEED_LABEL } from "@/lib/db/setup";
 import { nearestPlayerFeet, samePoint } from "@/lib/vision/tap-target";
+import { UpgradeOffer, type UpgradeOfferData } from "@/components/billing/UpgradeOffer";
 import { useRouter } from "next/navigation";
 
 import CourtPresetBar from "./CourtPresetBar";
@@ -501,6 +502,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   const [time, setTime] = useState(initial?.frameTimestampSeconds ?? 0);
   const [duration, setDuration] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [upgrade, setUpgrade] = useState<UpgradeOfferData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [auto, setAuto] = useState<"idle" | "running" | "done" | "failed">("idle");
   const [autoNote, setAutoNote] = useState<string | null>(null);
@@ -1146,9 +1148,14 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       if (thenAnalyse) {
         const run = await fetch(`/api/analyses/${analysisId}/process`, { method: "POST" });
         if (!run.ok) {
-          const j = (await run.json().catch(() => ({}))) as { error?: string };
+          const j = (await run.json().catch(() => ({}))) as { error?: string; upgrade?: UpgradeOfferData | null };
+          // Out of minutes is not an error to apologise for; it is a price.
+          // Show the way on rather than only the wall.
+          if (run.status === 429 && j.upgrade) setUpgrade(j.upgrade);
           // The setup itself saved, so say that rather than implying it was lost.
-          setError(`Setup saved, but processing would not start: ${j.error ?? "unknown error"}`);
+          setError(run.status === 429
+            ? (j.error ?? "You're out of free minutes this month.")
+            : `Setup saved, but processing would not start: ${j.error ?? "unknown error"}`);
           return;
         }
       }
@@ -1790,6 +1797,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
         <p className={auto === "failed" ? "error" : "note"} style={{ fontSize: 13 }}>{autoNote}</p>
       ) : null}
       {error ? <div className="error">{error}</div> : null}
+      {upgrade ? <UpgradeOffer offer={upgrade} /> : null}
     </div>
   );
 }

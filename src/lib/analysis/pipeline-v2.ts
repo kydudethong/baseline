@@ -18,6 +18,9 @@ import { LOCAL_BUCKET, R2_BUCKET, debugVideoDir, debugVideoKey, debugVideoObject
 import { isLocalDev } from "@/lib/deployment";
 import type { AnalysisProgress, AnalysisStage } from "@/lib/db/types";
 import { CoachingPipelineError, coachingProgress, runCoachingPipeline } from "@/lib/coaching/run-coaching";
+import { readEmail } from "@/lib/notify/read-email";
+import { sendEmail } from "@/lib/notify/send";
+import { env } from "@/lib/env";
 import { startHeartbeat } from "./heartbeat";
 import { withRunSignal } from "./run-registry";
 
@@ -283,6 +286,7 @@ export async function runPipelineV2(
         await coachingProgress(supabase, analysisId, "Watching the game and writing your read…");
         await runCoachingPipeline(supabase, userId, analysisId);
         await coachingProgress(supabase, analysisId, "Coaching read finished.", { done: true });
+        await notifyRead(supabase, userId, analysisId, "ready");
       } catch (err) {
         const why = err instanceof CoachingPipelineError
           ? err.message
@@ -305,6 +309,7 @@ export async function runPipelineV2(
          * shape, so the page needs one renderer rather than two.
          */
         await coachingProgress(supabase, analysisId, "Coaching read failed.", { error: why });
+        await notifyRead(supabase, userId, analysisId, "failed");
       }
     }
   } catch (err) {
@@ -713,4 +718,43 @@ function missingColumnFrom(error: unknown): string | null {
   if (e?.code !== "PGRST204") return null;
   const message = typeof e.message === "string" ? e.message : "";
   return /'([^']+)' column/.exec(message)?.[1] ?? null;
+}
+
+
+/**
+ * Email the owner that their read is ready, or that it did not finish.
+ *
+ * Only from THIS path, the automatic run after processing. The manual re-run
+ * is started by somebody sitting on the page watching it, and emailing them
+ * about a thing on their screen is noise.
+ *
+ * Never throws: the read is on the page whether or not the email went.
+ */
+async function notifyRead(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  analysisId: string,
+  kind: "ready" | "failed"
+): Promise<void> {
+  try {
+    // The service-role client is what runs this pipeline, and it is the only
+    // one that can look a user's email up by id.
+    const { data: userRes } = await supabase.auth.admin.getUserById(userId);
+    const to = userRes?.user?.email;
+    if (!to) return;
+    const [{ data: analysis }, { data: read }] = await Promise.all([
+      supabase.from("analyses").select("title").eq("id", analysisId).maybeSingle(),
+      supabase.from("coaching_reads").select("headline").eq("analysis_id", analysisId).maybeSingle(),
+    ]);
+    const content = readEmail({
+      kind,
+      title: (analysis as { title?: string } | null)?.title ?? "your game",
+      headline: kind === "ready" ? ((read as { headline?: string | null } | null)?.headline ?? null) : null,
+      url: `${env.siteUrl.replace(/\/+$/, "")}/dashboard/${analysisId}`,
+    });
+    const sent = await sendEmail(to, content);
+    if (sent) console.log(`[email] read-${kind} sent for ${analysisId}`);
+  } catch (err) {
+    console.warn(`[email] could not notify for ${analysisId}: ${describeError(err)}`);
+  }
 }

@@ -19,6 +19,9 @@
     "src/lib/analysis/**/*.ts",
     "src/lib/video/**/*.ts",
     "src/lib/coaching/**/*.ts",
-    "src/lib/practice/**/*.ts"
+    "src/lib/practice/**/*.ts",
+    "src/lib/billing/**/*.ts",
+    "src/lib/notify/**/*.ts",
+    "src/components/analysis/DrillCards.tsx"
   ]
 }

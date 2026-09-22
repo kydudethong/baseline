@@ -20,8 +20,54 @@
  * when they most need the re-run.
  */
 
-/** Minutes of gameplay a month on the default plan. */
-export const MINUTES_PER_MONTH = 30;
+/**
+ * Minutes of gameplay a month on the FREE plan: about one game.
+ *
+ * Was 30, which cost roughly $2 a month per free account at six-odd cents a
+ * minute -- a thousand people trying it would have been a $2,000 bill with no
+ * revenue against it. Twenty-five covers one real game (Ky's own run 16-19
+ * minutes) and not two, which is the point: enough to see what the read is,
+ * not enough to never need to pay.
+ *
+ * Still counted in MINUTES rather than as "one analysis", for the reason the
+ * header gives: a game is anything from twelve minutes to forty, and "one
+ * analysis" would let one person run a forty-minute clip free while another
+ * is refused a second ten-minute one.
+ */
+export const MINUTES_PER_MONTH = 25;
+
+/**
+ * The paid plan: 90 minutes a month, about six games.
+ *
+ * Priced in Stripe, not here -- this is only the allowance the price buys. At
+ * roughly 6.6 cents a minute all-in, a fully used month costs about $6 against
+ * $14.99, and most people will not use all of it.
+ */
+export const PRO_MINUTES_PER_MONTH = 90;
+
+/**
+ * The longest clip a single pay-per-game purchase covers.
+ *
+ * One price for one game, so it needs a ceiling: without one, the same $3.99
+ * buys a ninety-minute tournament session that costs six dollars to read.
+ * Thirty minutes is a long game with warm-up still in it.
+ */
+export const GAME_MAX_MINUTES = 30;
+
+/**
+ * What this account has paid for, as Stripe reports it.
+ *
+ * Read from Stripe at the moment of asking rather than copied into a table.
+ * No migration, no webhook to miss, and no second copy of "is this person
+ * paying" that can disagree with the one that actually charges them.
+ */
+export interface Entitlement {
+  plan: "free" | "pro";
+  /** Analyses bought one at a time. Each is allowed once, whatever the balance. */
+  paidAnalysisIds: readonly string[];
+}
+
+export const FREE_ENTITLEMENT: Entitlement = { plan: "free", paidAnalysisIds: [] };
 
 export function monthlyLimitMinutes(): number {
   const v = Number(process.env.ANALYSIS_MINUTES_PER_MONTH);
@@ -78,6 +124,12 @@ export interface QuotaState {
    */
   clipExceedsWholeAllowance: boolean;
   resetsAt: string;
+  plan: "free" | "pro";
+  /**
+   * Whether this one clip could be bought on its own. False when the clip is
+   * longer than a single game covers, or its length is unknown.
+   */
+  canBuyGame: boolean;
 }
 
 export interface StartedRun {
@@ -96,24 +148,43 @@ export function quotaFor(opts: {
   analysisId: string;
   minutes: number | null;
   email: string | null | undefined;
+  /** What they have paid for. Omitted means free. */
+  entitlement?: Entitlement;
   now?: Date;
 }): QuotaState {
-  const limitMinutes = monthlyLimitMinutes();
+  const ent = opts.entitlement ?? FREE_ENTITLEMENT;
+  const limitMinutes = ent.plan === "pro" ? PRO_MINUTES_PER_MONTH : monthlyLimitMinutes();
   const resetsAt = monthEnd(opts.now).toISOString();
+  const paid = new Set(ent.paidAnalysisIds);
 
   // One entry per analysis, so a clip started three times is counted once.
+  //
+  // A GAME BOUGHT ON ITS OWN IS NOT DRAWN FROM THE ALLOWANCE. It was paid for
+  // separately; counting it against the monthly minutes as well would charge
+  // for the same clip twice -- once in money, once in allowance.
   const byId = new Map<string, number>();
-  for (const r of opts.startedThisMonth) byId.set(r.analysisId, r.minutes);
+  for (const r of opts.startedThisMonth) {
+    if (!paid.has(r.analysisId)) byId.set(r.analysisId, r.minutes);
+  }
   const usedMinutes = Math.round([...byId.values()].reduce((a, b) => a + b, 0) * 10) / 10;
   const remainingMinutes = Math.max(0, Math.round((limitMinutes - usedMinutes) * 10) / 10);
 
-  const base = { usedMinutes, limitMinutes, remainingMinutes, resetsAt, clipExceedsWholeAllowance: false };
+  const canBuyGame = opts.minutes !== null && opts.minutes <= GAME_MAX_MINUTES;
+  const base = {
+    usedMinutes, limitMinutes, remainingMinutes, resetsAt,
+    clipExceedsWholeAllowance: false, plan: ent.plan, canBuyGame,
+  };
   if (isUnlimited(opts.email)) return { ...base, unlimited: true, allowed: true };
+
+  // Bought on its own: allowed, whatever the month looks like.
+  if (paid.has(opts.analysisId)) return { ...base, unlimited: false, allowed: true };
 
   // A re-run is already paid for. Checked by id rather than by arithmetic, so
   // it holds when the account is exactly out of minutes -- which is the only
   // time it matters.
-  if (byId.has(opts.analysisId)) return { ...base, unlimited: false, allowed: true };
+  if (opts.startedThisMonth.some((r) => r.analysisId === opts.analysisId)) {
+    return { ...base, unlimited: false, allowed: true };
+  }
 
   // A duration we never recorded is our missing metadata, not the user's
   // fault. Letting it through is the lesser error: refusing a run because of
@@ -147,7 +218,8 @@ export async function quotaForUser(
   email: string | null | undefined,
   analysisId: string,
   /** Length of the clip about to run; null when it is not known. */
-  minutes: number | null
+  minutes: number | null,
+  entitlement: Entitlement = FREE_ENTITLEMENT
 ): Promise<QuotaState> {
   const { data, error } = await supabase
     .from("analyses")
@@ -169,5 +241,5 @@ export async function quotaForUser(
     const secs = v?.duration_seconds ?? null;
     return { analysisId: r.id, minutes: secs === null ? 0 : secs / 60 };
   });
-  return quotaFor({ startedThisMonth: started, analysisId, minutes, email });
+  return quotaFor({ startedThisMonth: started, analysisId, minutes, email, entitlement });
 }
