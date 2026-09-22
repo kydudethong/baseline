@@ -205,6 +205,30 @@ export interface RosterOptions {
    * hands them to their partner.
    */
   imageAspect?: number;
+  /**
+   * The people the user TAPPED on the setup frame: who they are, when, and
+   * the box around them there (normalised).
+   *
+   * WHAT THIS FIXES. A slot's idea of what its player looks like is a running
+   * average that follows whoever the slot is on. So one bad hand-off --
+   * teammates crossing, a player hidden for a moment, somebody by the fence --
+   * and the slot's own model becomes the wrong person, after which it happily
+   * keeps them. Reported three ways from real use: the analysed player's box
+   * went to a bystander, to an opponent and to the teammate.
+   *
+   * An anchor is a FIXED picture of the tapped person, taken around the moment
+   * they were tapped, that never updates. The slot it is given to pays for
+   * every frame it sits on somebody who does not look like that person, so a
+   * hand-off to the wrong body costs more the longer it lasts, and the slot
+   * snaps back as soon as the real player is detectable again.
+   */
+  anchors?: RosterAnchor[];
+}
+
+export interface RosterAnchor {
+  role: "self" | "partner";
+  timestampSeconds: number;
+  box: BoundingBoxNorm;
 }
 
 export interface RosterResult {
@@ -217,6 +241,8 @@ export interface RosterResult {
   droppedOffCourt: number;
   droppedNoCourt: number;
   droppedSurplus: number;
+  /** The slot carrying each anchor, when the anchor was found in the detections. */
+  roles: { self: string | null; partner: string | null };
 }
 
 /**
@@ -263,6 +289,18 @@ interface Slot {
   appearance: AppearanceSignature | null;
   build: BuildSignature | null;
   /** How many build readings have gone into it, since one is not a shape. */
+  buildSamples: number;
+  /** A fixed picture of the person this slot must be. See RosterOptions.anchors. */
+  anchor: AnchorRef | null;
+  /** What each point in `points` looked like, index for index. For relabelling. */
+  looks: Array<AppearanceSignature | null>;
+}
+
+interface AnchorRef {
+  role: "self" | "partner";
+  group: string;
+  appearance: AppearanceSignature | null;
+  build: BuildSignature | null;
   buildSamples: number;
 }
 
@@ -557,9 +595,25 @@ export function buildRoster(perFrame: FrameDetectionSet[], opts: RosterOptions):
       slots.push({
         playerId: `player_${n++}`, group,
         points: [], last: null, lastT: null, velocity: null, unit: null, appearance: null,
-        build: null, buildSamples: 0,
+        build: null, buildSamples: 0, anchor: null, looks: [],
       });
     }
+  }
+
+  // ---- anchors: who the user tapped, fixed ---------------------------------
+  const refs = (opts.anchors ?? [])
+    .map((a) => anchorRef(a, byFrame, plane))
+    .filter((x): x is AnchorRef => x !== null);
+  const roles: { self: string | null; partner: string | null } = { self: null, partner: null };
+  for (const role of ["self", "partner"] as const) {
+    const ref = refs.find((x) => x.role === role);
+    if (!ref) continue;
+    // A group with no line is "all"; with one, the tap says which half.
+    const group = hasSides ? ref.group : "all";
+    const free = slots.find((sl) => sl.group === group && sl.anchor === null);
+    if (!free) continue;
+    free.anchor = { ...ref, group };
+    roles[role] = free.playerId;
   }
 
   /**
@@ -616,7 +670,11 @@ export function buildRoster(perFrame: FrameDetectionSet[], opts: RosterOptions):
         // Left to right, so the numbering is stable and meaningful rather than
         // whatever order the detector happened to emit.
         const seeds = [...pool].slice(0, mine.length).sort((a, b) => a.pos.x - b.pos.x);
-        seeds.forEach((c, i) => place(mine[i], c, frame.t, plane.kind));
+        // An anchored slot is seeded on whoever looks most like its anchor,
+        // not on whoever happens to be leftmost -- otherwise the first frames
+        // of the "you" slot are your partner until the costs pull it across.
+        const order = bestAnchorOrder(mine, seeds, plane);
+        order.forEach((ci, si) => { if (ci !== null) place(mine[si], seeds[ci], frame.t, plane.kind); });
         droppedSurplus += Math.max(0, cands.length - mine.length);
         continue;
       }
@@ -627,6 +685,14 @@ export function buildRoster(perFrame: FrameDetectionSet[], opts: RosterOptions):
     }
   }
 
+  // ---- relabel: which slot was really the tapped person, frame by frame ---
+  const selfSlot = slots.find((sl) => sl.playerId === roles.self);
+  if (selfSlot) relabelToAnchor(selfSlot, slots.filter((sl) => sl.group === selfSlot.group));
+  const partnerSlot = slots.find((sl) => sl.playerId === roles.partner);
+  if (partnerSlot) {
+    relabelToAnchor(partnerSlot, slots.filter((sl) => sl.group === partnerSlot.group && sl !== selfSlot));
+  }
+
   const tracks: PlayerTrack[] = slots
     .filter((s) => s.points.length > 0)
     .map((s) => ({ playerId: s.playerId, points: s.points }));
@@ -634,7 +700,105 @@ export function buildRoster(perFrame: FrameDetectionSet[], opts: RosterOptions):
   return {
     tracks, plane: plane.kind, split,
     detectionsSeen, droppedOffCourt, droppedNoCourt, droppedSurplus,
+    roles: {
+      self: roles.self && tracks.some((t) => t.playerId === roles.self) ? roles.self : null,
+      partner: roles.partner && tracks.some((t) => t.playerId === roles.partner) ? roles.partner : null,
+    },
   };
+}
+
+/**
+ * What it costs to call this detection the person this slot is anchored to.
+ * Zero for an unanchored slot.
+ *
+ * Weighted above the running appearance term (3 on the court) because this is
+ * the one picture of the player that cannot have drifted: a body that looks
+ * nothing like the tapped person costs about as much as eight feet of
+ * distance. Build only once the anchor has enough readings to be a shape.
+ */
+function anchorCost(slot: Slot, c: Cand, plane: Plane): number {
+  const a = slot.anchor;
+  if (!a) return 0;
+  const look = a.appearance && c.appearance
+    ? appearanceDistance(a.appearance, c.appearance) * (plane.kind === "court" ? 8 : 1.3)
+    : 0;
+  const shape = a.build && c.build && a.buildSamples >= 3
+    ? buildDistance(a.build, c.build) * (plane.kind === "court" ? 3 : 0.5)
+    : 0;
+  return look + shape;
+}
+
+/** Seeds (already chosen) to slots, cheapest anchor fit first. Index per slot, or null. */
+function bestAnchorOrder(slots: Slot[], seeds: Cand[], plane: Plane): Array<number | null> {
+  const n = Math.min(slots.length, seeds.length);
+  const identity = slots.map((_, i) => (i < n ? i : null));
+  if (!slots.some((sl) => sl.anchor)) return identity;
+  let best = identity;
+  let bestCost = Infinity;
+  for (const perm of permutations([...Array(seeds.length).keys()])) {
+    let cost = 0;
+    for (let i = 0; i < n; i++) cost += anchorCost(slots[i], seeds[perm[i]], plane);
+    if (cost < bestCost) { bestCost = cost; best = slots.map((_, i) => (i < n ? perm[i] : null)); }
+  }
+  return best;
+}
+
+/**
+ * The tapped person's fixed picture: the detection under the tap, followed a
+ * second either way and averaged, so one frame's lighting or pose is not the
+ * whole description.
+ */
+function anchorRef(
+  a: RosterAnchor,
+  byFrame: Array<{ t: number; groups: Map<string, Cand[]> }>,
+  plane: Plane,
+): AnchorRef | null {
+  let fi = -1;
+  let gap = Infinity;
+  byFrame.forEach((f, i) => {
+    const g = Math.abs(f.t - a.timestampSeconds);
+    if (g < gap) { gap = g; fi = i; }
+  });
+  if (fi < 0 || gap > 0.6) return null;
+  const all = (f: { groups: Map<string, Cand[]> }) =>
+    [...f.groups.entries()].flatMap(([g, cs]) => cs.map((c) => ({ g, c })));
+  const bx = a.box;
+  const feetX = bx.x + bx.width / 2, feetY = bx.y + bx.height;
+  const inside = all(byFrame[fi]).filter(({ c }) => {
+    const fx = c.box.x + c.box.width / 2, fy = c.box.y + c.box.height;
+    const padX = Math.max(bx.width * 0.5, bx.height * 0.15);
+    return fx >= bx.x - padX && fx <= bx.x + bx.width + padX
+      && Math.abs(fy - feetY) <= bx.height * 0.35;
+  });
+  if (inside.length === 0) return null;
+  const hit = inside.reduce((b, x) => {
+    const d = (o: typeof x) => Math.hypot(o.c.box.x + o.c.box.width / 2 - feetX, o.c.box.y + o.c.box.height - feetY);
+    return d(x) < d(b) ? x : b;
+  });
+
+  let appearance = hit.c.appearance;
+  let build = hit.c.build;
+  let buildSamples = build ? 1 : 0;
+  // A second either way, one step at a time, taking the nearest body to where
+  // the last one was -- tight enough that a partner a stride away is not it.
+  for (const dir of [1, -1]) {
+    let last = hit.c;
+    for (let i = fi + dir; i >= 0 && i < byFrame.length; i += dir) {
+      if (Math.abs(byFrame[i].t - byFrame[fi].t) > 1.0) break;
+      const cands = byFrame[i].groups.get(hit.g) ?? [];
+      let next: Cand | null = null;
+      let nd = Infinity;
+      for (const c of cands) {
+        const d = Math.hypot(c.pos.x - last.pos.x, c.pos.y - last.pos.y) / Math.max(1e-6, (c.unit + last.unit) / 2);
+        if (d < nd) { nd = d; next = c; }
+      }
+      if (!next || nd > plane.maxPredict * 0.5) break;
+      if (next.appearance) appearance = appearance ? blend(appearance, next.appearance, 0.2) : next.appearance;
+      if (next.build) { build = build ? blendBuild(build, next.build, 0.2) : next.build; buildSamples += 1; }
+      last = next;
+    }
+  }
+  return { role: a.role, group: hit.g, appearance, build, buildSamples };
 }
 
 function place(slot: Slot, c: Cand, t: number, kind: "court" | "image"): void {
@@ -663,6 +827,7 @@ function place(slot: Slot, c: Cand, t: number, kind: "court" | "image"): void {
     slot.build = slot.build ? blendBuild(slot.build, c.build, 0.1) : c.build;
     slot.buildSamples += 1;
   }
+  slot.looks.push(c.appearance);
   slot.points.push({
     timestampSeconds: t,
     boxImageNorm: c.box,
@@ -684,8 +849,18 @@ function place(slot: Slot, c: Cand, t: number, kind: "court" | "image"): void {
  * globally worse pairing and swaps their identities for the rest of the point.
  */
 function assign(slots: Slot[], cands: Cand[], t: number, plane: Plane): Array<[number, number]> {
-  const k = Math.min(slots.length, cands.length);
-  if (k === 0) return [];
+  // FEWER PAIRS WHEN ALL OF THEM CANNOT BE MADE. This tried only the largest
+  // number of pairs, and when no complete pairing was feasible -- one body
+  // reachable by one slot, another reachable by nobody -- it assigned NOTHING,
+  // so a player standing in plain view went untracked for that frame.
+  for (let k = Math.min(slots.length, cands.length); k > 0; k--) {
+    const got = assignK(slots, cands, t, plane, k);
+    if (got.length > 0) return got;
+  }
+  return [];
+}
+
+function assignK(slots: Slot[], cands: Cand[], t: number, plane: Plane, k: number): Array<[number, number]> {
 
   // WHICH SLOTS, not just which candidates. The first version of this looped
   // `for (let si = 0; si < k; si++)`, which means that with one player visible
@@ -767,7 +942,14 @@ function cost1(slot: Slot, c: Cand, t: number, plane: Plane): number | null {
   // prediction. A prediction is a guess and must never be able to rule a real
   // detection out; where the player actually was is a fact.
   const fromLast = Math.hypot(c.pos.x - slot.last.x, c.pos.y - slot.last.y) / unit;
-  if (Math.min(d, fromLast) > plane.maxJump) return null;
+  // THE LIMIT GROWS WHILE THEY ARE GONE. Sixteen feet is how far somebody
+  // gets between two samples; somebody unseen for two seconds can be anywhere
+  // on their half. A fixed limit meant a player who reappeared further than
+  // that from where they vanished could never get their own slot back -- it
+  // sat empty for the rest of the clip while its player went untracked.
+  const goneFor = slot.lastT === null ? 0 : Math.max(0, t - slot.lastT - 0.25);
+  const reach = plane.maxJump + goneFor * (plane.kind === "court" ? 15 : 2.5);
+  if (Math.min(d, fromLast) > reach) return null;
   // OFF THE COURT, A SLOT MAY ONLY BE FOLLOWED THERE, NEVER JUMP THERE.
   //
   // The six-foot margin exists so a player chasing a wide ball stays tracked.
@@ -804,7 +986,13 @@ function cost1(slot: Slot, c: Cand, t: number, plane: Plane): number | null {
   const shape = slot.build && c.build && slot.buildSamples >= MIN_BUILD_SAMPLES
     ? buildDistance(slot.build, c.build) * (plane.kind === "court" ? 1.5 : 0.25)
     : 0;
-  return d + look + shape;
+  // WHERE SOMEBODY WAS STOPS MEANING MUCH ONCE THEY HAVE BEEN GONE A WHILE.
+  // A second behind their partner and a player can be anywhere on their half
+  // -- stacking pairs swap sides exactly then -- so the distance from a stale
+  // position is ranked more softly the staler it is, and what they look like
+  // gets the say it deserves. Feasibility above is untouched.
+  const soften = 1 + 1.5 * Math.min(goneFor, 2);
+  return d / soften + look + shape + anchorCost(slot, c, plane);
 }
 
 /**
@@ -917,4 +1105,93 @@ function permutations(xs: number[]): number[][] {
     for (const p of permutations(rest)) out.push([xs[i], ...p]);
   }
   return out;
+}
+
+/**
+ * Give the anchored slot, at every frame, the body that was really its person.
+ *
+ * WHY A SECOND PASS. The frame-by-frame assignment only ever looks one step
+ * back, so once a slot has been handed to the wrong body -- a teammate after
+ * an overlap -- the next frame compares against the wrong body's position and
+ * keeps it. This looks at the WHOLE clip at once: at each frame, which of the
+ * slots on the tapped person's side holds somebody who looks like the tapped
+ * person, with a price on changing answer so one badly-lit frame cannot flip
+ * it. Where the answer is a different slot, the two slots trade that frame's
+ * points, so both tracks come out whole and consistent.
+ *
+ * Only as good as the colours: two players in identical kit give it nothing to
+ * choose on, and then it changes nothing, which is the honest outcome.
+ */
+function relabelToAnchor(anchored: Slot, group: Slot[]): number {
+  const ref = anchored.anchor?.appearance;
+  if (!ref || group.length < 2) return 0;
+  const selfIdx = group.indexOf(anchored);
+  if (selfIdx < 0) return 0;
+  const byT = group.map((sl) => new Map(sl.points.map((p, i) => [p.timestampSeconds, i])));
+  const times = [...new Set(group.flatMap((sl) => sl.points.map((p) => p.timestampSeconds)))].sort((a, b) => a - b);
+  if (times.length === 0) return 0;
+  const SWITCH = 1.2, ABSENT = 0.6, UNSEEN_LOOK = 0.35;
+  const emit = (k: number, t: number) => {
+    const i = byT[k].get(t);
+    if (i === undefined) return ABSENT;
+    const look = group[k].looks[i];
+    return look ? appearanceDistance(ref, look) : UNSEEN_LOOK;
+  };
+  // Viterbi over "which slot holds the tapped person".
+  const K = group.length;
+  let cost = group.map((_, k) => emit(k, times[0]) + (k === selfIdx ? 0 : SWITCH));
+  const back: number[][] = [];
+  for (let ti = 1; ti < times.length; ti++) {
+    const next: number[] = [];
+    const from: number[] = [];
+    for (let k = 0; k < K; k++) {
+      let best = Infinity, arg = 0;
+      for (let j = 0; j < K; j++) {
+        const c = cost[j] + (j === k ? 0 : SWITCH);
+        if (c < best) { best = c; arg = j; }
+      }
+      next.push(best + emit(k, times[ti]));
+      from.push(arg);
+    }
+    back.push(from);
+    cost = next;
+  }
+  let state = cost.indexOf(Math.min(...cost));
+  const path = new Array<number>(times.length);
+  for (let ti = times.length - 1; ti >= 0; ti--) {
+    path[ti] = state;
+    if (ti > 0) state = back[ti - 1][state];
+  }
+  // Trade points wherever the answer is another slot.
+  let traded = 0;
+  times.forEach((t, ti) => {
+    const k = path[ti];
+    if (k === selfIdx) return;
+    const other = group[k];
+    const iSelf = byT[selfIdx].get(t);
+    const iOther = byT[k].get(t);
+    if (iOther === undefined) return;
+    const pOther = other.points[iOther], lOther = other.looks[iOther];
+    if (iSelf !== undefined) {
+      other.points[iOther] = anchored.points[iSelf];
+      other.looks[iOther] = anchored.looks[iSelf];
+      anchored.points[iSelf] = pOther;
+      anchored.looks[iSelf] = lOther;
+    } else {
+      other.points.splice(iOther, 1);
+      other.looks.splice(iOther, 1);
+      anchored.points.push(pOther);
+      anchored.looks.push(lOther);
+      byT[k] = new Map(other.points.map((p, i) => [p.timestampSeconds, i]));
+    }
+    traded += 1;
+  });
+  if (traded > 0) {
+    for (const sl of [anchored, ...group]) {
+      const order = sl.points.map((_, i) => i).sort((a, b) => sl.points[a].timestampSeconds - sl.points[b].timestampSeconds);
+      sl.points = order.map((i) => sl.points[i]);
+      sl.looks = order.map((i) => sl.looks[i]);
+    }
+  }
+  return traded;
 }

@@ -11,7 +11,7 @@ import type { AnalysisStage } from "@/lib/db/types";
 import { StageTimer } from "@/lib/analysis/stage-timer";
 import { buildSignatureFrom } from "./build-signature";
 import { calibrationFromSetup, isPlausibleCourtQuad, playerGatePolygonPx, pointInPolygon, transformToCourtCoordinates } from "./court";
-import { buildRoster } from "./roster";
+import { buildRoster, type RosterAnchor } from "./roster";
 import { clusterRalliesFromHits, type ClusteredRally } from "./rallies";
 import { netBandImagePx, netLineImagePx, type NetCrossing } from "./rallies-net";
 import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
@@ -447,11 +447,35 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   // no-geometry case left, so there is no fallback and no path back to
   // however-many identities the tracker feels like minting.
   const rosterSlots = input.setup?.matchMode === "singles" ? 1 : 2;
+  // The people the user tapped, as fixed pictures the roster holds its slots
+  // to. See RosterOptions.anchors. Only taps on a detected box: a hand-placed
+  // mark has no body under it to take a picture of.
+  const su = input.setup;
+  const anchors: RosterAnchor[] = su && su.frameWidthPx > 0 && su.frameHeightPx > 0
+    ? su.players.flatMap((pl) => {
+        if (!pl.box) return [];
+        const role = pl.isSelf ? "self" as const : pl.label === PARTNER_SEED_LABEL ? "partner" as const : null;
+        if (!role) return [];
+        return [{
+          role,
+          timestampSeconds: su.frameTimestampSeconds,
+          box: {
+            x: pl.box.x / su.frameWidthPx, y: pl.box.y / su.frameHeightPx,
+            width: pl.box.width / su.frameWidthPx, height: pl.box.height / su.frameHeightPx,
+          },
+        }];
+      })
+    : [];
   const roster = buildRoster(filteredDetections, {
     toCourtFeet: feetCourt,
     slotsPerSide: rosterSlots,
     imageAspect: input.frameWidthPx / input.frameHeightPx,
+    anchors,
   });
+  if (anchors.length > 0) {
+    log(`roster: anchored — you ${roster.roles.self ?? "not found under the tap"}`
+      + (anchors.some((a) => a.role === "partner") ? `, partner ${roster.roles.partner ?? "not found under the tap"}` : ""));
+  }
   const rawTracks: PlayerTrack[] = roster.tracks;
   log(`roster: ${roster.tracks.length} player(s) from ${roster.detectionsSeen} detections`
     + ` on the ${roster.plane} plane`
@@ -511,8 +535,11 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   if (input.setup && input.setup.players.length > 0) {
     const matched = matchTracksToSetup(tracks, input.setup);
     tracksToUse = matched.keep;
-    selfPlayerId = matched.selfPlayerId;
-    partnerPlayerId = matched.partnerPlayerId;
+    // The roster's anchored slots first: they were built to BE those people
+    // for the whole clip. Matching at the tap frame is the fallback for a
+    // hand-placed mark or a tap the roster could not find a body under.
+    selfPlayerId = roster.roles.self ?? matched.selfPlayerId;
+    partnerPlayerId = roster.roles.partner ?? matched.partnerPlayerId;
     // Matching no longer drops anyone, so the only thing that can fail here is
     // working out which track is you -- and that only matters if you actually
     // marked yourself. Reporting "we could not match your players" whenever

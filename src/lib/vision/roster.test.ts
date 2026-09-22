@@ -776,3 +776,100 @@ test("a player who walks off the court is still followed there", () => {
   const wide = got.tracks.find((tr) => tr.points.some((p) => (p.courtPosition?.x ?? 0) > 22));
   assert.ok(wide, "the player who walked wide lost their slot");
 });
+
+// ---------------------------------------------------------------------------
+// Anchors: the person the user tapped, held to for the whole clip.
+// ---------------------------------------------------------------------------
+
+/** The box `at()` would draw, for use as a tap. */
+const tapBox = (xFt: number, yFt: number) => at(xFt, yFt).boxImageNorm;
+const RED = { h: 0 }, BLUE = { h: 220 }, GREEN = { h: 120 }, YELLOW = { h: 55 };
+
+/** Which kit a track is wearing at time t, by where the people in `rows` stood. */
+function trackAtT(tr: { points: Array<{ timestampSeconds: number; courtPosition?: { x: number; y: number } | null }> }, t: number) {
+  return tr.points.find((p) => Math.abs(p.timestampSeconds - t) < 1e-6)?.courtPosition ?? null;
+}
+
+test("the tapped player keeps their slot when the pair switch sides out of sight", () => {
+  // Stacking: the near pair vanish for a second (behind the net post, off
+  // frame) and come back on each other's sides. By distance alone every slot
+  // keeps its side and both identities swap; the anchor keeps "you" on you.
+  const rows = [];
+  for (let i = 0; i < 30; i++) {
+    const t = i * 0.2;
+    const far = [at(5, 30, GREEN), at(15, 30, YELLOW)];
+    if (i < 10) rows.push({ t, people: [at(5, 14, RED), at(15, 14, BLUE), ...far] });
+    else if (i < 15) rows.push({ t, people: far });
+    else rows.push({ t, people: [at(15, 14, RED), at(5, 14, BLUE), ...far] });
+  }
+  const anchors = [{ role: "self" as const, timestampSeconds: 0.4, box: tapBox(5, 14) }];
+  const got = buildRoster(frames(rows), { toCourtFeet, anchors });
+  assert.ok(got.roles.self, "the tap was found");
+  const self = got.tracks.find((tr) => tr.playerId === got.roles.self)!;
+  assert.equal(Math.round(trackAtT(self, 0.4)!.x), 5);
+  assert.equal(Math.round(trackAtT(self, 4.0)!.x), 15, "followed the red player across, not the side");
+});
+
+test("without an anchor, the same clip keeps sides (and says nothing about who is who)", () => {
+  // The control: this is the behaviour the anchor exists to change.
+  const rows = [];
+  for (let i = 0; i < 30; i++) {
+    const t = i * 0.2;
+    const far = [at(5, 30, GREEN), at(15, 30, YELLOW)];
+    if (i < 10) rows.push({ t, people: [at(5, 14, RED), at(15, 14, BLUE), ...far] });
+    else if (i < 15) rows.push({ t, people: far });
+    else rows.push({ t, people: [at(15, 14, RED), at(5, 14, BLUE), ...far] });
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet });
+  assert.equal(got.roles.self, null);
+});
+
+test("an anchored slot comes back to its player after being handed to the teammate", () => {
+  // The tapped (red) player vanishes; the teammate (blue) steps into their
+  // spot and the "you" slot follows the nearest body -- blue. When red comes
+  // back on the far side of the half, the frame-by-frame pass leaves "you" on
+  // blue; the relabel pass must hand every one of those frames back.
+  const rows = [];
+  for (let i = 0; i < 40; i++) {
+    const t = i * 0.2;
+    const far = [at(5, 30, GREEN), at(15, 30, YELLOW)];
+    if (i < 10) rows.push({ t, people: [at(4, 10, RED), at(12, 10, BLUE), ...far] });
+    else if (i < 20) rows.push({ t, people: [at(4, 10, BLUE), ...far] });
+    else rows.push({ t, people: [at(18, 2, RED), at(4, 10, BLUE), ...far] });
+  }
+  const anchors = [{ role: "self" as const, timestampSeconds: 0.2, box: tapBox(4, 10) }];
+  const got = buildRoster(frames(rows), { toCourtFeet, anchors });
+  const self = got.tracks.find((tr) => tr.playerId === got.roles.self)!;
+  const end = trackAtT(self, 7.0);
+  assert.ok(end && Math.round(end.x) === 18, `"you" ended on ${JSON.stringify(end)}`);
+  // And the teammate's track got blue back rather than losing those frames.
+  const mate = got.tracks.find((tr) => tr.playerId !== got.roles.self && trackAtT(tr, 7.0)?.y !== undefined
+    && Math.round(trackAtT(tr, 7.0)!.y) === 10);
+  assert.ok(mate, "the teammate's track holds blue at the end");
+});
+
+test("a tap with no body under it anchors nothing", () => {
+  const rows = [{ t: 0, people: [at(5, 14), at(15, 14), at(5, 30), at(15, 30)] }];
+  const got = buildRoster(frames(rows), {
+    toCourtFeet, anchors: [{ role: "self", timestampSeconds: 0, box: tapBox(10, 40) }],
+  });
+  assert.equal(got.roles.self, null);
+});
+
+test("in identical kit an anchor changes nothing it cannot justify", () => {
+  // Colour is the anchor's only evidence. With the pair dressed alike it has
+  // none, and the tracks must come out exactly as they would without it.
+  const rows = [];
+  for (let i = 0; i < 30; i++) {
+    rows.push({ t: i * 0.2, people: [
+      at(5 + Math.sin(i / 3) * 3, 12, RED), at(15 - Math.sin(i / 3) * 3, 12, RED),
+      at(5, 30, GREEN), at(15, 30, YELLOW),
+    ]});
+  }
+  const plain = buildRoster(frames(rows), { toCourtFeet });
+  const anchored = buildRoster(frames(rows), {
+    toCourtFeet, anchors: [{ role: "self", timestampSeconds: 0, box: tapBox(5, 12) }],
+  });
+  const sig = (r: typeof plain) => r.tracks.map((tr) => tr.points.map((p) => p.courtPosition?.x.toFixed(2)).join(",")).join("|");
+  assert.equal(sig(anchored), sig(plain));
+});
