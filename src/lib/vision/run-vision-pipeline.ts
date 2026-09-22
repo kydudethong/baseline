@@ -17,7 +17,6 @@ import { netBandImagePx, netLineImagePx, type NetCrossing } from "./rallies-net"
 import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
 import { smoothPoseFrames } from "./pose-smooth";
 import { gateImplausibleLimbs } from "./pose-limbs";
-import { assignRoles, roleNameMap } from "./player-roles";
 import { LoadSampler, describeLoad } from "@/lib/analysis/cpu-load";
 import {
   majoritySide, partnerGap, partnerOf, zoneBreakdown,
@@ -997,14 +996,15 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
   let overlayFailure: string | null = null;
   if (debugRenderEnabled() && input.debugId) {
     stage("overlay", "rendering the annotated overlay — the coaching read is written from it…");
-    // Roles from the positioning pass, which already knows which side of the
-    // net each player spent their time on.
-    const sideByPlayer = new Map(positioning.map((p) => [p.playerId, p.side]));
-    const roleNames = roleNameMap(assignRoles(
-      tracks.map((t) => t.playerId),
-      selfPlayerId ? [selfPlayerId] : [],
-      (id) => sideByPlayer.get(id) ?? null
-    ));
+    // EVERY BOX SAYS "Player". No "You", no "Partner", no gold box.
+    //
+    // The box labels are the tracker's opinion of who is who, and the tracker
+    // can hand a slot to the wrong body -- a read once followed a "You" box
+    // onto a bystander by the fence. Gemini is told who the subject is by the
+    // marked still instead, which comes from the user's own tap and cannot
+    // drift. A neutral label leaves it nothing to be misled by: the boxes help
+    // it find people, the still tells it which one is which. Ky's call.
+    const roleNames = new Map(tracks.map((t) => [t.playerId, "Player"]));
 
     // MEMORY AND DISK, right before the stage that keeps dying.
     //
@@ -1044,7 +1044,8 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
         rallies: ralliesUsed,
         tracks,
         poses,
-        selfPlayerId,
+        // Null so nobody is drawn in the subject's colour. See roleNames.
+        selfPlayerId: null,
         onLog: (l) => log(`  ${l}`),
       });
     } catch (err) {

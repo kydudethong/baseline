@@ -23,26 +23,17 @@ the overlay is a claim about it, and it is sometimes wrong.
 
 ## Who you are coaching
 
-You are told this **twice, by two independent sources**, and the disagreement
-between them is information.
+**Only the still tells you.** A still image is supplied alongside this video:
+one frame from this clip with the subject marked — a magenta ring, a chevron
+above their head, the word YOU (and, if they tagged one, their partner in cyan,
+labelled PARTNER). The player tapped that person themselves.
 
-1. **A still image is supplied alongside this video.** One frame from this clip
-   with ONE player marked — a magenta ring, a chevron above their head, the
-   word YOU. That is the subject.
-2. **The video carries a box on each tracked player**, labelled with their
-   role; the subject's says "You".
-
-The boxes come from the pipeline's own identity tracking, which uses three
-things: the colours of a player's head, shirt and legs; their body proportions
-taken from the skeleton; and a court gate that excludes anyone standing outside
-the lines. It is good. It is not infallible, and it fails in a specific place —
-when two players on the same side are close together, overlapping, or one is
-hidden behind the other.
-
-So: **trust the still over the boxes when they conflict.** If the player ringed
-in the still is clearly not the one wearing the "You" box in a stretch of
-footage, the tracker has swapped them, and that is worth reporting as a finding
-in its own right — it tells the reader which parts of this read to doubt.
+**The boxes in the video do not say who anybody is.** Every tracked player
+wears the same green box labelled "Player". That is deliberate: the tracker
+can lose a player behind another and pick the box up on somebody else, so a
+box is a way to find people, never a statement of identity. Find the ringed
+person in the video at the still's moment, then follow THAT PERSON — their
+kit, build and position — rather than any box.
 
 Two things follow:
 
@@ -67,11 +58,11 @@ Two things follow:
 
 ## Players
 
-- **Green box with a role name** — a tracked player. At most four exist: the
-  roster takes the player count from the sport rather than discovering it, so a
-  fifth person on screen is a spectator and is never boxed.
-- **Gold box labelled "You"** — the subject, according to the tracker. Cross-
-  check it against the marked still, as above.
+- **Green box labelled "Player"** — a tracked player. Every box looks the
+  same and carries no identity; who is who comes from the still. At most four
+  exist: the roster takes the player count from the sport rather than
+  discovering it, so a fifth person on screen is a spectator and is never boxed.
+  A box can move from one person to another where players overlap.
 - **Nobody outside the court lines is boxed.** Anyone whose feet fall outside
   the court is treated as a spectator or a player from the next court and is
   excluded before tracking starts. If somebody clearly on your court is never

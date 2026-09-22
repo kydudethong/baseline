@@ -256,14 +256,14 @@ test("a nonsense duration falls back rather than asking for zero room", () => {
   assert.ok(analystOutputBudget(Number.NaN) > THINKING_ALLOWANCE);
 });
 
-test("with a still attached, the prompt says which source wins", () => {
-  // THE CONFLICT IS THE POINT. The model is told who the subject is twice —
-  // by a fixed marked still and by per-frame boxes that can swap during an
-  // overlap. Telling it both without saying which to believe leaves it to
-  // pick, silently, exactly where the tracker is least reliable.
+test("with a still attached, the still is the only source of who the subject is", () => {
+  // There used to be two sources -- the still and a "You" box -- and the box
+  // drifted onto a bystander. Now every box says "Player" and the prompt must
+  // say so, or the model goes looking for a "You" box that is not drawn.
   const p = analystPrompt(input(), "LEGEND", null, true);
   assert.match(p, /TRUST THE STILL/);
-  assert.match(p, /report the\nconflict/);
+  assert.match(p, /ALL labelled "Player"/);
+  assert.doesNotMatch(p, /labelled "You"/);
 });
 
 test("with no still, the boxes are presented as a guess rather than an answer", () => {
@@ -272,7 +272,7 @@ test("with no still, the boxes are presented as a guess rather than an answer", 
   // indistinguishable from one where somebody actually confirmed it.
   const p = analystPrompt(input(), "LEGEND", null, false);
   assert.match(p, /NO STILL WAS SUPPLIED/);
-  assert.match(p, /best guess/i);
+  assert.match(p, /not a substitute for knowing/i);
   assert.doesNotMatch(p, /TRUST THE STILL/);
 });
 
@@ -296,12 +296,15 @@ test("the legend does not promise marks the renderer stopped drawing", () => {
   assert.doesNotMatch(OVERLAY_LEGEND, /Orange line.*ball's path/i);
   // And the things it SHOULD say now, since the boxes are back and the court
   // gate is what keeps spectators out of them.
-  assert.match(OVERLAY_LEGEND, /Gold box labelled "You"/);
+  assert.match(OVERLAY_LEGEND, /Green box labelled "Player"/);
+  // NO ROLE ON ANY BOX. Identity comes from the still alone; a "You" box that
+  // drifted onto a bystander is what this replaced.
+  assert.doesNotMatch(OVERLAY_LEGEND, /labelled "You"/);
   assert.match(OVERLAY_LEGEND, /outside the court/i);
   // The tie-break, which is the only instruction that makes two sources of
   // truth better than one. Without it the model picks, silently, in exactly
   // the frames where the tracker is least reliable.
-  assert.match(OVERLAY_LEGEND, /trust the still over the boxes/i);
+  assert.match(OVERLAY_LEGEND, /Only the still tells you/i);
 });
 
 test("the prompt tells the model the rate it is actually being shown", () => {
