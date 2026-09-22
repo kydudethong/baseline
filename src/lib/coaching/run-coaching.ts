@@ -442,6 +442,8 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       userId: analysis.user_id,
       selfPlayerLabel: analysis.self_player_label ?? null,
       partnerPlayerLabel: ctx.partnerPlayerId,
+      setup: await getSetup(supabase, analysisId).catch(() => null),
+      sourceKey: analysis.video?.storage_path ?? null,
       onLog: (line) => console.error(`[coaching] ${line}`),
     });
     analyst = await runAnalyst({

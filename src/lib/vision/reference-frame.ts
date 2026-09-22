@@ -144,3 +144,38 @@ export function pickReferenceFrame<F extends ReferenceFrameCandidate>(
   });
   return best;
 }
+
+/**
+ * The stored frame nearest a moment, among those where `label` has a box.
+ *
+ * FOR THE SETUP TIMESTAMP. That is the one instant where who-is-who was
+ * settled by a person rather than by tracking: the user tapped a body and the
+ * match is made there. Anywhere else in the clip a slot can have drifted --
+ * onto a bystander by the fence while the real player was hidden -- and the
+ * "fullest frame" picker above, which prefers the middle of the clip, then
+ * rings the bystander and the whole read coaches him. Reported from real use.
+ *
+ * Within `maxGapSeconds` or not at all: a frame a minute away is no closer to
+ * the tap than the middle of the clip is.
+ */
+export function pickFrameNear<F extends ReferenceFrameCandidate>(
+  frames: F[],
+  tracks: ReferenceTrack[],
+  label: string,
+  nearSeconds: number,
+  maxGapSeconds = 5,
+  sideOf?: SideOfCourt
+): PickedReferenceFrame<F> | null {
+  let best: PickedReferenceFrame<F> | null = null;
+  let bestGap = Infinity;
+  frames.forEach((frame, index) => {
+    if (!frame.debug_storage_path) return;
+    const gap = Math.abs(frame.timestamp_s - nearSeconds);
+    if (gap > maxGapSeconds || gap >= bestGap) return;
+    const boxes = boxesAtTimestamp(tracks, frame.timestamp_s, sideOf);
+    if (!boxes.some((b) => b.playerLabel === label)) return;
+    best = { frame, index, boxes };
+    bestGap = gap;
+  });
+  return best;
+}

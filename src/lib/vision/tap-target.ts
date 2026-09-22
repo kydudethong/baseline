@@ -63,7 +63,22 @@ export function nearestPlayerFeet(
   players: TapCandidate[],
   toleranceHeights = TAP_SNAP_HEIGHTS
 ): { x: number; y: number } | null {
-  let best: { distance: number; feet: { x: number; y: number } } | null = null;
+  return nearestPlayer(tap, players, toleranceHeights)?.feet ?? null;
+}
+
+/**
+ * The player this tap meant -- feet AND the box that was tapped -- or null.
+ *
+ * The box is kept because it is the one unambiguous record of WHO was tapped:
+ * a point at somebody's feet can later be "nearest" to a different person, a
+ * box around them cannot. See SetupPlayer.box.
+ */
+export function nearestPlayer(
+  tap: { x: number; y: number },
+  players: TapCandidate[],
+  toleranceHeights = TAP_SNAP_HEIGHTS
+): { feet: { x: number; y: number }; box: { x: number; y: number; width: number; height: number } } | null {
+  let best: { distance: number; feet: { x: number; y: number }; box: { x: number; y: number; width: number; height: number } } | null = null;
   for (const p of players) {
     const distance = distanceToBox(tap, p.boxPx);
     const height = boxRect(p.boxPx).height;
@@ -72,10 +87,10 @@ export function nearestPlayerFeet(
     // normal case on a doubles court, and iterating in detector order would
     // hand the tap to whichever the model happened to emit first.
     if (!best || distance < best.distance) {
-      best = { distance, feet: { x: p.feetPx[0], y: p.feetPx[1] } };
+      best = { distance, feet: { x: p.feetPx[0], y: p.feetPx[1] }, box: boxRect(p.boxPx) };
     }
   }
-  return best?.feet ?? null;
+  return best ? { feet: best.feet, box: best.box } : null;
 }
 
 /** Whether two seeds are the same point, so one person cannot be tagged twice. */

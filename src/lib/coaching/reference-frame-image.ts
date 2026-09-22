@@ -21,7 +21,15 @@ import path from "node:path";
 
 import type { Database } from "@/lib/db/types";
 import { markPlayersOnFrameViaPython, type FrameMark } from "@/lib/vision/cv-scripts";
-import { pickReferenceFrame } from "@/lib/vision/reference-frame";
+import { pickReferenceFrame, pickFrameNear } from "@/lib/vision/reference-frame";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { downloadToFile } from "@/lib/storage/r2";
+import { probeVideo } from "@/lib/video/ffmpeg";
+import type { PreAnalysisSetup, SetupBox } from "@/lib/db/setup";
+import { PARTNER_SEED_LABEL } from "@/lib/db/setup";
+
+const execFileAsync = promisify(execFile);
 
 export interface ReferenceFrameImage {
   mimeType: string;
@@ -76,10 +84,23 @@ export async function buildReferenceFrameImage(opts: {
    * it will do, silently, and write a confident section about the wrong one.
    */
   partnerPlayerLabel?: string | null;
+  /**
+   * The setup row and the clip, for drawing the ring where the user TAPPED.
+   *
+   * Preferred over everything below whenever the tap was on a detected box:
+   * the still is then the setup frame itself, cut from the source video, with
+   * the ring drawn from the box the user chose. No tracking sits between the
+   * tap and the ring, so nothing can move it onto somebody else.
+   */
+  setup?: PreAnalysisSetup | null;
+  sourceKey?: string | null;
   onLog?: (line: string) => void;
 }): Promise<ReferenceFrameImage | null> {
   const log = opts.onLog ?? (() => {});
   const label = (opts.selfPlayerLabel ?? "").split(",").map((l) => l.trim()).filter(Boolean)[0];
+
+  const fromTap = await stillFromSetupTap(opts, label ?? "you", log);
+  if (fromTap) return fromTap;
   if (!label) {
     log("reference frame: nobody is tagged as the subject — the model will not be told who to coach");
     return null;
@@ -95,7 +116,13 @@ export async function buildReferenceFrameImage(opts: {
     return null;
   }
 
-  const picked = pickReferenceFrame(framesRes.data ?? [], tracksRes.data ?? []);
+  // NEAR THE TAP FIRST. See pickFrameNear: the setup instant is where the
+  // label was matched to the person the user chose, so a frame there shows the
+  // right person under it; the fullest frame mid-clip may not.
+  const setupT = opts.setup?.players.some((p) => p.isSelf) ? opts.setup.frameTimestampSeconds : null;
+  const picked = (setupT !== null
+    ? pickFrameNear(framesRes.data ?? [], tracksRes.data ?? [], label, setupT)
+    : null) ?? pickReferenceFrame(framesRes.data ?? [], tracksRes.data ?? []);
   if (!picked) {
     log("reference frame: no rendered frame was stored for this analysis");
     return null;
@@ -163,6 +190,72 @@ export async function buildReferenceFrameImage(opts: {
     };
   } catch (e) {
     log(`reference frame: could not be built — ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * The setup frame, cut from the source, ringed where the user tapped.
+ *
+ * Null (and the caller falls back to the tracked frames) when there is no
+ * tapped box -- a hand-placed mark or an old setup row -- or when anything
+ * about cutting the frame fails. Never throws.
+ */
+async function stillFromSetupTap(
+  opts: { supabase: SupabaseClient<Database>; analysisId: string; userId: string;
+          setup?: PreAnalysisSetup | null; sourceKey?: string | null },
+  label: string,
+  log: (line: string) => void,
+): Promise<ReferenceFrameImage | null> {
+  const setup = opts.setup;
+  const self = setup?.players.find((p) => p.isSelf);
+  if (!setup || !self?.box || !opts.sourceKey) return null;
+  const W = setup.frameWidthPx, H = setup.frameHeightPx;
+  if (!(W > 0 && H > 0)) return null;
+  const partner = setup.players.find((p) => !p.isSelf && p.label === PARTNER_SEED_LABEL && p.box);
+  const norm = (b: SetupBox) => ({ x: b.x / W, y: b.y / H, width: b.width / W, height: b.height / H });
+
+  const dir = await mkdtemp(path.join(tmpdir(), "refsetup-"));
+  try {
+    const src = path.join(dir, "source.mp4");
+    const inPath = path.join(dir, "frame.jpg");
+    const outPath = path.join(dir, "marked.jpg");
+    await downloadToFile(opts.sourceKey, src);
+    const t = Math.max(0, setup.frameTimestampSeconds);
+    await execFileAsync("ffmpeg", [
+      "-v", "error", "-ss", t.toFixed(3), "-i", src, "-frames:v", "1",
+      "-vf", "scale='min(1280,iw)':-2", "-q:v", "3", "-y", inPath,
+    ]);
+    // THE SAME PICTURE THE USER TAPPED ON, checked rather than assumed: a
+    // rotated clip read one way by the browser and the other by ffmpeg would
+    // put the ring on empty court with total confidence.
+    const probed = await probeVideo(inPath);
+    if (!probed.width || !probed.height
+      || Math.abs(probed.width / probed.height - W / H) > 0.02 * (W / H)) {
+      log(`reference frame: setup still is ${probed.width}x${probed.height}, tap was on ${W}x${H} — using tracked frames`);
+      return null;
+    }
+    const marks: FrameMark[] = [{ box: norm(self.box), label: "YOU" }];
+    if (partner?.box) marks.push({ box: norm(partner.box), label: "PARTNER" });
+    await markPlayersOnFrameViaPython({ imagePath: inPath, outPath, marks });
+    const bytes = await readFile(outPath);
+    const storagePath = referenceFramePath(opts.userId, opts.analysisId);
+    const { error: upErr } = await opts.supabase.storage
+      .from("videos").upload(storagePath, bytes, { contentType: "image/jpeg", upsert: true });
+    if (upErr) log(`reference frame: kept in memory but not stored — ${upErr.message}`);
+    log(`reference frame: the setup frame at ${t.toFixed(1)}s, ringed where you tapped`
+      + (partner ? " · partner ringed too" : ""));
+    return {
+      mimeType: "image/jpeg",
+      dataBase64: bytes.toString("base64"),
+      timestampSeconds: t,
+      playerLabel: label,
+      markedPartner: Boolean(partner),
+    };
+  } catch (e) {
+    log(`reference frame: could not cut the setup frame — ${e instanceof Error ? e.message : String(e)}`);
     return null;
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});

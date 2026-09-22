@@ -119,3 +119,20 @@ test("tolerance scales with the player's own size, not a fixed pixel count", () 
   assert.equal(near.selfPlayerId, "NEAR");
   assert.equal(far.selfPlayerId, null);
 });
+
+test("a tapped box is not claimed by a big bystander whose track is merely nearby", () => {
+  // Reported from real footage. The tapped player is small and far off; the
+  // tracker has no box for them at that instant; a man by the camera is five
+  // hundred pixels tall, so a tolerance scaled by HIS height reaches the tap.
+  const tapped = { x: 882, y: 410, width: 36, height: 90 };   // feet at (900, 500)
+  const tracks = [trackAt("BYSTANDER", 1150, 560, 500)];
+  const byPoint = matchTracksToSetup(tracks, setupWith([{ x: 900, y: 500, isSelf: true }]));
+  assert.equal(byPoint.selfPlayerId, "BYSTANDER", "the old rule, kept for hand-placed marks");
+  const byBox = matchTracksToSetup(tracks, setupWith([{ x: 900, y: 500, isSelf: true, box: tapped }]));
+  assert.equal(byBox.selfPlayerId, null, "no track inside the tapped box is no match, not the wrong one");
+  const withPlayer = matchTracksToSetup(
+    [...tracks, trackAt("PLAYER", 905, 505, 90)],
+    setupWith([{ x: 900, y: 500, isSelf: true, box: tapped }]),
+  );
+  assert.equal(withPlayer.selfPlayerId, "PLAYER");
+});

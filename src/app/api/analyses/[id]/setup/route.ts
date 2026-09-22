@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAnalysisForUser } from "@/lib/db/analyses";
 import {
-  getSetup, saveSetup, normaliseLineColor,
+  getSetup, saveSetup, normaliseLineColor, cleanSetupPlayer,
   type PreAnalysisSetup, type SetupPlayer, type MatchMode,
 } from "@/lib/db/setup";
 
@@ -67,7 +67,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     }
   }
 
-  const players: SetupPlayer[] = Array.isArray(body.players) ? body.players.filter(point) : [];
+  const players: SetupPlayer[] = Array.isArray(body.players)
+    ? (body.players as unknown[]).map(cleanSetupPlayer).filter((p): p is SetupPlayer => p !== null)
+    : [];
   if (players.filter((p) => p.isSelf).length > 1) {
     return NextResponse.json({ error: "Only one player can be marked as you." }, { status: 400 });
   }

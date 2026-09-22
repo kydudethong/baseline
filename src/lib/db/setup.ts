@@ -18,6 +18,53 @@ export interface SetupPlayer extends SetupPoint {
   /** Where this player's feet were on the setup frame. */
   isSelf: boolean;
   label?: string;
+  /**
+   * The detection box the user tapped, in the same video pixels as x/y.
+   *
+   * Absent on a hand-placed mark (nobody was detected under the tap) and on
+   * rows saved before it existed. Present, it is the strongest statement in
+   * the whole setup: THIS body, on THIS frame. Two things lean on it --
+   * matching (a track's feet must be inside it, not merely "near" the tap,
+   * because a tolerance scaled by box height lets a big near-camera bystander
+   * claim a tap meant for a small player further away) and the still sent to
+   * the coach (drawn on the setup frame itself, from this box, so the ring is
+   * on exactly the person who was tapped and no tracking can move it).
+   */
+  box?: SetupBox;
+}
+
+export interface SetupBox { x: number; y: number; width: number; height: number }
+
+/** A seed from a request body, or null. Unknown fields are dropped, not kept. */
+export function cleanSetupPlayer(v: unknown): SetupPlayer | null {
+  const num = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  if (!num(o.x) || !num(o.y)) return null;
+  const out: SetupPlayer = { x: o.x, y: o.y, isSelf: o.isSelf === true };
+  if (typeof o.label === "string" && o.label) out.label = o.label;
+  const b = o.box as Record<string, unknown> | undefined;
+  if (b && num(b.x) && num(b.y) && num(b.width) && num(b.height) && b.width > 0 && b.height > 0) {
+    out.box = { x: b.x, y: b.y, width: b.width, height: b.height };
+  }
+  return out;
+}
+
+/**
+ * Whether a track's feet belong to the box the user tapped.
+ *
+ * Generous sideways (half a box width, since a box is a body and feet spread
+ * wider than the torso mid-stride) and a third of a body up or down from the
+ * bottom edge, which is where feet are. Tight enough that a different person
+ * a step away is outside it; loose enough that the tracker's own box for the
+ * same person, from a different detector pass, lands inside.
+ */
+export function feetInsideSeedBox(f: { x: number; y: number }, b: SetupBox): boolean {
+  const padX = Math.max(b.width * 0.5, b.height * 0.15);
+  const padY = b.height * 0.35;
+  const bottom = b.y + b.height;
+  return f.x >= b.x - padX && f.x <= b.x + b.width + padX
+    && f.y >= bottom - padY && f.y <= bottom + padY;
 }
 
 /**
@@ -298,7 +345,13 @@ export function matchTracksToSetup<T extends TrackLike>(
   setup.players.forEach((seed, si) => {
     for (const [id, f] of positions) {
       const d = Math.hypot(f.x - seed.x, f.y - seed.y);
-      if (d <= f.h * toleranceInHeights) pairs.push({ d, seed: si, id });
+      // THE TAPPED BOX DECIDES when there is one. The height-scaled tolerance
+      // below is scaled by the TRACK's height, so the biggest box in frame --
+      // somebody standing by the camera -- gets the widest net, and on a real
+      // clip it caught a tap meant for a player further away whose own track
+      // happened to be missing at that instant.
+      const ok = seed.box ? feetInsideSeedBox(f, seed.box) : d <= f.h * toleranceInHeights;
+      if (ok) pairs.push({ d, seed: si, id });
     }
   });
   pairs.sort((a, b) => a.d - b.d);

@@ -729,6 +729,23 @@ function assign(slots: Slot[], cands: Cand[], t: number, plane: Plane): Array<[n
  */
 const MAX_PREDICT_S = 1.0;
 
+/**
+ * How stale a slot may be and still follow its player off the court.
+ *
+ * ONE FRAME at the 5fps this runs at. Half a second was tried first and a
+ * test caught it: two frames of a hidden player allowed ten feet at running
+ * speed, which is exactly the distance to somebody standing by the fence.
+ * The cost is that a player lost while outside the lines is picked up again
+ * when they step back in, not while they are still out there.
+ */
+const OFF_COURT_FOLLOW_S = 0.3;
+
+/**
+ * Faster than anybody runs on a pickleball court (a sprint is ~20 ft/s),
+ * so a real player is never refused for it. Only checked off the court.
+ */
+const MAX_RUN_FT_PER_S = 25;
+
 function cost1(slot: Slot, c: Cand, t: number, plane: Plane): number | null {
   if (slot.last === null) return 50; // an unseeded slot takes anything, at a price
   // EVERY DISTANCE BELOW IS IN BODY LENGTHS, which is what lets one set of
@@ -751,6 +768,25 @@ function cost1(slot: Slot, c: Cand, t: number, plane: Plane): number | null {
   // detection out; where the player actually was is a fact.
   const fromLast = Math.hypot(c.pos.x - slot.last.x, c.pos.y - slot.last.y) / unit;
   if (Math.min(d, fromLast) > plane.maxJump) return null;
+  // OFF THE COURT, A SLOT MAY ONLY BE FOLLOWED THERE, NEVER JUMP THERE.
+  //
+  // The six-foot margin exists so a player chasing a wide ball stays tracked.
+  // It also admits whoever is standing by the fence, and the slot jump limit
+  // (sixteen feet) let a slot whose player had been hidden for a moment land
+  // on that bystander -- who then held it, being stationary and therefore
+  // always the nearest thing to where the slot last was. Reported from real
+  // footage: the read ringed a man drinking water beside the court.
+  //
+  // So a candidate outside the lines is only this slot if the slot was seen a
+  // moment ago and close by: a player walking out, not a slot teleporting.
+  // Inside the lines nothing changes.
+  if (!plane.onCourtStrict(c.pos)) {
+    const gap = slot.lastT === null ? Infinity : t - slot.lastT;
+    if (gap > OFF_COURT_FOLLOW_S) return null;
+    // At running speed from where they were, on the court plane where a foot
+    // is a foot. A bystander a few strides off is not reachable in one frame.
+    if (fromLast > MAX_RUN_FT_PER_S * Math.max(gap, 0.2)) return null;
+  }
   // Appearance is worth a couple of body lengths, no more. It breaks ties
   // between two players standing close together; it never overrules where they
   // are. Half a body on the image plane, where the same weight in court feet

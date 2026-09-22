@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { CoachingDrillRow, CoachingObservationRow } from "@/lib/db/types";
 
 /**
@@ -104,5 +105,59 @@ export function DrillCards({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * The drills, folded into one clearly-labelled door.
+ *
+ * FOLDED BECAUSE THEY ARE A DIFFERENT JOB. The read is for the sofa; the
+ * drills are for the court. Laid out in full under the read they were two
+ * screens of instructions nobody had asked for yet -- so they sit behind one
+ * tap, with the summary saying how many there are and what they fix.
+ *
+ * AND LABELLED AS PERSONAL, because a closed box of "drills" reads as a
+ * generic library. The summary names the problems from THIS game each one was
+ * picked for, which is the thing that makes it worth opening.
+ */
+export function PersonalDrillsReveal({
+  observations,
+  catalog,
+  subject = "you",
+}: {
+  observations: CoachingObservationRow[];
+  catalog: Catalog;
+  /** "you" on your own page; "them" on a shared link, read by somebody else. */
+  subject?: "you" | "them";
+}) {
+  const all = prescribedDrills(observations).filter((d) => catalog[d.slug]);
+  if (all.length === 0) return null;
+  const fixes = [...new Set(all.flatMap((d) => d.fixes))];
+  const shown = fixes.slice(0, 3);
+  const you = subject === "you";
+  return (
+    <details className="reveal drills-reveal" style={{ "--reveal-accent": "var(--good)" } as CSSProperties}>
+      <summary className="reveal-sum">
+        <span className="reveal-ic" aria-hidden="true">✦</span>
+        <span className="reveal-txt">
+          <span className="reveal-title">
+            {you ? "Your personal drills" : "Drills built for this player"}{" "}
+            <span className="drills-badge">Made from this game</span>
+          </span>
+          <span className="reveal-sub">
+            {all.length} drill{all.length === 1 ? "" : "s"} picked for what the coach saw {you ? "you" : "them"} do
+            {shown.length ? ` — ${shown.join(" · ")}${fixes.length > shown.length ? ` · +${fixes.length - shown.length} more` : ""}` : ""}
+          </span>
+        </span>
+        <span className="reveal-chev" aria-hidden="true">Open</span>
+      </summary>
+      <div className="reveal-body stack g3">
+        <p className="sm" style={{ margin: 0, color: "var(--ink-2)" }}>
+          Not a generic plan. Each drill was chosen for a specific thing in this game, and says
+          which. Start with number 1 — it fixes the biggest one.
+        </p>
+        <DrillCards observations={observations} catalog={catalog} />
+      </div>
+    </details>
   );
 }

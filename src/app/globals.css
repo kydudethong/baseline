@@ -1776,3 +1776,13 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 /* Two plans, centred rather than stretched across three columns. */
 .mk-prices.two{grid-template-columns:repeat(2,minmax(0,380px));justify-content:center}
 @media (max-width:900px){.mk-prices.two{grid-template-columns:1fr}}
+
+/* "Made from this game" -- the word that turns a closed box of drills into
+   something personal. Sits on the title line so it is read with it. */
+.drills-badge{
+  display:inline-block;vertical-align:2px;margin-left:6px;
+  padding:2px 8px;border-radius:999px;
+  background:color-mix(in srgb, var(--good) 16%, transparent);
+  color:var(--good);font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+}
+.drills-reveal .reveal-title{font-size:17px}

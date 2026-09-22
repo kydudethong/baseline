@@ -451,7 +451,13 @@ export function analystPrompt(
    * Defaulted, unlike hasReferenceFrame, because false is the honest answer
    * for every existing caller: none of them mark a partner.
    */
-  hasPartnerMark = false
+  hasPartnerMark = false,
+  /**
+   * When in the clip the still was taken. Given so the model can find the
+   * ringed person IN THE VIDEO at that moment and follow them from there,
+   * rather than matching a still against a whole match by eye.
+   */
+  stillAtSeconds: number | null = null
 ): string {
   const contacts = input.contacts.length;
   const withBody = input.contacts.filter((c) => c.body).length;
@@ -482,7 +488,7 @@ ${hasPartnerMark
   ? `\nAND WHO THEIR PARTNER IS. The same still carries a SECOND mark in CYAN,\nlabelled PARTNER — that player is the subject's doubles partner, on the\nsubject's own side of the net. The two people across the net are opponents and\nare not marked. Everything in the partnership section is about the magenta\nplayer and the cyan player TOGETHER.\n\nThe marks are on one frame. Players move, and after a switch the subject may\nbe on the other side of their own court — follow the PEOPLE, not the positions\nthey held on the still.\n`
   : ""}
 ${hasReferenceFrame
-  ? `WHO YOU ARE COACHING, said twice. One still frame is attached to this\nrequest, taken from this clip, with ONE player marked — a magenta ring, a\nchevron above their head, the word YOU. The video ALSO carries a box on each\ntracked player, the subject's labelled "You".\n\nThe boxes come from the pipeline's identity tracking, which is good and is not\ninfallible; it fails where two players on the same side overlap. The still is\nfixed and cannot drift. So TRUST THE STILL when they conflict, and report the\nconflict — a stretch where the "You" box is clearly on the wrong person tells\nthe reader which parts of this read to doubt, which is worth more than quietly\npicking one. If you lose the subject entirely, say so for that stretch rather\nthan guessing.`
+  ? `WHO YOU ARE COACHING, said twice. One still frame is attached to this\nrequest, taken from this clip, with ONE player marked — a magenta ring, a\nchevron above their head, the word YOU. The video ALSO carries a box on each\ntracked player, the subject's labelled "You".${stillAtSeconds !== null ? `\n\nThe still is the frame at ${stillAtSeconds.toFixed(1)}s into the clip: find the\nringed player in the video at that moment and follow THAT PERSON from there.` : ""}\n\nThe boxes come from the pipeline's identity tracking, which is good and is not\ninfallible; it fails where two players on the same side overlap. The still is\nfixed and cannot drift. So TRUST THE STILL when they conflict, and report the\nconflict — a stretch where the "You" box is clearly on the wrong person tells\nthe reader which parts of this read to doubt, which is worth more than quietly\npicking one. If you lose the subject entirely, say so for that stretch rather\nthan guessing.`
   : `NO STILL WAS SUPPLIED. The video's boxes are the only claim about who is\nwho, and they carry a role name rather than a confirmed identity — nobody has\nconfirmed which player this read is for. Treat the "You" box as the pipeline's\nbest guess and say so: attribute what you describe to "the player the tracker\nmarks as you", and do not write as though the subject were established.`}
 
 WHAT THE MEASUREMENTS ARE
@@ -1169,7 +1175,7 @@ export async function runAnalyst(opts: {
    * player was never tagged or the frame could not be built, and the prompt
    * says so rather than letting the model pick somebody.
    */
-  referenceFrame?: { mimeType: string; dataBase64: string; markedPartner?: boolean } | null;
+  referenceFrame?: { mimeType: string; dataBase64: string; markedPartner?: boolean; timestampSeconds?: number } | null;
   onLog?: (line: string) => void;
 }): Promise<{ output: AnalystOutput; problems: string[]; model: string; file: UploadedFile | null }> {
   const model = analystModel();
@@ -1233,7 +1239,8 @@ export async function runAnalyst(opts: {
         prompt: analystPrompt(
           opts.input, opts.legend, plan.length > 1 ? segment : null,
           Boolean(opts.referenceFrame),
-          Boolean(opts.referenceFrame?.markedPartner)
+          Boolean(opts.referenceFrame?.markedPartner),
+          opts.referenceFrame?.timestampSeconds ?? null
         ),
         schema: analystSchema(),
         // THE SAME STILL ON EVERY SEGMENT. A long match is several calls, and

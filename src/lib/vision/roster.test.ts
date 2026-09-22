@@ -727,13 +727,52 @@ test("waiting to seed does not lose players who start off court mid-rally", () =
   for (let i = 0; i < 10; i++) {
     rows.push({ t: i * 0.2, people: [at(6, 8), at(14, 8), at(6, 36), at(14, 36)] });
   }
-  // One player chases a lob four feet behind the baseline.
+  // One player chases a lob to three feet behind the baseline, at a run --
+  // about 2ft a frame, which is ~11 ft/s. (This once teleported 11ft in a
+  // single 0.2s frame, which no player does and which is exactly how a slot
+  // lands on a bystander.)
   for (let i = 10; i < 20; i++) {
-    rows.push({ t: i * 0.2, people: [at(6, -3), at(14, 8), at(6, 36), at(14, 36)] });
+    rows.push({ t: i * 0.2, people: [at(6, Math.max(-3, 8 - (i - 9) * 2.2)), at(14, 8), at(6, 36), at(14, 36)] });
   }
   const got = buildRoster(frames(rows), { toCourtFeet });
   assert.equal(got.tracks.length, 4);
   for (const tr of got.tracks) {
     assert.equal(tr.points.length, 20, `${tr.playerId} was dropped when they stepped out`);
   }
+});
+
+test("a slot whose player is hidden does not jump onto somebody beside the court", () => {
+  // Reported from real footage: the read ringed a man drinking water by the
+  // fence. The near-right player drops out of detection for a few frames; a
+  // bystander stands 4ft off the right sideline (inside the 6ft margin), 8ft
+  // from where that player was last seen. The slot must wait, not jump.
+  const rows = [];
+  for (let i = 0; i < 30; i++) {
+    const t = i * 0.2;
+    const hidden = i >= 10 && i < 16;
+    rows.push({ t, people: [
+      at(5, 14), ...(hidden ? [] : [at(15, 14)]),
+      at(5, 30), at(15, 30),
+      ...(i >= 5 ? [at(24, 12)] : []),               // the bystander, off court
+    ]});
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet });
+  for (const tr of got.tracks) {
+    const offCourt = tr.points.filter((p) => (p.courtPosition?.x ?? 0) > COURT_W_FT + 1.5);
+    assert.equal(offCourt.length, 0, `${tr.playerId} took the bystander ${offCourt.length} time(s)`);
+  }
+});
+
+test("a player who walks off the court is still followed there", () => {
+  // The other side of the rule: stepping out wide for a ball, a step at a
+  // time, keeps the slot.
+  const rows = [];
+  for (let i = 0; i < 20; i++) {
+    rows.push({ t: i * 0.2, people: [
+      at(5, 14), at(Math.min(15 + i * 0.6, 24), 14), at(5, 30), at(15, 30),
+    ]});
+  }
+  const got = buildRoster(frames(rows), { toCourtFeet });
+  const wide = got.tracks.find((tr) => tr.points.some((p) => (p.courtPosition?.x ?? 0) > 22));
+  assert.ok(wide, "the player who walked wide lost their slot");
 });

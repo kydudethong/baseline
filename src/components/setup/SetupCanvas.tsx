@@ -30,7 +30,7 @@
 import { CornerGuide } from "./CornerGuide";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PARTNER_SEED_LABEL } from "@/lib/db/setup";
-import { nearestPlayerFeet, samePoint } from "@/lib/vision/tap-target";
+import { nearestPlayer, samePoint } from "@/lib/vision/tap-target";
 import { UpgradeOffer, type UpgradeOfferData } from "@/components/billing/UpgradeOffer";
 import { useRouter } from "next/navigation";
 
@@ -182,6 +182,22 @@ interface AutoSetup {
   imageSize: [number, number];
 }
 
+type TagBox = { x: number; y: number; width: number; height: number };
+/**
+ * A tag: where, on WHICH frame, and (when a box was tapped) which box.
+ *
+ * THE FRAME IS PART OF THE ANSWER. The boxes are detected on one frame, and
+ * the video under them can be scrubbed. The tag used to be saved against
+ * whatever time the video showed at save, while the point came from a box on
+ * the detection frame -- so scrubbing after tapping moved the claim "you are
+ * here" to a moment when somebody else was standing there, and the read
+ * coached them. Reported from real use.
+ */
+type Tag = { x: number; y: number; t: number; box?: TagBox };
+
+/** Same frame, to within a frame at 30fps. */
+const sameFrame = (a: number, b: number) => Math.abs(a - b) < 0.05;
+
 export interface SetupCanvasProps {
   analysisId: string;
   videoUrl: string;
@@ -191,7 +207,7 @@ export interface SetupCanvasProps {
     lineColorHex?: string | null;
     matchMode?: MatchMode;
     /** Seeds from a previous visit, so re-opening this page keeps the answer. */
-    players?: Array<{ x: number; y: number; isSelf: boolean; label?: string }>;
+    players?: Array<{ x: number; y: number; isSelf: boolean; label?: string; box?: TagBox }>;
   } | null;
   /**
    * Rendered inside the upload flow rather than on its own page. The canvas
@@ -244,6 +260,8 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    * outline and both give themselves away the moment you see who is inside.
    */
   const [detected, setDetected] = useState<AutoPlayer[]>([]);
+  /** Which frame `detected` belongs to. Boxes are only shown, and only snapped to, on it. */
+  const [detectedAt, setDetectedAt] = useState<number | null>(null);
   /**
    * Where the user says they are, in video pixels at their own feet.
    *
@@ -253,11 +271,13 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    * specifically: they are the only part of a person on the court plane, so it
    * is the one place where a click and a track agree about where somebody is.
    */
-  const [selfPoint, setSelfPoint] = useState<{ x: number; y: number } | null>(
-    () => initial?.players?.find((pl) => pl.isSelf) ?? null
+  const fromSaved = (pl: { x: number; y: number; box?: TagBox } | undefined): Tag | null =>
+    pl ? { x: pl.x, y: pl.y, t: initial?.frameTimestampSeconds ?? 0, ...(pl.box ? { box: pl.box } : {}) } : null;
+  const [selfPoint, setSelfPoint] = useState<Tag | null>(
+    () => fromSaved(initial?.players?.find((pl) => pl.isSelf))
   );
-  const [partnerPoint, setPartnerPoint] = useState<{ x: number; y: number } | null>(
-    () => initial?.players?.find((pl) => !pl.isSelf && pl.label === PARTNER_SEED_LABEL) ?? null
+  const [partnerPoint, setPartnerPoint] = useState<Tag | null>(
+    () => fromSaved(initial?.players?.find((pl) => !pl.isSelf && pl.label === PARTNER_SEED_LABEL))
   );
   /**
    * Which of the two the next tap fills.
@@ -268,6 +288,9 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   const [tagging, setTagging] = useState<"self" | "partner">(
     () => (initial?.players?.some((pl) => pl.isSelf) ? "partner" : "self")
   );
+  // Read by the detection callback, which must not re-run when a tag changes.
+  const tagsRef = useRef({ self: selfPoint, partner: partnerPoint });
+  useEffect(() => { tagsRef.current = { self: selfPoint, partner: partnerPoint }; }, [selfPoint, partnerPoint]);
   const [offCourt, setOffCourt] = useState(0);
   /**
    * Whether the boxes were filtered against a fitted court at all.
@@ -500,6 +523,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   // detection is right and the whole job is one click, so the tools for when
   // it is wrong should be one click away rather than always on screen.
   const [time, setTime] = useState(initial?.frameTimestampSeconds ?? 0);
+  const onDetFrame = detectedAt !== null && sameFrame(time, detectedAt);
   const [duration, setDuration] = useState(0);
   const [saving, setSaving] = useState(false);
   const [upgrade, setUpgrade] = useState<UpgradeOfferData | null>(null);
@@ -551,7 +575,15 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       }
 
       if (json.frame) {
-        setTime(json.frame.timestampSeconds);
+        const at = json.frame.timestampSeconds;
+        setDetectedAt(at);
+        // A tag made on a box from an EARLIER detection frame now names a box
+        // nobody can see, on a still that has just been replaced. Ask again
+        // rather than keep a claim about a frame that is gone.
+        const stale = (tg: Tag | null) => Boolean(tg?.box) && !sameFrame(tg!.t, at);
+        if (stale(tagsRef.current.self)) { setSelfPoint(null); setPartnerPoint(null); setTagging("self"); }
+        else if (stale(tagsRef.current.partner)) setPartnerPoint(null);
+        setTime(at);
         const v = videoRef.current;
         if (v) v.currentTime = json.frame.timestampSeconds;
       }
@@ -748,7 +780,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
      * court lines is how the last version of this screen ended up being asked
      * to take them off. The one that is YOU is the only one that shouts.
      */
-    for (const d of detected) {
+    for (const d of onDetFrame ? detected : []) {
       // TWO CORNERS, converted once. Destructured as [bx, by, bw, bh] this
       // drew every box from the player's head to a point past the bottom of
       // the frame -- reported, for the third time, as "the boxes aren't on
@@ -784,8 +816,8 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       [selfPoint, "#ffd23a", "YOU"] as const,
       [partnerPoint, "#37d0e0", "PARTNER"] as const,
     ]) {
-      if (!pt) continue;
-      const onBox = detected.some((d) => samePoint({ x: d.feetPx[0], y: d.feetPx[1] }, pt));
+      if (!pt || !sameFrame(pt.t, time)) continue;
+      const onBox = onDetFrame && detected.some((d) => samePoint({ x: d.feetPx[0], y: d.feetPx[1] }, pt));
       if (onBox) continue;
       const r = Math.max(8, 14 * s);
       ctx.strokeStyle = colour;
@@ -869,7 +901,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     }
 
     ctx.restore();
-  }, [corners, courtLines, showLines, dragging, detected, selfPoint, partnerPoint]);
+  }, [corners, courtLines, showLines, dragging, detected, selfPoint, partnerPoint, onDetFrame, time]);
 
   useEffect(() => { draw(); }, [draw, time, videoReady]);
 
@@ -933,15 +965,26 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
      * good an input as a snapped one: matchTracksToSetup takes a position
      * either way and never sees which it was.
      */
-    const at = nearestPlayerFeet(p, detected) ?? p;
+    // Only onto boxes that belong to the frame on screen. Off the detection
+    // frame there are no boxes, and a tap is a hand-placed mark at this time.
+    const snap = onDetFrame ? nearestPlayer(p, detected) : null;
+    const at: Tag = snap
+      ? { x: snap.feet.x, y: snap.feet.y, t: time, box: snap.box }
+      : { x: p.x, y: p.y, t: time };
     if (tagging === "self") {
       setSelfPoint(at);
       // Clear a partner that the new self mark has just landed on, rather than
       // leaving somebody tagged as both -- which the matcher resolves by
-      // silently dropping one, in an order nobody can predict.
-      if (samePoint(partnerPoint, at)) setPartnerPoint(null);
+      // silently dropping one, in an order nobody can predict. And one tagged
+      // on a different frame: both tags are read against ONE timestamp.
+      if (partnerPoint && (samePoint(partnerPoint, at) || !sameFrame(partnerPoint.t, time))) setPartnerPoint(null);
       setTagging("partner");
     } else {
+      if (selfPoint && !sameFrame(selfPoint.t, time)) {
+        setError("Tag your partner on the same frame you tagged yourself on — jumped back to it.");
+        seek(selfPoint.t);
+        return;
+      }
       if (samePoint(selfPoint, at)) return;
       setPartnerPoint(at);
     }
@@ -1087,7 +1130,8 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
     setSaving(true);
     setError(null);
     const body = {
-      frameTimestampSeconds: time,
+      // THE FRAME THE TAGS WERE MADE ON, not wherever the video was left.
+      frameTimestampSeconds: selfPoint?.t ?? time,
       // The VIDEO's size, not the canvas's. Every corner is already in video
       // coordinates, and the pipeline scales by this to reach the source
       // frame -- handing it the padded canvas would stretch the court by the
@@ -1117,9 +1161,9 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
        * track's feet were nearest at this timestamp.
        */
       players: [
-        ...(selfPoint ? [{ x: selfPoint.x, y: selfPoint.y, isSelf: true }] : []),
+        ...(selfPoint ? [{ x: selfPoint.x, y: selfPoint.y, isSelf: true, box: selfPoint.box }] : []),
         ...(partnerPoint
-          ? [{ x: partnerPoint.x, y: partnerPoint.y, isSelf: false, label: PARTNER_SEED_LABEL }]
+          ? [{ x: partnerPoint.x, y: partnerPoint.y, isSelf: false, label: PARTNER_SEED_LABEL, box: partnerPoint.box }]
           : []),
       ],
       // Null means white, which is what the fitter assumes on its own.
@@ -1520,13 +1564,18 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
               {!courtDone
                 ? "Place the court first — while a corner is missing, a tap adds one."
                 : !selfPoint
-                  ? (detected.length > 0
+                  ? (detected.length > 0 && onDetFrame
                       ? "Tap yourself on the frame. Tap a green box, or anywhere at your feet if the box is missing."
                       : "Nobody was detected on this frame, so tap the spot on the court where you are standing.")
                   : tagging === "partner" && !partnerPoint
                     ? "Got you. Now tap your partner if you want a read on how you two play together — or skip it and analyse."
                     : "You and your partner are marked. Tap either one again to move it."}
             </p>
+            {courtDone && detectedAt !== null && detected.length > 0 && !onDetFrame ? (
+              <button type="button" className="btn btn-sm btn-soft" onClick={() => seek(selfPoint?.t ?? detectedAt)}>
+                {selfPoint ? "Back to the frame you were tagged on" : "Back to the frame with the player boxes"}
+              </button>
+            ) : null}
             {(selfPoint || partnerPoint) ? (
               <div className="row g2" style={{ flexWrap: "wrap" }}>
                 <button

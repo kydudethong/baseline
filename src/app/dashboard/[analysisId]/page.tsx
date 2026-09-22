@@ -38,7 +38,7 @@ import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel"
 import { PartnershipPanel } from "@/components/dashboard/PartnershipPanel";
 import { CoachingFailureNote } from "@/components/dashboard/CoachingFailureNote";
 import { CoachingInProgress } from "@/components/dashboard/CoachingInProgress";
-import { DrillCards, prescribedDrills } from "@/components/analysis/DrillCards";
+import { PersonalDrillsReveal, prescribedDrills } from "@/components/analysis/DrillCards";
 import { ShotsPanel } from "@/components/dashboard/ShotsPanel";
 import { AnalysisWorkspace } from "@/components/analysis/AnalysisWorkspace";
 import { EmptyState } from "@/components/analysis/EmptyState";
@@ -520,17 +520,15 @@ async function AnalysisBreakdown({
           what it fixes before it says what it is. */}
       {prescribedCount > 0 ? (
         <section className="stack g3">
-          <div className="stack g1">
-            <h2 className="h2" style={{ margin: 0 }}>Your drills — do these to get better</h2>
-            <p className="sm" style={{ margin: 0, color: "var(--ink-3)" }}>
-              Each one targets something from this game. Start with number 1.
-            </p>
-          </div>
-          <DrillCards observations={coachingData.observations} catalog={drillCatalog} />
+          <PersonalDrillsReveal observations={coachingData.observations} catalog={drillCatalog} />
         </section>
       ) : null}
 
-      {practice && practice.blocks.length > 0 ? (
+      {/* THE SESSION PLAN ONLY WHEN THERE ARE NO PERSONAL DRILLS. It repeated
+          the same drills inside a fifty-minute schedule, directly under them,
+          and two things labelled "drills" read as the page not knowing which
+          one it meant. Kept as the fallback for a read with no drills. */}
+      {prescribedCount > 0 ? null : practice && practice.blocks.length > 0 ? (
         <section className="stack g4">
           <details className="reveal" style={{ "--reveal-accent": "var(--warn)" } as CSSProperties}>
             <summary className="reveal-sum">

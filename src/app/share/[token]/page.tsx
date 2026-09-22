@@ -18,7 +18,7 @@ import { CoachingReadPanel } from "@/components/dashboard/CoachingReadPanel";
 import { PlaystyleMatchPanel } from "@/components/dashboard/PlaystyleMatchPanel";
 import { PartnershipPanel } from "@/components/dashboard/PartnershipPanel";
 import { PracticeSessionPanel } from "@/components/dashboard/PracticeSessionPanel";
-import { DrillCards, prescribedDrills } from "@/components/analysis/DrillCards";
+import { PersonalDrillsReveal, prescribedDrills } from "@/components/analysis/DrillCards";
 import { ErrorState } from "@/components/analysis/ErrorState";
 import type { AnalysisWithVideo } from "@/lib/db/analyses";
 
@@ -159,17 +159,11 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
 
       {prescribedCount > 0 ? (
         <section className="stack g3">
-          <div className="stack g1">
-            <h2 className="h2" style={{ margin: 0 }}>Your drills — do these to get better</h2>
-            <p className="sm" style={{ margin: 0, color: "var(--ink-3)" }}>
-              Each one targets something from this game. Start with number 1.
-            </p>
-          </div>
-          <DrillCards observations={coachingData.observations} catalog={drillCatalog} />
+          <PersonalDrillsReveal observations={coachingData.observations} catalog={drillCatalog} subject="them" />
         </section>
       ) : null}
 
-      {practice?.plan && practice.blocks.length > 0 ? (
+      {prescribedCount === 0 && practice?.plan && practice.blocks.length > 0 ? (
         <section className="stack g4">
           <h2 className="h2">The full practice session</h2>
           <PracticeSessionPanel plan={practice.plan} blocks={practice.blocks} drillNames={drillNames} />

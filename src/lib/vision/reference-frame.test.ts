@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pickReferenceFrame, boxesAtTimestamp } from "./reference-frame";
+import { pickReferenceFrame, boxesAtTimestamp, pickFrameNear } from "./reference-frame";
 
 const box = (x: number) => ({ x, y: 0.6, width: 0.05, height: 0.2 });
 const track = (label: string, times: number[], x = 0.4) => ({
@@ -105,4 +105,19 @@ test("the two sides come back distinguishable", () => {
   });
   const at = boxesAtTimestamp([mk("player_1", 0.8), mk("player_2", 0.7), mk("player_3", 0.2), mk("player_4", 0.3)], 0, side);
   assert.deepEqual(at.map((b) => b.side), ["near", "near", "far", "far"]);
+});
+
+
+test("the frame near the setup tap wins over the fullest frame in the middle", () => {
+  // The fullest-frame picker lands mid-clip; the tap was at 1s. Only the
+  // frame at 1s is known to show the right person under that label.
+  const fr = [0, 1, 2, 3, 4].map((t) => ({ timestamp_s: t, debug_storage_path: `f${t}.jpg` }));
+  const box = { x: 0.1, y: 0.1, width: 0.1, height: 0.2 };
+  const tracks = [
+    { player_label: "player_1", points: [0, 1, 2, 3, 4].map((t) => ({ timestampSeconds: t, boxImageNorm: box })) },
+  ];
+  const got = pickFrameNear(fr, tracks, "player_1", 1.2);
+  assert.equal(got?.frame.timestamp_s, 1);
+  assert.equal(pickFrameNear(fr, tracks, "player_1", 30), null, "too far from any frame");
+  assert.equal(pickFrameNear(fr, tracks, "player_9", 1), null, "label not visible");
 });
