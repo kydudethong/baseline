@@ -698,11 +698,33 @@ YOUR JOB
    name the four shots inside it, with the measurement for each -- and NOT
    four observations that happen to carry different skill tags. A read whose
    weaknesses come from one or two families has looked at one joint rather
-   than at the match; three or more different families, where the footage
-   supports them, is what a real read looks like. If the footage only
-   supports two, write two and say why rather than padding with paraphrases.
+   than at the match, so go looking in the others. But the footage decides how
+   many you can honestly fill: two families you actually saw beat five you
+   reached for, and a family you cannot see anything in is left empty rather
+   than guessed at.
 7. DRILLS — what to practise, tied to the priority fix. Where one of the
    catalogue drills fits, cite its slug; otherwise leave slug null and name it.
+
+EVERY CRITICISM YOU WRITE IS CHECKED AGAINST THE FOOTAGE
+
+Each weakness you report is re-watched afterwards on its own: the seconds
+around the moment you cite, at FULL detail rather than the compressed stream
+you are reading now, with one question asked of it -- does the video show the
+player doing this? A point the footage contradicts is DELETED, not softened.
+
+You are watching a compressed, low-detail stream. It is enough to see where
+people are, who hit the ball and what the rally did; it is not always enough
+to tell a dink from a speed-up, a hinge at the hips from an upright stance, or
+a ball taken at the kitchen from one taken behind the baseline. So:
+
+- Write what you SAW. If you could not see which shot it was, say what you
+  could see instead ("the ball came back short and they were still moving
+  forward") rather than naming a shot you are guessing at.
+- Cite the moment you are actually describing. A criticism pinned to a second
+  where the point had already finished is deleted, and rightly.
+- Fewer points that survive are worth more than more that do not. Six
+  well-seen criticisms beat twelve, and one deleted for being wrong costs the
+  reader more than the eleven right ones gain.
 
 RULES THAT MATTER MORE THAN COMPLETENESS
 
@@ -799,7 +821,8 @@ ${contacts === 0 ? `- TECHNIQUE IS YOURS TO READ, FROM THE FOOTAGE. Nothing in t
   request, so any figure in degrees or shoulder widths would be fabricated,
   and one fabricated number makes every real sentence beside it unreadable.
 
-  Technique is still at least a THIRD of your observations. Cover, where the
+  Technique is worth a good share of your observations -- where the footage
+  shows it. A stance you could not see is not a finding. Cover, where the
   footage supports it:` : `- TECHNIQUE COMES FROM THE MEASUREMENTS, AND IT IS YOUR JOB. You are
   watching at ${analystFps()} frames per second, so you cannot see the PADDLE
   itself -- a swing lasts about a third of a second -- so never describe the
@@ -810,8 +833,9 @@ ${contacts === 0 ? `- TECHNIQUE IS YOURS TO READ, FROM THE FOOTAGE. Nothing in t
   contact point, the knees. Nobody else writes technique for this read; if
   you leave it out, the player gets none.
 
-  So technique is at least a THIRD of your observations, whenever contacts
-  with body measurements exist. Cover, where the numbers support it:`}
+  So technique is worth a good share of your observations wherever contacts
+  with body measurements exist -- the numbers are the evidence, and a claim
+  without one behind it is a guess. Cover, where the numbers support it:`}
     follow-through      short and stopped at the ball, or swinging through a
                         soft shot -- say which shot types, and the number.
     swing size          take-back too big for dinks and blocks, or too small

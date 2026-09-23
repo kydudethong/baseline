@@ -52,6 +52,7 @@ import path from "node:path";
 import { downloadToFile } from "@/lib/storage/r2";
 import { getSetup, matchTracksToSetup } from "@/lib/db/setup";
 import { momentFor } from "./evidence-moment";
+import { verifyObservations } from "./verify-observations";
 import { cutEvidenceClips } from "./evidence-clips";
 import { OVERLAY_LEGEND } from "./overlay-legend";
 import { buildReferenceFrameImage } from "./reference-frame-image";
@@ -456,6 +457,33 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
       activeWindows: useGate ? gate.windows : undefined,
       onLog: (line) => console.error(`[coaching] ${line}`),
     });
+    // EVERY CRITICISM CHECKED AGAINST THE FOOTAGE BEFORE IT IS WRITTEN DOWN.
+    //
+    // The scan watches the whole game at low media resolution, which is what
+    // makes a twenty-minute clip affordable and is not enough to tell a dink
+    // from a speed-up or a hinge from a slouch. Four reported cases in one
+    // read: a smash called "from behind the baseline" that was at the kitchen,
+    // a paddle clash cited after the point had ended, a dink written up as a
+    // speed-up, and a hinge written up as an upright stance. See
+    // verify-observations.ts. Never throws: a failed check keeps the point.
+    try {
+      if (!analyst.file) throw new Error("no uploaded file handle to re-watch with");
+      const verified = await verifyObservations({
+        model: analyst.model,
+        file: analyst.file,
+        observations: analyst.output.observations ?? [],
+        rallies: (analyst.output.rallies ?? []).map((rl) => ({
+          idx: rl.idx, start_s: Number(rl.start_s), end_s: Number(rl.end_s),
+        })),
+        clipSeconds: analystInput.clipSeconds,
+        referenceFrame,
+        onLog: (line) => console.error(`[coaching] ${line}`),
+      });
+      analyst.output.observations = verified.kept;
+    } catch (err) {
+      console.error(`[coaching] verify pass skipped: ${describeError(err)}`);
+    }
+
     // The record. Config first, because it is what makes a later correction
     // attributable: "wrong at 5fps low resolution" is a fixable claim, "wrong"
     // is not.

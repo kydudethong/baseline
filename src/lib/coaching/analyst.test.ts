@@ -649,7 +649,7 @@ test("with no contacts measured, the prompt stops describing measurements it doe
   assert.doesNotMatch(none, /shoulderTurnDeg/);
   assert.doesNotMatch(none, /MEASURED, NOT ESTIMATED/);
   assert.match(none, /Do not invent a number/);
-  assert.match(none, /at least a THIRD of your observations/, "technique is still a third of the read");
+  assert.match(none, /Technique is worth a good share/, "technique is still expected, just not by quota");
 
   // And when there ARE measurements, it still says to use them.
   const some = analystPrompt(input(), "LEGEND", null, true);
@@ -680,4 +680,16 @@ test("the prompt asks for clock times in the prose and raw seconds in the fields
   const p = analystPrompt(input(), "LEGEND", null, true);
   assert.match(p, /never "at 766\.1s"/);
   assert.match(p, /stays a number of seconds/);
+});
+
+test("the prompt says the criticisms are checked, and does not set a quota", () => {
+  // THE QUOTAS WERE PRESSURE TO FABRICATE. "At least a third of your
+  // observations" and "three or more families" are demands for volume, made
+  // of a model reading a compressed stream — so it wrote specifics it could
+  // not see: a dink called a speed-up, a hinge called an upright stance.
+  const p = analystPrompt(input(), "LEGEND", null, true);
+  assert.match(p, /re-watched afterwards on its own/);
+  assert.match(p, /DELETED, not softened/);
+  assert.doesNotMatch(p, /at least a THIRD/);
+  assert.doesNotMatch(p, /three or more different families/);
 });
