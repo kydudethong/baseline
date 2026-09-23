@@ -31,9 +31,18 @@ test("no time named means the whole point", () => {
   assert.equal(m.kind === "rally" && m.reason, "no time named");
 });
 
-test("a clip where nothing was measured keeps the named time", () => {
-  // Measuring no contacts is normal on hard footage. Refusing every cited
-  // moment there would leave those reads with no evidence at all.
+test("with no contacts measured, the rally is the witness", () => {
+  // No contacts is now the normal case: the wrist-speed detector was removed
+  // for putting a third of its contacts between points. A cited time inside
+  // the rally it was tagged to is believed; one outside it is not.
+  const inside = momentFor({ namedSeconds: 7, contactSeconds: [], rally: { start: 3, end: 11 } });
+  assert.equal(inside.kind, "moment");
+  assert.equal(inside.kind === "moment" && inside.tSeconds, 7);
+  const outside = momentFor({ namedSeconds: 14.5, contactSeconds: [], rally: { start: 3, end: 11 } });
+  assert.equal(outside.kind, "rally");
+});
+
+test("with no contacts and no rally, the named time is all there is", () => {
   const m = momentFor({ namedSeconds: 14.5, contactSeconds: [], rally: null });
   assert.equal(m.kind, "moment");
   assert.equal(m.kind === "moment" && m.tSeconds, 14.5);

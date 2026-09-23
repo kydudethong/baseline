@@ -638,3 +638,20 @@ test("technique talk about the follow-through is not mistaken for paddle talk", 
   out.coaching.summary = "Your follow-through on drives stopped at the ball — 0.4 shoulder widths.";
   assert.deepEqual(auditAnalysis(out, input()), []);
 });
+
+test("with no contacts measured, the prompt stops describing measurements it does not have", () => {
+  // THE PIPELINE NO LONGER MEASURES CONTACTS. A prompt that keeps explaining
+  // what shoulderTurnDeg means, and tells the model to "USE THE NUMBER", is
+  // inviting it to produce a number from a video — which is the one thing
+  // that makes every real sentence beside it unreadable.
+  const none = analystPrompt(input({ contacts: [] }), "LEGEND", null, true);
+  assert.doesNotMatch(none, /shoulderTurnDeg/);
+  assert.doesNotMatch(none, /MEASURED, NOT ESTIMATED/);
+  assert.match(none, /Do not invent a number/);
+  assert.match(none, /at least a THIRD of your observations/, "technique is still a third of the read");
+
+  // And when there ARE measurements, it still says to use them.
+  const some = analystPrompt(input(), "LEGEND", null, true);
+  assert.match(some, /shoulderTurnDeg/);
+  assert.match(some, /USE\nTHE NUMBER|USE THE NUMBER/);
+});

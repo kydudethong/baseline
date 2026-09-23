@@ -4,15 +4,13 @@ import { detectFootworkFoundation } from "./events";
 import { computeAppearanceSignaturesViaPython } from "./cv-scripts";
 import type { BallDetection, BallTrackPoint, BallTrackStats } from "./ball";
 import { courtFrameFor, type Shot } from "./shots";
-import { detectSwingEvents, swingsToUnknownShotEvents } from "./swing-events";
-import { measureSwing, SWING_SAMPLE_WINDOW_S } from "./swing";
 import { overlayFps } from "@/lib/coaching/read-rate";
 import type { AnalysisStage } from "@/lib/db/types";
 import { StageTimer } from "@/lib/analysis/stage-timer";
 import { buildSignatureFrom } from "./build-signature";
 import { calibrationFromSetup, isPlausibleCourtQuad, playerGatePolygonPx, pointInPolygon, transformToCourtCoordinates } from "./court";
 import { buildRoster, type RosterAnchor } from "./roster";
-import { clusterRalliesFromHits, type ClusteredRally } from "./rallies";
+import { type ClusteredRally } from "./rallies";
 import { netBandImagePx, netLineImagePx, type NetCrossing } from "./rallies-net";
 import { debugRenderEnabled, renderDebugVideo } from "./debug-render";
 import { smoothPoseFrames } from "./pose-smooth";
@@ -826,127 +824,36 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
       + (limbGate.stats.unmeasured ? ` (${limbGate.stats.unmeasured} bone(s) had too few samples to judge)` : ""));
   }
 
-  // CONTACT TIMESTAMPS, from the arms rather than the ball.
+  // NO CONTACT TIMESTAMPS. The wrist-speed detector is gone, and this is the
+  // measurement that ended it.
   //
-  // Here and not earlier because it must run on the SMOOTHED, GATED poses: a
-  // wrist-speed peak is a derivative, and a derivative of a noisy signal is
-  // mostly noise. One jittery frame before smoothing is a spike taller than
-  // any real swing, and the limb gate has already thrown out the joints that
-  // were geometrically impossible rather than merely fast.
+  // Audited on ky-720p (101s, seven hand-labelled rallies, pose at 5 and
+  // 15fps, court gate applied): of the contacts it found, about a THIRD fell
+  // between points -- a hat being adjusted, a jog back to position, an arm
+  // thrown out mid-sprint -- and it found only 0.44 per second of live play
+  // where a rally has one or two. So it missed most shots and invented some.
   //
-  // What this restores: facts.ts groups rallies from `unknown_shot` events and
-  // calls measureSwing() at each one, which is the only path by which a
-  // measured knee angle, shoulder turn or contact height reaches the coaching
-  // model. Ball tracking used to emit them; when it was removed the events
-  // stopped, every per-shot mechanic came back empty, and the model went back
-  // to judging technique by eye while the code that could measure it sat
-  // unused. See swing-events.ts for what this signal can and cannot do.
-  const swings = detectSwingEvents(poses);
-  events.push(...swingsToUnknownShotEvents(swings));
-  if (swings.length > 0) {
-    const perPlayer = new Map<string, number>();
-    for (const s of swings) perPlayer.set(s.playerId, (perPlayer.get(s.playerId) ?? 0) + 1);
-    log(`swings: ${swings.length} contact candidate(s) from wrist speed — `
-      + [...perPlayer].map(([id, c]) => `${id}:${c}`).join(", "));
-    knownLimitations.push(
-      "Contact times are estimated from each player's wrist speed, not from the ball. With pose "
-      + `sampled at ${input.visionFps}fps they are good to roughly a tenth of a second, and a hard `
-      + "fake or a practice swing between points can be counted as a shot. The body angles measured "
-      + "at these moments are real measurements; which shot they belong to is an estimate."
-    );
-  } else if (poses.length > 0) {
-    log("swings: no contact candidates — no wrist-speed peak cleared this clip's own baseline");
-    knownLimitations.push(
-      "No paddle contacts could be picked out of the players' movement, so the per-shot body "
-      + "measurements are empty for this analysis."
-    );
-  }
-
-  // A SHOT ROW PER CONTACT, whose only real content is the body measurement.
+  // WHY THAT WAS WORSE THAN NOTHING, rather than merely thin. Every contact
+  // became a row with MEASURED BODY ANGLES attached, and those angles went
+  // into the coaching prompt as facts about a shot. A player standing still
+  // between points has straight knees and an upright chest, so the numbers
+  // the model was handed said "straight legs at contact" -- and it wrote that
+  // up, with a number, confidently, over and over. Reported as a read where
+  // every criticism was about knee angle. An isolation filter lifted the
+  // precision to about three quarters, which still means one in four of the
+  // measurements a coach quotes is of somebody standing about.
   //
-  // This is the last link in the chain, and the one whose absence made the
-  // rest pointless. contactsFromShots() in analyst-facts.ts reads
-  // analysis_shots, filters each row's `mechanics` through COACHABLE_MECHANICS
-  // and hands the survivors to the coaching model as `body` -- so a measured
-  // knee angle reaches Gemini through this table or not at all. Ball tracking
-  // used to write these rows; when it went, the table emptied, and the prompt
-  // started telling the model outright that "no body measurements were taken
-  // on any contact, so any technique note must come from watching the footage"
-  // -- which is exactly the guess-from-video the pose pass exists to replace.
-  //
-  // WHAT IS AND IS NOT FILLED IN. Everything the ball used to supply is null
-  // and stays null: shot TYPE (a dink and a drive look the same in a wrist
-  // trace), where the ball landed, its speed, its arc, whether it bounced
-  // first. Writing "dink" here because the hand moved slowly would be the same
-  // fabricated confidence the ball tracker was removed for. The model reads
-  // shot types off the video itself and is better at it. What this adds is the
-  // measurement it cannot make by eye: the angles of the body at the moment of
-  // contact.
-  //
-  // The window is widened to match the sampling. measureSwing defaults to a
-  // window tuned for burst-rate pose; at VISION_FPS the samples are 200ms
-  // apart, so a tight window contains one frame and every field comes back
-  // null. SWING_SAMPLE_WINDOW_S is wide enough to catch the frames either side
-  // of contact and no wider -- past about a second it starts measuring the
-  // next shot.
-  if (swings.length > 0) {
-    const aspect = input.frameHeightPx > 0 ? input.frameWidthPx / input.frameHeightPx : 1;
-    const posesByPlayer = new Map<string, PlayerPoseFrame[]>();
-    for (const f of poses) {
-      const list = posesByPlayer.get(f.playerId);
-      if (list) list.push(f);
-      else posesByPlayer.set(f.playerId, [f]);
-    }
-    const clipSeconds = input.frames.length > 0
-      ? input.frames[input.frames.length - 1].timestampSeconds
-      : 0;
-    const swingRallies = clusterRalliesFromHits(swings.map((s) => s.timestampSeconds), clipSeconds);
-    const rallyIdxAt = (t: number): number =>
-      swingRallies.find((r) => t >= r.startS && t <= r.endS)?.idx ?? 0;
-    const shotIdxInRally = new Map<number, number>();
-    let measured = 0;
-    for (const sw of swings) {
-      const rallyIdx = rallyIdxAt(sw.timestampSeconds);
-      const shotIdx = shotIdxInRally.get(rallyIdx) ?? 0;
-      shotIdxInRally.set(rallyIdx, shotIdx + 1);
-      const frames = posesByPlayer.get(sw.playerId) ?? [];
-      const m = measureSwing(frames, sw.timestampSeconds, SWING_SAMPLE_WINDOW_S, aspect);
-      // A measurement with nothing in it is not written. An absent key cannot
-      // be mistaken for a reading of zero; a row full of nulls can.
-      const anyField = m.kneeAngleAtContactDeg !== null || m.contactHeightTorsos !== null
-        || m.shoulderTurnDeg !== null || m.contactHeightRatio !== null
-        || m.backswingShoulders !== null || m.wristSpeedIntoContact !== null;
-      const keep = m.samples >= 2 && anyField;
-      if (keep) measured += 1;
-      shots.push({
-        rallyIdx, shotIdx,
-        t: sw.timestampSeconds,
-        playerId: sw.playerId,
-        type: "unknown",
-        category: "unknown",
-        confidence: sw.confidence,
-        hitCourt: null, hitZone: "unknown",
-        landingCourt: null, landingZone: "unknown",
-        speedMpsApprox: null, arcNorm: null, bouncedBefore: null,
-        outcome: "in",
-        features: {
-          detected_from: "wrist-speed-peak",
-          peak_shoulders_per_s: sw.peakShouldersPerSecond,
-          above_own_baseline_mads: sw.standardScore,
-        },
-        mechanics: keep ? m : null,
-      });
-    }
-    log(`shots: ${shots.length} contact row(s), ${measured} with measured body angles`
-      + ` (window ${SWING_SAMPLE_WINDOW_S}s, aspect ${aspect.toFixed(2)})`);
-    if (measured === 0) {
-      knownLimitations.push(
-        "Contacts were found but no body angle could be measured at any of them — the skeletons "
-        + "around those moments were too sparse or too low-confidence. Technique notes must come "
-        + "from watching the footage rather than from a measured number."
-      );
-    }
-  }
+  // What replaces it: nothing here. Shot times and types come from the
+  // coaching pass watching the video, which is where they were already coming
+  // from, and technique is read from the footage rather than from a number
+  // attached to the wrong instant. The prompt has always had an honest branch
+  // for "no contacts were measured for this clip"; that is now the only path.
+  knownLimitations.push(
+    "Paddle contacts are not detected here. Shot times, shot types and technique are read from the "
+    + "video by the coaching pass, which sees the stroke itself — the wrist-speed detector this "
+    + "replaces put about a third of its contacts between points and measured the posture of "
+    + "players standing still."
+  );
 
   // Positioning, which needs no ball at all.
   //
@@ -1091,7 +998,7 @@ export async function runVisionPipeline(input: VisionPipelineInput): Promise<Vis
 
   events.sort((a, b) => a.timestampSeconds - b.timestampSeconds);
   const shotEventCount = events.filter((e) => e.type === "unknown_shot").length;
-  log(`contacts: ${shotEventCount} found from wrist speed, ${shots.length} shot row(s) written`
+  log(`contacts: none detected here by design — the coaching pass reads shots off the video`
     + ` · done in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
   // The line this whole exercise exists for. Every claim about what makes a
   // run slow has so far been inferred from reading the code; this is the

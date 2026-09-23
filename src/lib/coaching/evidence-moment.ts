@@ -69,10 +69,16 @@ export function momentFor(input: MomentInput): Moment {
     return { kind: "moment", tSeconds: nearest, snappedBy: gap };
   }
 
-  // NO CONTACTS AT ALL is not evidence of dead air -- plenty of clips measure
-  // none, and on those the named time is the only thing there is. The check
-  // only bites when there were swings to compare against.
-  if (input.contactSeconds.length === 0) return { kind: "moment", tSeconds: named, snappedBy: 0 };
+  // NO CONTACTS MEASURED -- which is now every clip, since the wrist-speed
+  // detector was removed for putting a third of its contacts between points.
+  // The rally is then the only independent witness there is: a time inside
+  // the rally the point was tagged to is believed, and one outside it is not.
+  if (input.contactSeconds.length === 0) {
+    if (!rally) return { kind: "moment", tSeconds: named, snappedBy: 0 };
+    return named >= rally.start - 0.5 && named <= rally.end + 0.5
+      ? { kind: "moment", tSeconds: named, snappedBy: 0 }
+      : asRally("named a moment with no play in it");
+  }
 
   // Named a time with no swing near it. If the rally it was tagged to is real,
   // show the rally instead and say it is the rally; otherwise show nothing.

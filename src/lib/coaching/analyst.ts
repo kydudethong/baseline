@@ -537,7 +537,7 @@ kitchen lines are at y=15 and y=29. Body measurements are in the player's own
 shoulder widths, so a shot at the far baseline compares directly with one near
 the camera; knee angle is degrees, where 180 is a straight leg.
 
-THE BODY MEASUREMENTS ARE MEASURED, NOT ESTIMATED. They come from a pose model
+${contacts === 0 ? "" : `THE BODY MEASUREMENTS ARE MEASURED, NOT ESTIMATED. They come from a pose model
 that located seventeen joints per player per frame. Where one is present, USE
 THE NUMBER and say it — "your shoulders were 12 degrees from square at contact"
 is worth more to a player than "your preparation looked late", and it is the
@@ -557,7 +557,7 @@ What they mean:
                               Negative means the ball was struck behind them.
   paddleElbowDeg              180 is a straight, reaching arm; ~90 is a block.
   stanceWidthRatio            ankle spread in shoulder widths. ~1.5 is athletic.
-  driftTowardNetTorsosPerSec  positive is moving in, negative is backing off.
+  driftTowardNetTorsosPerSec  positive is moving in, negative is backing off.`}
   readyPaddleHeightRatio      resting paddle height between shots, same scale.
   readyKneeFlexionDeg         knee angle while waiting. 180 is standing upright.
   resetSeconds                how long they took to get back to their own ready
@@ -742,7 +742,23 @@ guess which player is the subject's partner: on a doubles court that is a
 one-in-three choice, and a confident section about the wrong person is the
 worst outcome available here.
 `}
-- TECHNIQUE COMES FROM THE MEASUREMENTS, AND IT IS YOUR JOB. You are
+${contacts === 0 ? `- TECHNIQUE IS YOURS TO READ, FROM THE FOOTAGE. Nothing in this pipeline
+  measures a body angle any more: a wrist-speed detector used to, and an audit
+  found a third of its contacts were between points, so it was measuring the
+  posture of players standing about and calling it a shot. You are watching at
+  ${analystFps()} frames per second. That is enough to see a stance, a knee
+  bend, where contact was made relative to the body, whether the arm finished
+  the stroke or stopped at the ball, and whether the shoulders turned. It is
+  NOT enough to see the paddle face, its path, or spin -- never describe those.
+
+  Say what you SAW, in words, and name the moment: "on the third-shot drops
+  around 2:10 and 4:35 you were upright with the paddle below the knee" is a
+  coaching point. Do not invent a number. There are no measurements in this
+  request, so any figure in degrees or shoulder widths would be fabricated,
+  and one fabricated number makes every real sentence beside it unreadable.
+
+  Technique is still at least a THIRD of your observations. Cover, where the
+  footage supports it:` : `- TECHNIQUE COMES FROM THE MEASUREMENTS, AND IT IS YOUR JOB. You are
   watching at ${analystFps()} frames per second, so you cannot see the PADDLE
   itself -- a swing lasts about a third of a second -- so never describe the
   paddle's face, its angle, its
@@ -753,7 +769,7 @@ worst outcome available here.
   you leave it out, the player gets none.
 
   So technique is at least a THIRD of your observations, whenever contacts
-  with body measurements exist. Cover, where the numbers support it:
+  with body measurements exist. Cover, where the numbers support it:`}
     follow-through      short and stopped at the ball, or swinging through a
                         soft shot -- say which shot types, and the number.
     swing size          take-back too big for dinks and blocks, or too small
