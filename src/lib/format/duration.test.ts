@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clock, secs } from "./duration";
+import { clock, secs, timesInProse } from "./duration";
 
 test("a moment reads like a video player", () => {
   assert.equal(clock(0), "0:00");
@@ -30,4 +30,24 @@ test("nothing ever prints sixty seconds", () => {
   // 59.97 with one decimal is "60.0s", which is the bug this guards.
   assert.equal(secs(59.97, 1), "1m");
   assert.equal(secs(59.4, 1), "59.4s");
+});
+
+
+test("seconds written into the coaching prose become minutes too", () => {
+  // The read is written by a model that is handed times in seconds. No
+  // formatter reaches inside a paragraph, so this is where "766.1s" survived.
+  assert.equal(
+    timesInProse("During a kitchen battle at 766.1s, you flicked a ball"),
+    "During a kitchen battle at 12:46, you flicked a ball",
+  );
+  assert.equal(timesInProse("the rally at 155 seconds"), "the rally at 2:35");
+  assert.equal(timesInProse("(92.0s)"), "(1:32)");
+});
+
+test("short times, speeds and ordinary words are left alone", () => {
+  assert.equal(timesInProse("you hung back for 3s"), "you hung back for 3s", "under a minute reads fine");
+  assert.equal(timesInProse("the ball left at 4.2 m/s"), "the ball left at 4.2 m/s", "a speed is not a time");
+  assert.equal(timesInProse("shots, drops and resets"), "shots, drops and resets");
+  assert.equal(timesInProse("3.5s level"), "3.5s level", "a rating is not a time");
+  assert.equal(timesInProse(null), null);
 });

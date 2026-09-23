@@ -829,6 +829,11 @@ ${contacts === 0 ? `- TECHNIQUE IS YOURS TO READ, FROM THE FOOTAGE. Nothing in t
 
   Where no body measurements exist for a shot, say nothing about its
   mechanics rather than inventing them from the video.
+- TIMES IN WORDS ARE MINUTES AND SECONDS. Every at_s, shot_t and t FIELD
+  you fill in stays a number of seconds from the start of the clip -- those are
+  read by the app, not by a person. But inside a SENTENCE, write the moment the
+  way a clock does: "at 12:46", never "at 766.1s". Nobody reads three digits of
+  seconds without doing arithmetic first, and a read is not a stopwatch.
 - WRITE IT THE WAY YOU WOULD SAY IT ON A COURT. No abbreviations the reader
   has to decode: say "the kitchen line", never "NVZ" or "the NVZ line"; say
   "the non-volley zone" only if you have already said kitchen. Same for any

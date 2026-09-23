@@ -4,6 +4,7 @@ import { type CoachingRead } from "@/lib/coaching/types";
 import { Check, Paddle } from "@/components/motifs/Motifs";
 import { CoachingInsight } from "@/components/analysis/CoachingInsight";
 import type { Evidence } from "@/lib/db/evidence";
+import { timesInProse } from "@/lib/format/duration";
 
 /**
  * The coaching read, with every point said ONCE.
@@ -177,7 +178,7 @@ export function CoachingReadPanel({
                     <span className="ic">
                       <Check size={14} />
                     </span>
-                    <p className="tx">{s}</p>
+                    <p className="tx">{timesInProse(s)}</p>
                   </div>
                 ))}
               </div>
@@ -190,11 +191,11 @@ export function CoachingReadPanel({
               <span className="lb">Top priority fix — the one thing to work on first</span>
             </div>
             <div className="bd">
-              <h3 className="issue">{coaching.top_priority_fix.issue}</h3>
-              <p className="why">{coaching.top_priority_fix.why_it_matters}</p>
+              <h3 className="issue">{timesInProse(coaching.top_priority_fix.issue)}</h3>
+              <p className="why">{timesInProse(coaching.top_priority_fix.why_it_matters)}</p>
               <div className="evidence">
                 <span className="k">Seen in your clip</span>
-                <span>{coaching.top_priority_fix.evidence}</span>
+                <span>{timesInProse(coaching.top_priority_fix.evidence)}</span>
               </div>
             </div>
           </section>
@@ -210,8 +211,8 @@ export function CoachingReadPanel({
                   <div key={i} className="noting">
                     <span className="no">{String(i + 2).padStart(2, "0")}</span>
                     <div>
-                      <p className="issue">{o.issue}</p>
-                      <p className="ev">{o.evidence}</p>
+                      <p className="issue">{timesInProse(o.issue)}</p>
+                      <p className="ev">{timesInProse(o.evidence)}</p>
                     </div>
                   </div>
                 ))}

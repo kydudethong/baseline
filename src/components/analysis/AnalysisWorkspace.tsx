@@ -20,6 +20,7 @@ import { EmptyState } from "./EmptyState";
 import { StatTiles } from "./StatTiles";
 import { shotName } from "./ShotBadge";
 import { clock, secs } from "@/lib/format/duration";
+import { timesInProse } from "@/lib/format/duration";
 
 /**
  * One workspace instead of six tabs.
@@ -408,7 +409,7 @@ function Overview({ view, observations, coachingPending = false }: {
               <span className={`take-ic ${tone}`}>{o.valence === "strength" ? "\u2713" : "!"}</span>
               <span>
                 <span className="take-t">{o.title}</span>
-                <span className="take-d">{o.what_to_change ?? o.detail}</span>
+                <span className="take-d">{timesInProse(o.what_to_change ?? o.detail)}</span>
               </span>
             </div>
           );

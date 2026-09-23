@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { PartnershipRead } from "@/lib/coaching/analyst";
 import { PARTNERSHIP_DIMENSIONS } from "@/lib/coaching/analyst";
 import { clock } from "@/lib/format/duration";
+import { timesInProse } from "@/lib/format/duration";
 
 /**
  * How the pair works, rather than how each of them plays.
@@ -132,7 +133,7 @@ export function PartnershipPanel({
         </p>
       </div>
 
-      <p className="measure" style={{ margin: 0 }}>{partnership.summary}</p>
+      <p className="measure" style={{ margin: 0 }}>{timesInProse(partnership.summary)}</p>
 
       {rated.length > 0 ? (
         <div className="stack g2">
@@ -162,7 +163,7 @@ export function PartnershipPanel({
               {f.fix ? <p className="sm" style={{ margin: "6px 0 0" }}>{f.fix}</p> : null}
               {f.evidence || f.at_s !== null ? (
                 <p className="sm" style={{ margin: "6px 0 0", color: "var(--ink-3)" }}>
-                  {f.evidence} <At at={f.at_s} onSeek={onSeek} />
+                  {timesInProse(f.evidence)} <At at={f.at_s} onSeek={onSeek} />
                 </p>
               ) : null}
             </div>
@@ -179,7 +180,7 @@ export function PartnershipPanel({
               {w.why_it_works ? <> — {w.why_it_works}</> : null}
               {w.evidence || w.at_s !== null ? (
                 <p className="sm" style={{ margin: "6px 0 0", color: "var(--ink-3)" }}>
-                  {w.evidence} <At at={w.at_s} onSeek={onSeek} />
+                  {timesInProse(w.evidence)} <At at={w.at_s} onSeek={onSeek} />
                 </p>
               ) : null}
             </div>

@@ -3,6 +3,7 @@ import type { CoachingObservationRow } from "@/lib/db/types";
 import { FeedbackButtons } from "./FeedbackButtons";
 import { EvidenceClip } from "./EvidenceClip";
 import type { CoachingShotTechniqueRow } from "@/lib/db/types";
+import { timesInProse } from "@/lib/format/duration";
 
 /**
  * One coaching point, in the order a coach would actually say it:
@@ -61,7 +62,7 @@ export function CoachingInsight({
   return (
     <article className={`insight${hero ? " insight-hero" : ""}`}>
       <div className="insight-top">
-        <h3 className="insight-title">{o.title}</h3>
+        <h3 className="insight-title">{timesInProse(o.title)}</h3>
         <span className={`pill ${isStrength ? "p-good" : o.severity >= 4 ? "p-bad" : "p-warn"}`}>
           {eyebrow ?? (isStrength ? "Strength" : o.severity >= 4 ? "Priority" : "Worth fixing")}
         </span>
@@ -77,20 +78,20 @@ export function CoachingInsight({
 
       <div className="insight-part">
         <span className="insight-lbl">What happened</span>
-        <p className="insight-txt">{o.detail}</p>
+        <p className="insight-txt">{timesInProse(o.detail)}</p>
       </div>
 
       {o.why_it_matters ? (
         <div className="insight-part">
           <span className="insight-lbl">Why it matters</span>
-          <p className="insight-txt">{o.why_it_matters}</p>
+          <p className="insight-txt">{timesInProse(o.why_it_matters)}</p>
         </div>
       ) : null}
 
       {o.what_to_change ? (
         <div className="insight-part insight-fix">
           <span className="insight-lbl">What to change</span>
-          <p className="insight-txt">{o.what_to_change}</p>
+          <p className="insight-txt">{timesInProse(o.what_to_change)}</p>
         </div>
       ) : null}
 

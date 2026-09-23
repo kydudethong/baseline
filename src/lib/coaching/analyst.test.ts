@@ -672,3 +672,12 @@ test("the subject's half of the court is a rule about attribution", () => {
   assert.doesNotMatch(none, /HALF — the half/);
   assert.doesNotMatch(none, /never theirs/);
 });
+
+test("the prompt asks for clock times in the prose and raw seconds in the fields", () => {
+  // Both, because they are read by different things: the app parses at_s, a
+  // person reads the sentence. "at 766.1s" in a sentence is a stopwatch
+  // reading, and it is what the page kept showing.
+  const p = analystPrompt(input(), "LEGEND", null, true);
+  assert.match(p, /never "at 766\.1s"/);
+  assert.match(p, /stays a number of seconds/);
+});

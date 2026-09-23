@@ -40,3 +40,34 @@ export function secs(seconds: number, decimals = 0): string {
   const s = total % 60;
   return s === 0 ? `${m}m` : `${m}m ${s}s`;
 }
+
+/**
+ * Rewrite seconds written into prose as minutes and seconds.
+ *
+ * FOR TEXT WE DID NOT WRITE. Everything this app renders itself goes through
+ * `clock` and `secs` above, but the coaching read is written by a model that
+ * is given times in seconds and hands them back the same way -- "at 766.1s",
+ * in the middle of a sentence. No formatter reaches inside a paragraph, so
+ * the page kept showing three-digit second counts in exactly the place a
+ * person reads most carefully.
+ *
+ * Only figures of a minute or more are touched: "you hung back for 3s" is
+ * clearer as it is, and rewriting it would be noise. Speeds are left alone --
+ * "4.2 m/s" ends in the same letter and means something else entirely.
+ */
+export function timesInProse(text: string): string;
+export function timesInProse(text: string | null | undefined): string | null;
+export function timesInProse(text: string | null | undefined): string | null {
+  if (text === null || text === undefined) return null;
+  return text
+    // "766.1s", "at 766 s" — but never "4.2 m/s" or a bare "12s".
+    .replace(/(^|[^\w/.])(\d+(?:\.\d+)?)\s?s\b/g, (whole, before: string, num: string) => {
+      const v = Number(num);
+      return Number.isFinite(v) && v >= 60 ? `${before}${clock(v)}` : whole;
+    })
+    // "at 766.1 seconds"
+    .replace(/(^|[^\w/.])(\d+(?:\.\d+)?)\s?seconds\b/g, (whole, before: string, num: string) => {
+      const v = Number(num);
+      return Number.isFinite(v) && v >= 60 ? `${before}${clock(v)}` : whole;
+    });
+}
