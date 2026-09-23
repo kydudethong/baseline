@@ -39,6 +39,7 @@ import CourtPresetBar from "./CourtPresetBar";
 
 import { courtSegments, type CourtLineRole } from "@/lib/vision/court-model";
 import { boxRect, imageScale, scaleBox, scalePoint, type BoxPx } from "@/lib/vision/image-space";
+import { courtQuadProblem } from "@/lib/vision/court-quad";
 import { type MatchMode } from "@/lib/db/setup";
 import { SetupExamples } from "./SetupExamples";
 import { clock } from "@/lib/format/duration";
@@ -304,6 +305,8 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    */
   const [gated, setGated] = useState<boolean | null>(null);
   const [videoReady, setVideoReady] = useState(false);
+  /** The video's own size, once known. Read during render, so state not a ref. */
+  const [videoSize, setVideoSize] = useState<{ w: number; h: number } | null>(null);
   // The margin the canvas adds around the video, as a fraction of the canvas
   // width. Needed in CSS space to work out what "show the video, and nothing
   // else" means; stored rather than read off the ref because a ref cannot be
@@ -1218,6 +1221,27 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
   };
 
   const courtDone = corners.length === 4;
+  /*
+   * WHAT IS WRONG WITH THE SHAPE, said here rather than discovered after the
+   * run. A quad whose corners have crossed, or whose far edge is wider than
+   * its near edge, is geometrically impossible for a camera behind a
+   * baseline. The pipeline already refuses those -- and refusing them AFTER a
+   * run means the person waited for an analysis with no distances in it and
+   * a limitation line explaining why. The same test, run on every drag.
+   */
+  const courtProblem = courtDone && videoSize
+    ? courtQuadProblem(
+        {
+          bottomLeft: [corners[0].x, corners[0].y],
+          bottomRight: [corners[1].x, corners[1].y],
+          topRight: [corners[2].x, corners[2].y],
+          topLeft: [corners[3].x, corners[3].y],
+        },
+        videoSize?.w ?? 0,
+        videoSize?.h ?? 0,
+        quadKind,
+      )
+    : null;
   /**
    * ONE REQUIREMENT: the court is where the court is.
    *
@@ -1286,6 +1310,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
           const v = videoRef.current;
           const box = frameBoxRef.current;
           setDuration(v?.duration ?? 0);
+          if (v?.videoWidth) setVideoSize({ w: v.videoWidth, h: v.videoHeight });
           if (v?.videoWidth) {
             const pad = Math.round(Math.min(v.videoWidth, v.videoHeight) * PAD_FRAC);
             const inset = pad / (v.videoWidth + pad * 2);
@@ -1463,22 +1488,24 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             style={{
               padding: "var(--a4)",
               borderRadius: "var(--r3)",
-              background: courtDone ? "var(--good-wash)" : "var(--warn-wash)",
-              border: `1px solid ${courtDone ? "var(--good)" : "var(--warn)"}`,
+              background: courtDone && !courtProblem ? "var(--good-wash)" : "var(--warn-wash)",
+              border: `1px solid ${courtDone && !courtProblem ? "var(--good)" : "var(--warn)"}`,
             }}
           >
             <div className="row g2" style={{ alignItems: "center" }}>
               <span style={{
                 width: 22, height: 22, borderRadius: "50%", display: "grid", placeItems: "center",
-                background: courtDone ? "var(--good)" : "var(--warn)", color: "#fff",
+                background: courtDone && !courtProblem ? "var(--good)" : "var(--warn)", color: "#fff",
                 fontSize: 12, fontWeight: 700, flex: "none",
               }}>
-                {courtDone ? "\u2713" : "1"}
+                {courtDone && !courtProblem ? "\u2713" : "1"}
               </span>
               <strong style={{ fontSize: 15 }}>Does the court line up?</strong>
             </div>
-            <p className="sm" style={{ margin: 0, color: courtDone ? "var(--good)" : "var(--warn)" }}>
-              {courtDone
+            <p className="sm" style={{ margin: 0, color: courtDone && !courtProblem ? "var(--good)" : "var(--warn)" }}>
+              {courtProblem
+                ? `${courtProblem} Drag the yellow corners onto the four corners of the court you are playing on.`
+                : courtDone
                 ? "Check the blue lines sit on the painted ones — the kitchen line and the centre line as well as the outside. Drag any yellow corner that is off."
                 : "No court on the frame yet. Press “Fit the court” to lay one down, then drag its corners onto the painted lines."}
             </p>

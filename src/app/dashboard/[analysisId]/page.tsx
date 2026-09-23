@@ -8,7 +8,7 @@ import { courtFrameFor } from "@/lib/vision/shots";
 import { referenceFramePath } from "@/lib/coaching/reference-frame-image";
 import { createClient } from "@/lib/supabase/server";
 import { getSignedDownloadUrl } from "@/lib/storage/r2";
-import { getSetup, isCompleteSetup } from "@/lib/db/setup";
+import { getSetup, isCompleteSetup, PARTNER_SEED_LABEL } from "@/lib/db/setup";
 import { getAnalysisForUser, type AnalysisWithVideo } from "@/lib/db/analyses";
 import { getPhase2Data } from "@/lib/db/vision";
 import { getProfile } from "@/lib/db/profiles";
@@ -233,6 +233,12 @@ async function AnalysisBreakdown({
   const drillNames: Record<string, string> = {};
   for (const d of drills) drillNames[d.slug] = d.name;
   const drillCatalog = Object.fromEntries(drills.map((d) => [d.slug, d]));
+  // Whether a partner was tapped at all, so the partnership section can say
+  // which kind of nothing it is showing. One row, already cached by the setup
+  // fetch the page does for the tag banner.
+  const setupRow = await getSetup(supabase, analysis.id).catch(() => null);
+  const taggedPartner = Boolean(setupRow?.players.some((pl) => pl.label === PARTNER_SEED_LABEL));
+
   const prescribedCount = prescribedDrills(coachingData.observations)
     .filter((d) => drillCatalog[d.slug]).length;
   // Computed once and shared, so the workspace and the read below cannot
@@ -459,6 +465,8 @@ async function AnalysisBreakdown({
           the setup frame, which is the only way to know who it is about. */}
       <PartnershipPanel
         partnership={partnershipFrom(coachingData.read?.coaching_json ?? null)}
+        taggedPartner={taggedPartner}
+        setupHref={`/dashboard/${analysis.id}/setup`}
       />
 
 

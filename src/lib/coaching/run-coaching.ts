@@ -838,7 +838,23 @@ export async function persistCoachingOutput(opts: {
   // evidence-moment.ts: a straight-leg criticism once came with footage of
   // the players standing about after the point had ended, which is how a true
   // sentence gets read as a false one.
-  const contactSeconds = analystInput.contacts.map((c) => c.t).filter((t) => Number.isFinite(t));
+  //
+  // AND ONLY THE ONES INSIDE A RALLY. Measured on ky-720p: about a third of
+  // the contacts the wrist detector finds land between points, and a cited
+  // time that lands on one of those produces footage of nobody playing --
+  // which is the complaint this whole path exists to answer. The rallies come
+  // from the coach watching the video, so they are an independent opinion
+  // about when the ball was live.
+  const rallyWindows = out.rallies
+    .map((r) => [Number(r.start_s), Number(r.end_s)] as const)
+    .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && b > a);
+  const inAnyRally = (t: number) => rallyWindows.some(([a, b]) => t >= a - 0.5 && t <= b + 0.5);
+  const allContacts = analystInput.contacts.map((c) => c.t).filter((t) => Number.isFinite(t));
+  const contactSeconds = rallyWindows.length > 0 ? allContacts.filter(inAnyRally) : allContacts;
+  if (rallyWindows.length > 0 && contactSeconds.length < allContacts.length) {
+    console.error(`[coaching] ${allContacts.length - contactSeconds.length} of ${allContacts.length} `
+      + "measured contacts fall outside every rally — not usable as evidence");
+  }
   if (out.observations.length > 0) {
     let deadAir = 0;
     const obsRows = out.observations.map((o) => {

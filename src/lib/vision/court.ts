@@ -1,4 +1,5 @@
 import { detectCourtViaPython } from "./cv-scripts";
+import { courtQuadProblem } from "./court-quad";
 import { computeHomography, applyHomography, type Homography } from "./homography";
 import { courtFrameFor } from "./shots";
 import type { PreAnalysisSetup } from "@/lib/db/setup";
@@ -38,33 +39,12 @@ export function isPlausibleCourtQuad(
   frameWidthPx: number,
   frameHeightPx: number
 ): boolean {
-  const c = cal?.cornersImagePx;
-  if (!c || !(frameWidthPx > 0) || !(frameHeightPx > 0)) return false;
-  const pts = [c.bottomLeft, c.bottomRight, c.topRight, c.topLeft];
-  if (pts.some((p) => !Array.isArray(p) || p.length !== 2 || !p.every(Number.isFinite))) return false;
-
-  const area = Math.abs(
-    pts.reduce((sum, p, i) => {
-      const q = pts[(i + 1) % pts.length];
-      return sum + (p[0] * q[1] - q[0] * p[1]);
-    }, 0) / 2
-  );
-  if (area < 0.05 * frameWidthPx * frameHeightPx) return false;
-
-  const ys = pts.map((p) => p[1]);
-  if (Math.max(...ys) - Math.min(...ys) < 0.12 * frameHeightPx) return false;
-
-  const xs = pts.map((p) => p[0]);
-  if (Math.max(...xs) - Math.min(...xs) < 0.20 * frameWidthPx) return false;
-
-  // A full court seen from behind a baseline is deeper than it is wide in the
-  // image. A quad claiming "full" while being a shallow band across the bottom
-  // is claiming to have seen 44 feet of court in a few dozen pixels.
-  if (cal!.quadKind === "full") {
-    const depth = Math.max(...ys) - Math.min(...ys);
-    if (depth < 0.20 * frameHeightPx) return false;
-  }
-  return true;
+  return courtQuadProblem(
+    cal?.cornersImagePx ?? null,
+    frameWidthPx,
+    frameHeightPx,
+    cal?.quadKind ?? "full",
+  ) === null;
 }
 
 /**

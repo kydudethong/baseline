@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { PartnershipRead } from "@/lib/coaching/analyst";
 import { PARTNERSHIP_DIMENSIONS } from "@/lib/coaching/analyst";
 import { clock } from "@/lib/format/duration";
@@ -63,12 +64,50 @@ function Bar({ rating }: { rating: number }) {
 export function PartnershipPanel({
   partnership,
   onSeek,
+  taggedPartner,
+  setupHref,
 }: {
   partnership: PartnershipRead | null | undefined;
   /** Jump the player to a moment. Omitted on the share page's read-only view. */
   onSeek?: (seconds: number) => void;
+  /**
+   * Whether a partner was tapped on the setup frame at all.
+   *
+   * WHY THE ABSENCE NEEDS A VOICE. This section rendered nothing when there
+   * was no partnership read, so a player who never tagged a partner and a
+   * player whose partner could not be matched saw exactly the same thing --
+   * an empty space where they had been told a partnership read would be.
+   * Reported twice as "I still don't see the partner analysis". Undefined
+   * keeps the old silence, for the shared page where the reader cannot act.
+   */
+  taggedPartner?: boolean;
+  /** Where to go to tag one. Only useful to the owner. */
+  setupHref?: string;
 }) {
-  if (!partnership) return null;
+  if (!partnership) {
+    if (taggedPartner === undefined) return null;
+    return (
+      <section className="stack g2 card">
+        <span className="eyebrow" style={{ color: "var(--blue)" }}>You and your partner</span>
+        <p className="sm measure" style={{ margin: 0, color: "var(--ink-2)" }}>
+          {taggedPartner
+            ? "Your partner was tagged, but no partnership read came back for this clip — usually the "
+              + "tracker lost one of you for too much of it. Re-running the analysis is free and "
+              + "usually produces one."
+            : "No partner was tagged on this clip, so there is nothing to say about how the two of you "
+              + "play together. Tap your partner on the setup frame — the second tap, after yourself — "
+              + "and analyse again."}
+        </p>
+        {setupHref ? (
+          <div className="row g2">
+            <Link href={setupHref} className="btn btn-sm btn-soft">
+              {taggedPartner ? "Check the setup and re-run" : "Tag my partner"}
+            </Link>
+          </div>
+        ) : null}
+      </section>
+    );
+  }
 
   const rated = (partnership.dimensions ?? [])
     .filter((d) => DIMENSION_LABELS[d.key])

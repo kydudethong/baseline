@@ -87,6 +87,34 @@ const MIN_PEAK_SHOULDERS_PER_S = 3;
 const MIN_GAP_S = 0.5;
 
 /**
+ * How far away the NEAREST other contact may be before this one is dropped.
+ *
+ * A RALLY IS AN EXCHANGE, AND A LONE PEAK IS NOT ONE. Measured on ky-720p
+ * (101s, 7 hand-labelled rallies, pose at 15fps, court-gated): of 28 contacts,
+ * 10 landed in dead air -- somebody adjusting their hat between points, a
+ * player jogging back, an arm thrown out mid-sprint. Requiring another contact
+ * within two seconds cut the dead-air rate by 41% (0.17 to 0.10 per dead
+ * second) while keeping 17 of the 18 real ones: a rally always has a second
+ * contact near, and a man walking to the fence does not.
+ *
+ * This matters beyond the count. Every contact is a moment the coaching model
+ * is handed BODY MEASUREMENTS for, so a contact between points measures the
+ * posture of somebody standing still -- straight knees, upright chest -- and
+ * hands it to the coach as the shape of a shot.
+ */
+const MAX_ISOLATION_S = 2.0;
+
+/**
+ * How many contacts a clip needs before isolation is allowed to judge any.
+ *
+ * The rule reads the SHAPE of a clip -- contacts come in exchanges -- and a
+ * clip with four of them has no shape to read. Below this the filter would be
+ * deciding on noise, and a run that found three contacts has bigger problems
+ * than which of them is real.
+ */
+const MIN_FOR_ISOLATION = 6;
+
+/**
  * How much taller the peak must be than the quiet either side of it.
  *
  * AND "EITHER SIDE" MEANS TWO OR THREE SAMPLES OUT, not the adjacent one.
@@ -245,7 +273,28 @@ export function detectSwingEvents(poses: PlayerPoseFrame[]): SwingEvent[] {
     out.push(...kept);
   }
 
-  return out.sort((a, b) => a.timestampSeconds - b.timestampSeconds);
+  return dropIsolated(out.sort((a, b) => a.timestampSeconds - b.timestampSeconds));
+}
+
+/**
+ * Drop contacts with nothing else near them in time. See MAX_ISOLATION_S.
+ *
+ * ACROSS PLAYERS, not within one: the second contact of an exchange is the
+ * other team's, so requiring the same player to hit twice inside two seconds
+ * would throw away every ordinary rally. A serve and its return are one
+ * bounce apart, which is well inside the window.
+ */
+export function dropIsolated(
+  swings: SwingEvent[],
+  windowSeconds = MAX_ISOLATION_S
+): SwingEvent[] {
+  if (swings.length < MIN_FOR_ISOLATION) return swings;
+  return swings.filter((s, i) => {
+    const prev = swings[i - 1];
+    const next = swings[i + 1];
+    return (prev !== undefined && s.timestampSeconds - prev.timestampSeconds <= windowSeconds)
+      || (next !== undefined && next.timestampSeconds - s.timestampSeconds <= windowSeconds);
+  });
 }
 
 /** The AnalysisEvent shape the rest of the app already expects. */
