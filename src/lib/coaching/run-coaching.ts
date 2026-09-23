@@ -51,6 +51,7 @@ import path from "node:path";
 
 import { downloadToFile } from "@/lib/storage/r2";
 import { getSetup, matchTracksToSetup } from "@/lib/db/setup";
+import { momentFor } from "./evidence-moment";
 import { cutEvidenceClips } from "./evidence-clips";
 import { OVERLAY_LEGEND } from "./overlay-legend";
 import { buildReferenceFrameImage } from "./reference-frame-image";
@@ -833,10 +834,22 @@ export async function persistCoachingOutput(opts: {
     return end > start ? { start, end } : null;
   };
 
+  // A CITED TIME IS CHECKED AGAINST THE SWINGS BEFORE IT IS BELIEVED. See
+  // evidence-moment.ts: a straight-leg criticism once came with footage of
+  // the players standing about after the point had ended, which is how a true
+  // sentence gets read as a false one.
+  const contactSeconds = analystInput.contacts.map((c) => c.t).filter((t) => Number.isFinite(t));
   if (out.observations.length > 0) {
+    let deadAir = 0;
     const obsRows = out.observations.map((o) => {
-      const named = Number.isFinite(Number(o.shot_t)) ? Number(o.shot_t) : null;
-      const window = named === null ? rallyWindow(o.rally_idx) : null;
+      const moment = momentFor({
+        namedSeconds: Number.isFinite(Number(o.shot_t)) ? Number(o.shot_t) : null,
+        contactSeconds,
+        rally: rallyWindow(o.rally_idx),
+      });
+      if (moment.kind !== "moment" && moment.reason === "named a moment with no play in it") deadAir += 1;
+      const named = moment.kind === "moment" ? moment.tSeconds : null;
+      const window = moment.kind === "rally" ? { start: moment.tSeconds, end: moment.endSeconds } : null;
       return {
       analysis_id: analysisId,
       read_id: readId,
@@ -859,9 +872,13 @@ export async function persistCoachingOutput(opts: {
       // A slug the model invented would break the foreign key AND point the
       // player at a drill that does not exist. Drop it rather than fail.
       drill_slug: o.drill_slug && validSlugs.has(o.drill_slug) ? o.drill_slug : null,
-      shot_idx: shotIdxAt(o.shot_t),
+      shot_idx: shotIdxAt(named),
       };
     });
+    if (deadAir > 0) {
+      console.error(`[coaching] ${deadAir} observation(s) named a time with no measured swing near it — `
+        + "showed the whole point instead of a manufactured moment");
+    }
     const { data: inserted, error: insertObsError } = await supabase
       .from("coaching_observations").insert(obsRows).select("id, t_s, severity, rally_idx, t_is_approx");
     if (insertObsError) throw insertObsError;

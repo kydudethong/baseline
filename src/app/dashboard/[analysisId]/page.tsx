@@ -470,6 +470,9 @@ async function AnalysisBreakdown({
             hero={hero}
             heroEvidence={hero ? evidence.get(hero.id) ?? null : null}
             drillName={hero?.drill_slug ? drillNames[hero.drill_slug] : null}
+            evidence={evidence}
+            drillNames={drillNames}
+            feedback={feedback ?? undefined}
             analysisId={analysis.id}
             heroVerdict={hero ? feedback?.get(hero.id) ?? null : null}
           />

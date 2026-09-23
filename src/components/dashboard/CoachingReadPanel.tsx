@@ -43,6 +43,7 @@ import type { Evidence } from "@/lib/db/evidence";
  */
 export function CoachingReadPanel({
   read, observations, hero, heroEvidence, drillName, analysisId, heroVerdict,
+  evidence, drillNames, feedback,
 }: {
   read: CoachingReadRow;
   /** Only to decide whether the narrative fallback is the only coaching there is. */
@@ -63,12 +64,33 @@ export function CoachingReadPanel({
   drillName?: string | null;
   analysisId?: string;
   heroVerdict?: "right" | "wrong" | "unsure" | null;
+  /**
+   * The footage for EVERY observation, not just the leading one.
+   *
+   * EVERY CRITICISM IS CHECKABLE OR NONE OF THEM ARE. Only the top priority
+   * fix came with a clip; the rest were a title and a paragraph, and the
+   * footage for them existed -- it was cut, uploaded and then only reachable
+   * by selecting exactly the right rally in the player above. A reader who
+   * cannot see the moment behind a criticism has to take it on faith, which
+   * is the one thing this product is not asking anybody to do.
+   */
+  evidence?: Map<string, Evidence>;
+  drillNames?: Record<string, string>;
+  feedback?: Map<string, "right" | "wrong" | "unsure">;
 }) {
   const coaching = parseCoaching(read.coaching_json);
 
   // The narrative blob is the ONLY coaching on the fallback path. Anywhere else
   // it is the observations reworded, so it is not rendered.
   const narrativeOnly = observations.length === 0;
+
+  // Red and yellow both: severity 4+ reads as "Priority", the rest as "Worth
+  // fixing", and a player asked to look at one and not the other has no way
+  // to tell why. Ordered by severity, with a deterministic tie-break so the
+  // page does not shuffle between loads.
+  const rest = observations
+    .filter((o) => o.valence !== "strength" && o.id !== hero?.id)
+    .sort((a, b) => (b.severity ?? 0) - (a.severity ?? 0) || a.id.localeCompare(b.id));
 
   return (
     <div className="stack g6">
@@ -88,6 +110,38 @@ export function CoachingReadPanel({
           initialVerdict={heroVerdict ?? null}
         />
       ) : null}
+      {/* EVERYTHING ELSE THE COACH SAW, each with its own footage, ordered by
+          what it costs. Weaknesses only: the strengths are listed in the
+          overview above the video, and a page of clips of things going well
+          is not what anybody opened this for. */}
+      {rest.length > 0 ? (
+        <section className="stack g4">
+          <div className="stack g1">
+            <h3 className="h2" style={{ margin: 0 }}>
+              {hero ? "The rest of what the coach saw" : "What the coach saw"}
+            </h3>
+            <p className="sm" style={{ margin: 0, color: "var(--ink-3)" }}>
+              Most costly first. Each one plays the moment it came from.
+            </p>
+          </div>
+          {rest.map((o) => (
+            <CoachingInsight
+              key={o.id}
+              observation={o}
+              clipUrl={evidence?.get(o.id)?.clipUrl ?? null}
+              fallbackUrl={evidence?.get(o.id)?.fallbackUrl ?? null}
+              startSeconds={evidence?.get(o.id)?.startSeconds ?? null}
+              windowStartSeconds={evidence?.get(o.id)?.windowStartSeconds ?? null}
+              windowEndSeconds={evidence?.get(o.id)?.windowEndSeconds ?? null}
+              technique={evidence?.get(o.id)?.technique ?? null}
+              drillName={o.drill_slug ? drillNames?.[o.drill_slug] ?? null : null}
+              analysisId={analysisId}
+              initialVerdict={feedback?.get(o.id) ?? null}
+            />
+          ))}
+        </section>
+      ) : null}
+
       {/* THE HEADLINE PARAGRAPH IS GONE.
           "Dominant Kitchen Offense Balanced by Smarter Baseline Margins" --
           a sentence no player would write, restating in praise-shaped prose

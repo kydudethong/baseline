@@ -30,6 +30,12 @@ const POLL_MS = 5000;
  */
 const STALE_AFTER_MS = 20 * 60 * 1000;
 
+/**
+ * How long a run may sit with a read row and no further progress before the
+ * page gives up waiting for the rest of it and shows what there is.
+ */
+const PARTIAL_AFTER_MS = 3 * 60 * 1000;
+
 export function CoachingInProgress({
   analysisId,
   startedAt,
@@ -54,9 +60,24 @@ export function CoachingInProgress({
           progress?: { message?: string; error?: string; coachingDone?: boolean; updatedAt?: string } | null;
         };
         if (!alive) return;
-        // Done either way: a read to show, or a failure to explain. Both are
-        // rendered by the server page, so one refresh and this unmounts.
-        if (data.hasCoachingRead || data.progress?.coachingDone || data.progress?.error) {
+        // WAIT FOR THE WHOLE RUN, NOT FOR THE FIRST ROW OF IT.
+        //
+        // `hasCoachingRead` goes true the moment the read row is inserted --
+        // which happens BEFORE the observations, before the clips are cut and
+        // uploaded, and before the skill ratings are written. Refreshing there
+        // landed the reader on a page with the read text and no ratings chart,
+        // no clips and no coaching points, which then never appeared until
+        // they reloaded by hand. Reported as "the skill ratings don't load at
+        // the same time as the page".
+        //
+        // `coachingDone` is written once everything is in, so that is what
+        // this waits for. The read row is kept only as a safety net: if it
+        // exists and nothing has been written for a few minutes, the process
+        // died after inserting it, and a partial page beats a spinner.
+        const diedPartway = data.hasCoachingRead
+          && data.progress?.updatedAt
+          && Date.now() - new Date(data.progress.updatedAt).getTime() > PARTIAL_AFTER_MS;
+        if (data.progress?.coachingDone || data.progress?.error || diedPartway) {
           router.refresh();
           return;
         }
@@ -96,8 +117,9 @@ export function CoachingInProgress({
       <div className="progress indet"><div className="bar" /></div>
       <p className="sm" style={{ margin: 0 }}>
         The tracking is done. Baseline is now watching the game and writing your read —
-        rallies, technique, what to fix and the drill for it. On a full game this takes a
-        few minutes. This page will update by itself when it&apos;s ready.
+        rallies, technique, what to fix, the clip behind each point and your skill ratings.
+        On a full game this takes a few minutes. The page opens when all of it is ready,
+        rather than half of it now and half in a minute.
       </p>
       <p className="sm" style={{ margin: 0, color: "var(--ink-3)" }}>
         {message ?? "Starting…"}

@@ -295,15 +295,15 @@ export function AnalysisWorkspace({
                           below, so it is not repeated here.
                         </p>
                       ) : null}
+                      {/* NO CLIP ON THESE CARDS. The footage for every point
+                          now sits with it in the read below, and the video for
+                          THIS rally is already playing beside this panel -- a
+                          second player inside the card was the same moment
+                          twice on one screen. */}
                       {rallyObservations.map((o: CoachingObservationRow) => (
                         <CoachingInsight
                           key={o.id}
                           observation={o}
-                          clipUrl={evidence?.get(o.id)?.clipUrl ?? null}
-                          fallbackUrl={evidence?.get(o.id)?.fallbackUrl ?? null}
-                          startSeconds={evidence?.get(o.id)?.startSeconds ?? null}
-                          windowStartSeconds={evidence?.get(o.id)?.windowStartSeconds ?? null}
-                          windowEndSeconds={evidence?.get(o.id)?.windowEndSeconds ?? null}
                           technique={evidence?.get(o.id)?.technique ?? null}
                           drillName={o.drill_slug ? drillNames[o.drill_slug] : null}
                           analysisId={analysisId}

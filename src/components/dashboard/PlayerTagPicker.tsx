@@ -479,7 +479,9 @@ async function waitForRead(analysisId: string, onStage: (line: string) => void):
     }
 
     if (json.progress?.error) throw new Error(json.progress.error);
-    if (json.hasCoachingRead || json.progress?.coachingDone) return;
+    // The read ROW is not the finished read: the ratings, the clips and the
+    // observations all land after it. See CoachingInProgress.
+    if (json.progress?.coachingDone) return;
     if (json.progress?.message) onStage(json.progress.message);
 
     if (Date.now() - started > POLL_GIVE_UP_MS) {
