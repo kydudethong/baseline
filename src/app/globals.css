@@ -1786,3 +1786,30 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
   color:var(--good);font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
 }
 .drills-reveal .reveal-title{font-size:17px}
+
+/* THE TWO JOBS, AT THE TOP, IN ORDER. People were missing that the setup page
+   asks for two separate things -- the court corners and who they are -- and a
+   caption beside each control is only read once you are already there. */
+.setup-steps{
+  list-style:none;margin:0;padding:0;display:grid;gap:var(--a2);
+}
+.setup-steps li{
+  display:grid;grid-template-columns:28px 1fr;gap:var(--a3);align-items:start;
+  padding:var(--a3);border-radius:var(--r2);
+  border:1px solid var(--line);background:var(--card-2, var(--card));
+  opacity:.55;transition:opacity .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.setup-steps li.now{
+  opacity:1;border-color:var(--warn);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent);
+}
+.setup-steps li.done{opacity:1;border-color:color-mix(in srgb, var(--good) 55%, var(--line))}
+.setup-steps .n{
+  width:28px;height:28px;border-radius:50%;display:grid;place-items:center;
+  font-size:13px;font-weight:700;color:#fff;background:var(--ink-3);
+}
+.setup-steps li.now .n{background:var(--warn)}
+.setup-steps li.done .n{background:var(--good)}
+.setup-steps .t{display:flex;flex-direction:column;gap:2px;min-width:0}
+.setup-steps .t strong{font-size:14.5px;color:var(--ink)}
+.setup-steps .t .sm{color:var(--ink-2);line-height:1.4}

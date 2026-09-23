@@ -557,7 +557,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
    * Finding the frame.
    * ------------------------------------------------------------------- */
 
-  const findFrame = useCallback(async (colour?: string | null) => {
+  const findFrame = useCallback(async (colour?: string | null, atSeconds?: number) => {
     setAuto("running");
     setAutoNote(null);
     setError(null);
@@ -569,7 +569,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
       const res = await fetch(`/api/analyses/${analysisId}/setup-frame`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lineColorHex: colour ?? null }),
+        body: JSON.stringify({ lineColorHex: colour ?? null, atSeconds: atSeconds ?? null }),
       });
       const json = (await res.json()) as AutoSetup & { error?: string };
       if (!res.ok) {
@@ -1468,9 +1468,38 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
               <span className="dot" />
               {ready
                 ? "Ready to analyse"
-                : !courtDone ? "Place the court to start" : "Tap yourself to finish"}
+                : !courtDone ? "Step 1 of 2 — place the court" : "Step 2 of 2 — tap yourself"}
             </span>
           </div>
+
+          {/*
+            THE TWO JOBS, SAID ONCE AT THE TOP, IN ORDER.
+            
+            The panel below already explains each step where it happens, and
+            people were still not seeing that there WERE two of them: reported
+            as not knowing the corners had to be placed, and as never tagging a
+            partner. A checklist you read before you start is a different thing
+            from a caption you read once you are already in the wrong place.
+          */}
+          <ol className="setup-steps">
+            <li className={courtDone && !courtProblem ? "done" : "now"}>
+              <span className="n">{courtDone && !courtProblem ? "\u2713" : "1"}</span>
+              <span className="t">
+                <strong>Put the four corners on the court</strong>
+                <span className="sm">Each yellow dot goes on a corner of the court you are playing on.</span>
+              </span>
+            </li>
+            <li className={!courtDone ? "" : selfPoint ? "done" : "now"}>
+              <span className="n">{selfPoint ? "\u2713" : "2"}</span>
+              <span className="t">
+                <strong>Tap yourself, then your partner</strong>
+                <span className="sm">
+                  Tap your own box first — that is who the coaching is written about.
+                  Then tap your partner for a read on how the two of you play together.
+                </span>
+              </span>
+            </li>
+          </ol>
 
           {/*
             TWO TILES: the court, and who you are.
@@ -1586,7 +1615,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
               }}>
                 {selfPoint ? "\u2713" : "2"}
               </span>
-              <strong style={{ fontSize: 15 }}>Which player is you?</strong>
+              <strong style={{ fontSize: 15 }}>Which player is you — and which is your partner?</strong>
             </div>
             <p className="sm" style={{ margin: 0, color: selfPoint ? "var(--good)" : "var(--warn)" }}>
               {!courtDone
@@ -1596,7 +1625,7 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                       ? "Tap yourself on the frame. Tap a green box, or anywhere at your feet if the box is missing."
                       : "Nobody was detected on this frame, so tap the spot on the court where you are standing.")
                   : tagging === "partner" && !partnerPoint
-                    ? "Got you. Now tap your partner if you want a read on how you two play together — or skip it and analyse."
+                    ? "Got you. Now tap YOUR PARTNER — the other player on your side of the net. That is the only way this clip can say anything about how the two of you play together, and it cannot be added later."
                     : "You and your partner are marked. Tap either one again to move it."}
             </p>
             {courtDone && detectedAt !== null && detected.length > 0 && !onDetFrame ? (
@@ -1604,6 +1633,26 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
                 {selfPoint ? "Back to the frame you were tagged on" : "Back to the frame with the player boxes"}
               </button>
             ) : null}
+            {/*
+              A WAY OUT OF A BAD FRAME. The finder picks the fullest frame in
+              the clip, and sometimes that frame is unusable anyway: somebody
+              behind the net post, two players overlapping, the camera still
+              being set down. Without this the only options were to hand-place
+              a mark (losing the box that anchors the tracking) or to give up.
+            */}
+            <div className="row g2" style={{ flexWrap: "wrap", alignItems: "center" }}>
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                disabled={auto === "running"}
+                onClick={() => { void findFrame(lineColor, time); }}
+              >
+                {auto === "running" ? "Looking…" : "Use a different frame"}
+              </button>
+              <span className="xs" style={{ color: "var(--ink-3)" }}>
+                Scrub to a moment where everyone is clear of each other, then press this.
+              </span>
+            </div>
             {(selfPoint || partnerPoint) ? (
               <div className="row g2" style={{ flexWrap: "wrap" }}>
                 <button
@@ -1676,6 +1725,14 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
             >
               {saving ? "Saving…" : "Looks right — analyse"}
             </button>
+            {/* WHAT THEY ARE ABOUT TO GIVE UP, on the button that gives it
+                up. A partnership read cannot be written later from a clip that
+                was never tagged, and "analyse" said nothing about that. */}
+            {selfPoint && !partnerPoint ? (
+              <span className="xs" style={{ color: "var(--warn)" }}>
+                No partner tagged — you will not get the partnership read.
+              </span>
+            ) : null}
             <button type="button" className="btn btn-soft" onClick={() => setFixing(true)}>
               More settings
             </button>

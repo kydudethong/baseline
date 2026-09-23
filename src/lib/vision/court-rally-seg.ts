@@ -229,7 +229,17 @@ export async function setupFrameViaRallySeg(
   frameSize: [number, number],
   outFramePath: string | null,
   onLog?: (line: string) => void,
-  configOverrides?: Array<[string, string]>
+  configOverrides?: Array<[string, string]>,
+  /**
+   * Look only inside these seconds.
+   *
+   * THE FRAME IS CHOSEN, NOT ASKED FOR -- which is right until the one it
+   * chooses is one the user cannot work with: a player behind the net post,
+   * the camera still being carried, the wrong end of a clip holding two
+   * games. Then they need to say "look around here instead", and this is how
+   * the setup page says it. Undefined scans the whole clip, as before.
+   */
+  window?: { startSeconds: number; endSeconds: number },
 ): Promise<RallySegSetup | null> {
   if (!rallySegInstalled()) return null;
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "rss-"));
@@ -241,6 +251,10 @@ export async function setupFrameViaRallySeg(
     // court that would not fit against white gets another go against the
     // colour that is actually painted on it.
     for (const [key, value] of configOverrides ?? []) args.push("--set", `${key}=${value}`);
+    if (window && window.endSeconds > window.startSeconds) {
+      args.push("--start", Math.max(0, window.startSeconds).toFixed(2));
+      args.push("--end", window.endSeconds.toFixed(2));
+    }
     if (outFramePath) {
       fs.mkdirSync(path.dirname(outFramePath), { recursive: true });
       args.push("--out-frame", outFramePath);

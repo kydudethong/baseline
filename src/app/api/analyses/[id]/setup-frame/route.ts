@@ -55,14 +55,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // colour that is actually on the ground, which is the whole point of
   // asking -- so this has to reach the fitter, not just the saved setup.
   let lineColorHex: string | null = null;
+  let atSeconds: number | null = null;
   try {
-    const body = (await request.json()) as { lineColorHex?: unknown };
+    const body = (await request.json()) as { lineColorHex?: unknown; atSeconds?: unknown };
     lineColorHex = normaliseLineColor(body?.lineColorHex);
+    // "Look around here instead." The frame finder scans the whole clip by
+    // default and picks the fullest frame; when its pick is unusable -- a
+    // player behind the post, the camera still being set down -- the setup
+    // page sends the second the user is looking at and it searches there.
+    if (typeof body?.atSeconds === "number" && Number.isFinite(body.atSeconds)) {
+      atSeconds = Math.max(0, body.atSeconds);
+    }
   } catch {
     // No body, or not JSON. The frame finder has always worked without one.
   }
 
-  const refresh = new URL(request.url).searchParams.get("refresh") === "1";
+  // A frame asked for by second is never served from the cache: the cache
+  // holds the finder's own pick, and being handed that again is exactly what
+  // the request is trying to get away from.
+  const refresh = new URL(request.url).searchParams.get("refresh") === "1" || atSeconds !== null;
   const dir = cacheDir();
   const jpegPath = path.join(dir, `${id}.jpg`);
   const metaPath = path.join(dir, `${id}.json`);
@@ -108,7 +119,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const result = await setupFrameViaRallySeg(localPath, [width, height], jpegPath, (line) => {
       logs.push(line);
       console.warn(`[setup-frame ${id}] ${line}`);
-    }, lineColorHex ? [["court.line_color_hex", lineColorHex]] : []);
+    }, lineColorHex ? [["court.line_color_hex", lineColorHex]] : [],
+      // A window around the second asked for, not that second exactly: the
+      // finder still picks the best frame it can see, and the seconds around
+      // a moment usually hold a better one than the moment itself.
+      atSeconds === null ? undefined : { startSeconds: Math.max(0, atSeconds - 2), endSeconds: atSeconds + 10 });
     if (!result) {
       const why = logs.length ? logs[logs.length - 1] : "no diagnostic was produced";
       return NextResponse.json(
