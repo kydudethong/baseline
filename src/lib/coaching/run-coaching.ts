@@ -50,7 +50,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { downloadToFile } from "@/lib/storage/r2";
-import { getSetup, matchTracksToSetup } from "@/lib/db/setup";
+import { getSetup, matchTracksToSetup, PARTNER_SEED_LABEL } from "@/lib/db/setup";
 import { momentFor } from "./evidence-moment";
 import { verifyObservations } from "./verify-observations";
 import { cutEvidenceClips } from "./evidence-clips";
@@ -309,9 +309,11 @@ export async function rebuildAnalystContext(
    * list would have half their shots counted as the user's.
    */
   let partnerPlayerId: string | null = null;
+  let partnerTagged = false;
   try {
     const setup = await getSetup(supabase, analysisId);
     if (setup) {
+      partnerTagged = setup.players.some((pl) => pl.label === PARTNER_SEED_LABEL);
       partnerPlayerId = matchTracksToSetup(
         ((tracksRes.data ?? []) as PlayerTrackRow[]).map((t) => ({
           playerId: t.player_label,
@@ -333,6 +335,7 @@ export async function rebuildAnalystContext(
     clipSeconds: Number(analysis.video?.duration_seconds ?? 0),
     subjectPlayerId: analysis.self_player_label ?? null,
     partnerPlayerId,
+    partnerTagged,
     shots: (shotsRes.data ?? []) as AnalysisShotRow[],
     ballTrack: (ballRes.data as BallTrackRow | null) ?? null,
     movement: (movementRes.data ?? []) as MovementMetricRow[],

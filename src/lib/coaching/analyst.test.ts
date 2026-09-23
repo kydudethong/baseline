@@ -11,6 +11,7 @@ function input(over: Partial<AnalystInput> = {}): AnalystInput {
     clipSeconds: 101.3,
     subjectPlayerId: "player_2",
     partnerPlayerId: null,
+    partnerTagged: false,
     subjectSide: "near",
     ballCoverage: 0.28,
     courtConfidence: 0.735,
@@ -413,7 +414,7 @@ test("every coaching dimension has a label", () => {
 // The partnership section.
 // ---------------------------------------------------------------------------
 
-const withPartner = () => input({ partnerPlayerId: "player_3" });
+const withPartner = () => input({ partnerPlayerId: "player_3", partnerTagged: true });
 
 test("no partner tagged means the model is told to omit the section, not to guess", () => {
   // The worst available outcome is a confident partnership read about an
@@ -692,4 +693,46 @@ test("the prompt says the criticisms are checked, and does not set a quota", () 
   assert.match(p, /DELETED, not softened/);
   assert.doesNotMatch(p, /at least a THIRD/);
   assert.doesNotMatch(p, /three or more different families/);
+});
+
+
+test("tagging a partner is enough for the partnership section, matched or not", () => {
+  // THE BUG: the section was gated on partnerPlayerId, a TRACK label from
+  // matching the tap to a tracked player at the setup frame. When that match
+  // failed the prompt said "NO PARTNER WAS TAGGED, omit partnership" — while
+  // the still in the same request had a cyan ring round the partner. Reported
+  // three times as "I still don't see the partner analysis".
+  const tappedOnly = analystPrompt(
+    input({ partnerPlayerId: null, partnerTagged: true }), "LEGEND", null, true, true);
+  assert.match(tappedOnly, /THE PARTNERSHIP SECTION/);
+  assert.doesNotMatch(tappedOnly, /NO PARTNER WAS TAGGED/);
+
+  // And nobody tagged means nobody tagged: no section, no guessing which of
+  // the three other players it is about.
+  const neither = analystPrompt(
+    input({ partnerPlayerId: null, partnerTagged: false }), "LEGEND", null, true);
+  assert.match(neither, /NO PARTNER WAS TAGGED/);
+  assert.doesNotMatch(neither, /THE PARTNERSHIP SECTION/);
+});
+
+test("the partnership section says which player it is about, three ways", () => {
+  // A section about "your partner" that cannot point at them is how a
+  // confident report about an opponent gets written.
+  const ringed = analystPrompt(withPartner(), "LEGEND", null, true, true);
+  assert.match(ringed, /ringed in CYAN/);
+
+  // No ring, no matched track, but we know which half they play in: on a
+  // doubles court that leaves exactly one other player. Not a guess.
+  const bySide = analystPrompt(
+    input({ partnerPlayerId: null, partnerTagged: true, subjectSide: "near" }),
+    "LEGEND", null, true, false);
+  assert.match(bySide, /THE PARTNERSHIP SECTION/);
+  assert.match(bySide, /OTHER player in the near half/);
+
+  // Nothing to point with: no ring, no track, no court. One in three is a
+  // guess, and the section is dropped rather than guessed.
+  const blind = analystPrompt(
+    input({ partnerPlayerId: null, partnerTagged: true, subjectSide: null }),
+    "LEGEND", null, true, false);
+  assert.doesNotMatch(blind, /THE PARTNERSHIP SECTION/);
 });

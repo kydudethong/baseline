@@ -169,6 +169,22 @@ export interface AnalystInput {
    */
   partnerPlayerId: string | null;
   /**
+   * Whether a partner was TAPPED on the setup frame, matched or not.
+   *
+   * THE SECTION WAS GATED ON THE WRONG FACT. It asked for partnerPlayerId --
+   * a TRACK label, produced by matching the tap to a tracked player at the
+   * setup frame. When that match fails (the tracker had nobody there on that
+   * frame, which happens), the prompt told the model "NO PARTNER WAS TAGGED,
+   * omit partnership" while the still attached to the very same request had a
+   * cyan ring round the partner. The player tagged one, saw the ring, and got
+   * no partnership read; reported three times.
+   *
+   * The tap is the fact that matters: it says a real person wants this
+   * section and which body it is about. The track label only decides whether
+   * we can ALSO put numbers against them.
+   */
+  partnerTagged: boolean;
+  /**
    * Which half of the court the subject played in, when the court says.
    *
    * THE ONE FACT THAT SETTLES AN ATTRIBUTION. A read blamed the subject for
@@ -491,6 +507,35 @@ function sideRule(input: AnalystInput): string {
   ].join("\n");
 }
 
+/**
+ * Whether the read should contain a partnership section at all.
+ *
+ * It needs two things: somebody ASKED for it (they tapped a partner), and
+ * there is a way to say WHICH player it is about. The second used to be a
+ * matched track label alone, and when the match failed the section vanished
+ * even though the still had a cyan ring on the partner. There are three ways
+ * to point at them now, in order of how directly they point.
+ */
+export function partnershipWanted(input: AnalystInput, hasPartnerMark: boolean): boolean {
+  if (!input.partnerPlayerId && !input.partnerTagged) return false;
+  return Boolean(input.partnerPlayerId) || hasPartnerMark || Boolean(input.subjectSide);
+}
+
+/** The sentence that says which player the partnership is about. */
+function whoThePartnerIs(input: AnalystInput, hasPartnerMark: boolean): string {
+  if (hasPartnerMark) {
+    return "WHO THE PARTNER IS: the player ringed in CYAN on the still, labelled PARTNER.\n"
+      + "The player tapped them themselves.";
+  }
+  if (input.subjectSide) {
+    return `WHO THE PARTNER IS: the OTHER player in the ${input.subjectSide} half — the one\n`
+      + "sharing the subject's side of the net. There are only two of them in that half, so\n"
+      + "this is not a choice: the subject is one, their partner is the other. The player\n"
+      + "asked for this section, but the still could not ring them.";
+  }
+  return "WHO THE PARTNER IS: the other player on the subject's side of the net.";
+}
+
 export function analystPrompt(
   input: AnalystInput,
   legend: string,
@@ -739,10 +784,12 @@ RULES THAT MATTER MORE THAN COMPLETENESS
   height", "landed deep", "took the pace off", "sat up" — and never in figures.
   A sentence that sounds measured and is not is worse than no sentence, because
   the reader cannot tell which of your sentences are which.
-${input.partnerPlayerId ? `
+${partnershipWanted(input, hasPartnerMark) ? `
 THE PARTNERSHIP SECTION
 
-Fill in \`partnership\`. It is about the subject AND THE PLAYER MARKED PARTNER
+${whoThePartnerIs(input, hasPartnerMark)}
+
+Fill in \`partnership\`. It is about the subject AND THEIR PARTNER
 as a pair — not two individual reads side by side, and not a report card on the
 partner, who did not ask for one. Everything in it must be something two people
 did together that this camera can see.
@@ -1250,7 +1297,7 @@ export function auditAnalysis(out: AnalystOutput, input: AnalystInput): string[]
   // to moments inside this clip, are the numbers on the scale they claim.
   const pship = out.partnership;
   if (pship) {
-    if (!input.partnerPlayerId) {
+    if (!input.partnerPlayerId && !input.partnerTagged) {
       problems.push(
         "The read includes a partnership section, but nobody was tagged as your partner for this clip — " +
         "so whoever it is about was chosen by the model, not by you. Treat that whole section as a guess."

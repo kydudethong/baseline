@@ -185,6 +185,8 @@ export function buildAnalystInput(opts: {
   subjectPlayerId: string | null;
   /** Track label of the partner, when one was tagged on the setup frame. */
   partnerPlayerId?: string | null;
+  /** Whether a partner was TAPPED on the setup frame, matched to a track or not. */
+  partnerTagged?: boolean;
   shots: AnalysisShotRow[];
   ballTrack: BallTrackRow | null;
   movement: MovementMetricRow[];
@@ -240,6 +242,10 @@ export function buildAnalystInput(opts: {
     clipSeconds: Math.round(opts.clipSeconds * 10) / 10,
     subjectPlayerId: opts.subjectPlayerId,
     partnerPlayerId: opts.partnerPlayerId ?? null,
+    // The TAP, not the match. See AnalystInput.partnerTagged: the match can
+    // fail on a frame where the tracker had nobody under the tap, and the
+    // section was being switched off by that rather than by the user.
+    partnerTagged: opts.partnerTagged ?? Boolean(opts.partnerPlayerId),
     // WHICH HALF, from the positioning pass rather than from the model's eye.
     // It is computed over the whole clip (see PlayerPositioning.side), so a
     // player who steps across the kitchen line for one frame does not change
