@@ -11,6 +11,7 @@ function input(over: Partial<AnalystInput> = {}): AnalystInput {
     clipSeconds: 101.3,
     subjectPlayerId: "player_2",
     partnerPlayerId: null,
+    subjectSide: "near",
     ballCoverage: 0.28,
     courtConfidence: 0.735,
     contacts: [
@@ -654,4 +655,20 @@ test("with no contacts measured, the prompt stops describing measurements it doe
   const some = analystPrompt(input(), "LEGEND", null, true);
   assert.match(some, /shoulderTurnDeg/);
   assert.match(some, /USE\nTHE NUMBER|USE THE NUMBER/);
+});
+
+
+test("the subject's half of the court is a rule about attribution", () => {
+  // REPORTED: a read criticised the subject for flicking a ball into the net
+  // that the player ACROSS THE NET hit. Four people in a kitchen exchange look
+  // alike on a phone; which half a shot came from does not.
+  const near = analystPrompt(input({ subjectSide: "near" }), "LEGEND", null, true);
+  assert.match(near, /NEAR HALF/);
+  assert.match(near, /A ball hit from the far half is never theirs/);
+  const far = analystPrompt(input({ subjectSide: "far" }), "LEGEND", null, true);
+  assert.match(far, /A ball hit from the near half is never theirs/);
+  // No court, no claim: a side asserted without a court is a guess.
+  const none = analystPrompt(input({ subjectSide: null }), "LEGEND", null, true);
+  assert.doesNotMatch(none, /HALF — the half/);
+  assert.doesNotMatch(none, /never theirs/);
 });

@@ -168,6 +168,20 @@ export interface AnalystInput {
    * asked to infer it will infer something rather than decline.
    */
   partnerPlayerId: string | null;
+  /**
+   * Which half of the court the subject played in, when the court says.
+   *
+   * THE ONE FACT THAT SETTLES AN ATTRIBUTION. A read blamed the subject for
+   * flicking a ball into the net that an OPPONENT hit -- across the net, in a
+   * kitchen exchange where four people are within a few feet of each other on
+   * screen. Following a person by eye through twelve minutes of video is the
+   * hard problem; deciding which side of the net a shot was struck from is
+   * not, and it rules out half the court before the hard problem starts.
+   *
+   * "near" is the half closest to the camera. Null when no court was marked,
+   * in which case the prompt says nothing about sides rather than guessing.
+   */
+  subjectSide: "near" | "far" | null;
   ballCoverage: number | null;
   courtConfidence: number | null;
   contacts: MeasuredContact[];
@@ -449,6 +463,34 @@ export function analystSchema(): Record<string, unknown> {
   };
 }
 
+/**
+ * Which half of the court the subject is in, said as a rule about attribution.
+ *
+ * Empty when no court was marked: a side claimed without a court is a guess,
+ * and a confident wrong half is worse than no half.
+ */
+function sideRule(input: AnalystInput): string {
+  const side = input.subjectSide;
+  if (!side) return "";
+  const other = side === "near" ? "far" : "near";
+  const where = side === "near" ? "closest to the camera" : "furthest from the camera";
+  return [
+    "",
+    "",
+    `AND THEY PLAY IN THE ${side.toUpperCase()} HALF — the half ${where}, where the ring`,
+    "sits in the still. Their partner is the other player in that half; the two in the",
+    "other half are OPPONENTS.",
+    "",
+    "So before you attribute a shot to the subject, check which half it was struck",
+    `from. A ball hit from the ${other} half is never theirs, however alike the four of`,
+    "them look in a kitchen exchange. THIS HAS GONE WRONG: a read criticised the",
+    "subject for flicking a ball into the net that the player across the net hit.",
+    "",
+    "If they swap ends part way through the clip, follow the PERSON, and say so in",
+    "data_gaps.",
+  ].join("\n");
+}
+
 export function analystPrompt(
   input: AnalystInput,
   legend: string,
@@ -523,7 +565,7 @@ ${hasPartnerMark
   ? `\nAND WHO THEIR PARTNER IS. The same still carries a SECOND mark in CYAN,\nlabelled PARTNER — that player is the subject's doubles partner, on the\nsubject's own side of the net. The two people across the net are opponents and\nare not marked. Everything in the partnership section is about the magenta\nplayer and the cyan player TOGETHER.\n\nThe marks are on one frame. Players move, and after a switch the subject may\nbe on the other side of their own court — follow the PEOPLE, not the positions\nthey held on the still.\n`
   : ""}
 ${hasReferenceFrame
-  ? `WHO YOU ARE COACHING, said twice. One still frame is attached to this\nrequest, taken from this clip, with ONE player marked — a magenta ring, a\nchevron above their head, the word YOU. The player marked that person\nthemselves. The boxes in the video are ALL labelled "Player" and say nothing\nabout who anyone is.${stillAtSeconds !== null ? `\n\nThe still is the frame at ${stillAtSeconds.toFixed(1)}s into the clip: find the\nringed player in the video at that moment and follow THAT PERSON from there.` : ""}\n\nTRUST THE STILL. Identify the subject from it — kit, build, where they stand —\nand follow that person through the video. A box is only a way to find people;\nit can pass from one player to another where they overlap. If you lose the\nsubject for a stretch, say so for that stretch rather than guessing.`
+  ? `WHO YOU ARE COACHING, said twice. One still frame is attached to this\nrequest, taken from this clip, with ONE player marked — a magenta ring, a\nchevron above their head, the word YOU. The player marked that person\nthemselves. The boxes in the video are ALL labelled "Player" and say nothing\nabout who anyone is.${stillAtSeconds !== null ? `\n\nThe still is the frame at ${stillAtSeconds.toFixed(1)}s into the clip: find the\nringed player in the video at that moment and follow THAT PERSON from there.` : ""}\n\nTRUST THE STILL. Identify the subject from it — kit, build, where they stand —\nand follow that person through the video. A box is only a way to find people;\nit can pass from one player to another where they overlap. If you lose the\nsubject for a stretch, say so for that stretch rather than guessing.${sideRule(input)}`
   : `NO STILL WAS SUPPLIED, and every box in the video is labelled "Player", so\nnothing here tells you which player this read is for. Say so plainly at the\nstart of the summary. Describe the near-side pair's play and the patterns you\nsee, and do not write as though the subject were established — a\nguess is not a substitute for knowing.`}
 
 WHAT THE MEASUREMENTS ARE

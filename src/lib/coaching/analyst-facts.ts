@@ -71,6 +71,30 @@ const COACHABLE_MECHANICS = new Set([
   "readyPaddleHeightRatio", "readyKneeFlexionDeg", "resetSeconds",
 ]);
 
+/**
+ * The half of the court the subject spent their time in, or null.
+ *
+ * Reads `movement_metrics.positioning`, which the vision pass writes per
+ * player when the court was calibrated. Null when there was no court, when the
+ * subject has no row, or when their labels disagree about which half they were
+ * in -- that last case is the tracker having swapped them with somebody, and a
+ * side derived from a swap is exactly the wrong thing to hand a coach.
+ */
+export function subjectSide(
+  movement: Array<{ player_label: string; positioning: unknown }>,
+  subjectPlayerId: string | null,
+): "near" | "far" | null {
+  if (!subjectPlayerId) return null;
+  const labels = new Set(subjectPlayerId.split(",").map((l) => l.trim()).filter(Boolean));
+  const sides = new Set<string>();
+  for (const row of movement) {
+    if (!labels.has(row.player_label)) continue;
+    const side = (row.positioning as { side?: unknown } | null)?.side;
+    if (side === "near" || side === "far") sides.add(side);
+  }
+  return sides.size === 1 ? ([...sides][0] as "near" | "far") : null;
+}
+
 export function contactsFromShots(shots: AnalysisShotRow[]): MeasuredContact[] {
   return [...shots]
     .filter((s) => Number.isFinite(Number(s.timestamp_s)))
@@ -216,6 +240,12 @@ export function buildAnalystInput(opts: {
     clipSeconds: Math.round(opts.clipSeconds * 10) / 10,
     subjectPlayerId: opts.subjectPlayerId,
     partnerPlayerId: opts.partnerPlayerId ?? null,
+    // WHICH HALF, from the positioning pass rather than from the model's eye.
+    // It is computed over the whole clip (see PlayerPositioning.side), so a
+    // player who steps across the kitchen line for one frame does not change
+    // sides -- and the two labels that mean "you" are merged first, because
+    // the tracker hands the subject more than one when it loses them.
+    subjectSide: subjectSide(opts.movement, opts.subjectPlayerId),
     ballCoverage: coverage,
     courtConfidence: opts.courtConfidence,
     contacts,
