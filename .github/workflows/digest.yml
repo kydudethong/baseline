@@ -1,0 +1,54 @@
+# The weekly digest, sent by GitHub rather than by the app.
+#
+# WHY NOT A TIMER INSIDE THE APP. Baseline runs as one long-lived container
+# (docs/deploy.md). A setInterval in it fires again on every redeploy, never on
+# a machine that was restarted, and not at all while the box is asleep. A
+# scheduler outside it has none of those failure modes, and this repo already
+# has a runner.
+#
+# ONE-TIME SETUP (Settings -> Secrets and variables -> Actions -> New secret):
+#   DIGEST_TOKEN   the same value as the app's DIGEST_TOKEN Fly secret
+#   SITE_URL       https://your-domain   (optional; defaults to the Fly URL)
+#
+# Until DIGEST_TOKEN exists here AND on the app, this workflow does nothing but
+# say so -- it is not an error, it is the off state.
+
+name: Weekly digest
+
+on:
+  schedule:
+    # 16:00 UTC on Mondays — 9am in San Diego, when somebody is likely to act
+    # on "here is what moved" rather than archive it.
+    - cron: "0 16 * * 1"
+  # So it can be sent by hand, and so a dry run can be done from the Actions
+  # tab without waiting a week.
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "Report what it would send, without sending it"
+        type: boolean
+        default: true
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send the digest
+        env:
+          DIGEST_TOKEN: ${{ secrets.DIGEST_TOKEN }}
+          SITE_URL: ${{ secrets.SITE_URL || 'https://baseline-court.fly.dev' }}
+          DRY: ${{ inputs.dry && '1' || '0' }}
+        run: |
+          if [ -z "$DIGEST_TOKEN" ]; then
+            echo "DIGEST_TOKEN is not set in this repository's secrets — nothing to do."
+            exit 0
+          fi
+          url="$SITE_URL/api/cron/digest"
+          if [ "$DRY" = "1" ]; then url="$url?dry=1"; fi
+          echo "POST $url"
+          # --fail-with-body so a 401 or a 503 fails the run AND prints the
+          # reason, which is the whole diagnosis: a wrong token and an unset
+          # RESEND_API_KEY look identical from a bare exit code.
+          curl --fail-with-body -sS -X POST \
+            -H "authorization: Bearer $DIGEST_TOKEN" \
+            "$url"
