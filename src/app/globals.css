@@ -1813,3 +1813,33 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
 .setup-steps .t{display:flex;flex-direction:column;gap:2px;min-width:0}
 .setup-steps .t strong{font-size:14.5px;color:var(--ink)}
 .setup-steps .t .sm{color:var(--ink-2);line-height:1.4}
+
+/* THE PARTNERSHIP DOOR. The score is the front of it: a ring filled to the
+   rating, in the rating's own colour, so "is this worth opening" is answered
+   before the words are read. */
+.pship .reveal-sum{gap:var(--a3)}
+.pship-score{
+  flex:none;width:56px;height:56px;border-radius:50%;
+  display:grid;place-items:center;
+  box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--line) 80%, transparent);
+}
+.pship-score-in{
+  width:44px;height:44px;border-radius:50%;background:var(--card);
+  display:grid;place-items:center;line-height:1;
+}
+.pship-score-in b{font-size:16px;font-weight:750;color:var(--ink)}
+.pship-score-in i{font-style:normal;font-size:9px;color:var(--ink-3);margin-top:1px}
+.pship .reveal-title{font-size:16.5px}
+@media (max-width:640px){
+  .pship-score{width:46px;height:46px}
+  .pship-score-in{width:36px;height:36px}
+  .pship-score-in b{font-size:14px}
+}
+
+/* The same section with nothing in it yet. Dashed rather than solid: an
+   outline of something that could be here, not a thing that is. */
+.pship-empty{border-style:dashed}
+.pship-empty-ic{
+  width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none;
+  background:color-mix(in srgb, var(--blue) 14%, transparent);color:var(--blue);font-size:17px;
+}

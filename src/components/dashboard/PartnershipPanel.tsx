@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { CSSProperties } from "react";
 import type { PartnershipRead } from "@/lib/coaching/analyst";
 import { PARTNERSHIP_DIMENSIONS } from "@/lib/coaching/analyst";
 import { clock } from "@/lib/format/duration";
@@ -88,8 +89,11 @@ export function PartnershipPanel({
   if (!partnership) {
     if (taggedPartner === undefined) return null;
     return (
-      <section className="stack g2 card">
-        <span className="eyebrow" style={{ color: "var(--blue)" }}>You and your partner</span>
+      <section className="stack g2 card pship-empty">
+        <div className="row g2" style={{ alignItems: "center" }}>
+          <span className="pship-empty-ic" aria-hidden="true">&#8646;</span>
+          <span className="eyebrow" style={{ color: "var(--blue)" }}>You and your partner</span>
+        </div>
         <p className="sm measure" style={{ margin: 0, color: "var(--ink-2)" }}>
           {taggedPartner
             ? "Your partner was tagged, but no partnership read came back for this clip — usually the "
@@ -113,25 +117,52 @@ export function PartnershipPanel({
   const rated = (partnership.dimensions ?? [])
     .filter((d) => DIMENSION_LABELS[d.key])
     .sort((a, b) => a.rating - b.rating);
+  const score = partnership.compatibility;
+  const tone = score >= 7 ? "var(--good)" : score >= 4.5 ? "var(--warn)" : "var(--bad)";
+  const weakest = rated[0];
 
+  /*
+   * BEHIND ONE TAP, LIKE THE DRILLS.
+   *
+   * It is a page of its own -- a score, nine rated dimensions, friction,
+   * what works, who does what, a joint drill -- and it sits between a player
+   * and their own coaching. Somebody reading about their own game does not
+   * want a report on the pair first; somebody who came for the pair wants all
+   * of it. A door with the score on the front settles both, and the score is
+   * the one number that says whether opening it is worth the tap.
+   */
   return (
-    <section className="stack g4">
-      <div className="stack g1">
-        <span className="eyebrow" style={{ color: "var(--blue)" }}>You and your partner</span>
-        <div className="row" style={{ alignItems: "baseline", gap: "var(--a3)" }}>
-          <span style={{ fontSize: 34, fontWeight: 700, lineHeight: 1 }}>
-            {partnership.compatibility.toFixed(1)}
+    <details className="reveal pship" style={{ "--reveal-accent": tone } as CSSProperties}>
+      <summary className="reveal-sum">
+        <span className="pship-score" style={{
+          background: `conic-gradient(${tone} ${Math.max(0, Math.min(10, score)) * 36}deg, `
+            + "color-mix(in srgb, var(--line) 70%, transparent) 0)",
+        }}>
+          <span className="pship-score-in">
+            <b>{score.toFixed(1)}</b>
+            <i>/10</i>
           </span>
-          <span className="sm" style={{ color: "var(--ink-3)" }}>/ 10 as a pair</span>
-        </div>
-        {/* Said plainly, because a number beside two players' names reads as a
-            rating of the players unless it is told not to. */}
-        <p className="sm" style={{ margin: 0, color: "var(--ink-3)" }}>
-          This is how well you two <em>work together</em>, not how good you are. Two steady
-          players who move as one score higher here than two better players who both chase
-          the same ball.
-        </p>
-      </div>
+        </span>
+        <span className="reveal-txt">
+          <span className="reveal-title">You and your partner</span>
+          <span className="reveal-sub">
+            How well the two of you work together
+            {weakest ? ` · weakest: ${DIMENSION_LABELS[weakest.key].toLowerCase()}` : ""}
+            {partnership.friction?.length
+              ? ` · ${partnership.friction.length} thing${partnership.friction.length === 1 ? "" : "s"} costing you points`
+              : ""}
+          </span>
+        </span>
+        <span className="reveal-chev" aria-hidden="true">Open</span>
+      </summary>
+      <div className="reveal-body stack g4">
+      {/* Said plainly, because a number beside two players' names reads as a
+          rating of the players unless it is told not to. */}
+      <p className="sm" style={{ margin: 0, color: "var(--ink-3)" }}>
+        This is how well you two <em>work together</em>, not how good you are. Two steady
+        players who move as one score higher here than two better players who both chase
+        the same ball.
+      </p>
 
       <p className="measure" style={{ margin: 0 }}>{timesInProse(partnership.summary)}</p>
 
@@ -225,6 +256,7 @@ export function PartnershipPanel({
           </div>
         </div>
       ) : null}
-    </section>
+      </div>
+    </details>
   );
 }
