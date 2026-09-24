@@ -67,6 +67,72 @@ export default async function PricingPage() {
         </div>
       </section>
 
+      {/*
+        WHAT THEY ARE ACTUALLY BUYING, before the price has to be justified.
+        Everything above this is a promise; a page that asks for twenty
+        dollars a month and shows nothing it produces is asking to be trusted
+        on the strength of its own adjectives. This is one real point out of
+        one real read, in the shape the page shows it: what happened, why it
+        matters, what to change, and the clip it rests on.
+      */}
+      <section className="mk-section">
+        <div className="mk-wrap stack g4">
+          <div className="stack g1">
+            <span className="eyebrow">What a read looks like</span>
+            <h2 className="mk-h2">One point out of one game</h2>
+            <p className="mk-lead" style={{ maxWidth: 620 }}>
+              Every criticism comes with the seconds of footage it came from, and every one is
+              re-watched at full detail before you see it — the ones the video contradicts are
+              deleted rather than softened.
+            </p>
+          </div>
+          <div className="mk-sample">
+            <div className="mk-sample-top">
+              <strong>Late off the kitchen line after the return</strong>
+              <span className="pill p-bad">Priority</span>
+            </div>
+            <div className="mk-sample-grid">
+              <div className="stack g3">
+                <div className="stack g1">
+                  <span className="eyebrow">What happened</span>
+                  <p className="sm" style={{ margin: 0 }}>
+                    On four of your six returns you stopped two steps short of the kitchen and
+                    played the next ball from the transition zone, at 2:14, 5:03, 8:40 and 11:22.
+                  </p>
+                </div>
+                <div className="stack g1">
+                  <span className="eyebrow">Why it matters</span>
+                  <p className="sm" style={{ margin: 0 }}>
+                    A ball taken below net height from mid-court has to go up. Three of those four
+                    points ended with the other team volleying into your feet.
+                  </p>
+                </div>
+                <div className="stack g1">
+                  <span className="eyebrow">What to change</span>
+                  <p className="sm" style={{ margin: 0 }}>
+                    Keep moving through the return and split-step at the line, not before it. If
+                    the ball beats you there, stop and reset rather than driving from the middle.
+                  </p>
+                </div>
+                <div className="mk-sample-drill">
+                  <span className="eyebrow">Practice</span>
+                  <span>Return-and-run, 10 balls · then cross-court dinks</span>
+                </div>
+              </div>
+              <div className="mk-sample-clip" aria-hidden="true">
+                <Photo src="stock-court.jpg" alt="" ratio="16 / 10" />
+                <span className="mk-sample-play">▶</span>
+                <span className="mk-sample-time">2:14 — the clip this is from</span>
+              </div>
+            </div>
+          </div>
+          <p className="xs" style={{ color: "var(--ink-3)", margin: 0 }}>
+            An illustration of the layout, written in the same shape as a real read. Your own read
+            is about your own game, with your own footage under each point.
+          </p>
+        </div>
+      </section>
+
       <section className="mk-section alt">
         <div className="mk-wrap mk-split">
           <div className="stack g4">

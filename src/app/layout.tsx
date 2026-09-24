@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { noteRequest } from "@/lib/analysis/idle-sleep";
 
@@ -12,6 +12,19 @@ export const metadata: Metadata = {
   title: "Baseline — AI pickleball match analysis",
   description:
     "Upload your pickleball game footage and get player tracking, court positioning, and AI coaching insights.",
+  // Installed on a phone this is the status-bar treatment; see manifest.ts for
+  // why installing is worth caring about.
+  appleWebApp: { capable: true, title: "Baseline", statusBarStyle: "default" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#16A34A",
+  // The whole product is used one-handed at the side of a court, and a pinch
+  // zoom on the setup canvas is a real gesture people need -- so this sets a
+  // sensible initial scale WITHOUT locking zoom out, which would also lock
+  // out anyone who needs to make the text bigger.
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

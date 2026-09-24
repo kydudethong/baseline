@@ -1873,3 +1873,34 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
   width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none;
   background:color-mix(in srgb, var(--blue) 14%, transparent);color:var(--blue);font-size:15px;
 }
+
+/* The sample read on the pricing page. Shaped like the real insight card, so
+   what is being bought is recognisable when it arrives. */
+.mk-sample{
+  border:1px solid var(--line);border-radius:var(--r3);background:var(--card);
+  box-shadow:var(--lift);overflow:hidden;
+}
+.mk-sample-top{
+  display:flex;gap:var(--a3);align-items:center;justify-content:space-between;
+  padding:var(--a4);border-bottom:1px solid var(--line);
+  background:linear-gradient(100deg, color-mix(in srgb, var(--bad) 8%, transparent), transparent 60%);
+}
+.mk-sample-top strong{font-size:16px}
+.mk-sample-grid{
+  display:grid;grid-template-columns:1.2fr 1fr;gap:var(--a4);padding:var(--a4);
+}
+.mk-sample-drill{
+  display:flex;flex-direction:column;gap:3px;padding:var(--a3);border-radius:var(--r2);
+  background:var(--sunk);font-size:13px;color:var(--ink-2);
+}
+.mk-sample-clip{position:relative;border-radius:var(--r2);overflow:hidden;min-height:180px;background:#000}
+.mk-sample-clip img{width:100%;height:100%;object-fit:cover;opacity:.82}
+.mk-sample-play{
+  position:absolute;inset:0;display:grid;place-items:center;
+  color:#fff;font-size:34px;text-shadow:0 2px 12px rgba(0,0,0,.5);
+}
+.mk-sample-time{
+  position:absolute;left:10px;bottom:10px;padding:4px 9px;border-radius:999px;
+  background:rgba(8,12,18,.62);color:#fff;font-size:11.5px;
+}
+@media (max-width:760px){ .mk-sample-grid{grid-template-columns:1fr} }
