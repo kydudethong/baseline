@@ -4,6 +4,7 @@ import type { PartnershipRead } from "@/lib/coaching/analyst";
 import { PARTNERSHIP_DIMENSIONS } from "@/lib/coaching/analyst";
 import { clock } from "@/lib/format/duration";
 import { timesInProse } from "@/lib/format/duration";
+import { ShareLinkButton } from "./ShareLinkButton";
 
 /**
  * How the pair works, rather than how each of them plays.
@@ -68,6 +69,7 @@ export function PartnershipPanel({
   onSeek,
   taggedPartner,
   setupHref,
+  shareHref,
 }: {
   partnership: PartnershipRead | null | undefined;
   /** Jump the player to a moment. Omitted on the share page's read-only view. */
@@ -85,6 +87,16 @@ export function PartnershipPanel({
   taggedPartner?: boolean;
   /** Where to go to tag one. Only useful to the owner. */
   setupHref?: string;
+  /**
+   * The public link, so the partner can be handed their own half of this.
+   *
+   * IT IS A READ ABOUT TWO PEOPLE AND ONLY ONE OF THEM IS LOOKING AT IT. The
+   * other one is standing next to them at the court, is named in every
+   * paragraph, and has no way to see it. Doubles is two people; this is the
+   * one place in the product where sending it on is the obvious next thing to
+   * do rather than a growth tactic bolted onto a page.
+   */
+  shareHref?: string;
 }) {
   if (!partnership) {
     if (taggedPartner === undefined) return null;
@@ -237,6 +249,19 @@ export function PartnershipPanel({
               {partnership.role_split.imbalance}
             </p>
           ) : null}
+        </div>
+      ) : null}
+
+      {shareHref ? (
+        <div className="row g2" style={{ alignItems: "center", flexWrap: "wrap" }}>
+          <ShareLinkButton
+            url={shareHref}
+            label="Send this to your partner"
+            title="How we play as a pair — from Baseline"
+          />
+          <span className="xs" style={{ color: "var(--ink-3)" }}>
+            They can open it without an account.
+          </span>
         </div>
       ) : null}
 

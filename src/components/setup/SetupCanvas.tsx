@@ -1544,6 +1544,26 @@ export default function SetupCanvas({ analysisId, videoUrl, initial, embedded, o
               </button>
             </div>
             {/*
+              THE COURTS THEY HAVE ALREADY MARKED, on the front panel rather
+              than three taps inside the tools. Somebody who films from the
+              same fence post every week answered this question last week;
+              asking again is the single most repeated bit of work in the
+              product. Renders nothing when there are no saved courts.
+            */}
+            <CourtPresetBar
+              compact
+              corners={corners}
+              lineColorHex={lineColor}
+              matchMode={matchMode}
+              readFrameSize={() => {
+                const v = videoRef.current;
+                return v && v.videoWidth > 0 && v.videoHeight > 0
+                  ? { width: v.videoWidth, height: v.videoHeight }
+                  : null;
+              }}
+              onApply={(next) => { commit(); setCorners(next); }}
+            />
+            {/*
               SAID OUT LOUD, because "it will be less accurate" is not what
               happens. A court that is subtly wrong produces numbers that look
               exactly like right ones -- feet off the kitchen, ground covered,

@@ -48,6 +48,9 @@ import { getAllDrills } from "@/lib/coaching/drills";
 import { topPriorityObservation } from "@/lib/coaching/ranking";
 import type { AnalysisFrameRow, PlayerTrackRow } from "@/lib/db/types";
 import { clock, secs } from "@/lib/format/duration";
+import { NextGameNudge } from "@/components/dashboard/NextGameNudge";
+import { listAnalysisSummariesForUser } from "@/lib/db/analyses";
+import { skillName } from "@/lib/coaching/types";
 
 export const dynamic = "force-dynamic";
 
@@ -237,6 +240,15 @@ async function AnalysisBreakdown({
   // which kind of nothing it is showing. One row, already cached by the setup
   // fetch the page does for the tag banner.
   const setupRow = await getSetup(supabase, analysis.id).catch(() => null);
+
+  // For the "analyse another game" card: how many games this account has, and
+  // the weakest thing this read found, so the ask is about their game rather
+  // than about the product.
+  const analysisCount = (await listAnalysisSummariesForUser(supabase, analysis.user_id).catch(() => [])).length;
+  const weakestSkill = [...coachingData.skills]
+    .filter((sk) => Number.isFinite(Number(sk.raw)))
+    .sort((a, b) => Number(a.raw) - Number(b.raw))
+    .map((sk) => ({ name: skillName(sk.skill_key), rating: Number(sk.raw) }))[0] ?? null;
   const taggedPartner = Boolean(setupRow?.players.some((pl) => pl.label === PARTNER_SEED_LABEL));
 
   const prescribedCount = prescribedDrills(coachingData.observations)
@@ -467,6 +479,7 @@ async function AnalysisBreakdown({
         partnership={partnershipFrom(coachingData.read?.coaching_json ?? null)}
         taggedPartner={taggedPartner}
         setupHref={`/dashboard/${analysis.id}/setup`}
+        shareHref={shareUrl(analysis.id, env.siteUrl)}
       />
 
 
@@ -570,6 +583,15 @@ async function AnalysisBreakdown({
           body="The session plan is the last step of a run and the only optional one — everything above it is already saved. Re-running the analysis usually produces one."
         />
       ) : null}
+
+      {/* THE SECOND GAME. One read says what happened; two say what you do.
+          Nothing in the product asked for it, and the practice page that draws
+          the trend sat empty waiting. */}
+      <NextGameNudge
+        analysisCount={analysisCount}
+        weakestSkill={weakestSkill?.name ?? null}
+        weakestRating={weakestSkill?.rating ?? null}
+      />
 
       {blueprints.length > 0 ? (
         <section className="stack g4">

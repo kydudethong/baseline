@@ -13,13 +13,24 @@ import { useState } from "react";
  * silently does nothing in an odd browser is worse than a URL somebody can
  * select by hand.
  */
-export function ShareLinkButton({ url }: { url: string }) {
+export function ShareLinkButton({
+  url,
+  label = "Share this read",
+  title = "A Baseline coaching read",
+  className = "btn btn-sm btn-soft",
+}: {
+  url: string;
+  /** What the button says. The partnership section asks for a different thing. */
+  label?: string;
+  title?: string;
+  className?: string;
+}) {
   const [state, setState] = useState<"idle" | "copied" | "shown">("idle");
 
   async function onClick() {
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
-        await navigator.share({ title: "A Baseline coaching read", url });
+        await navigator.share({ title, url });
         return;
       } catch {
         // A cancelled share sheet throws the same way a broken one does, so
@@ -39,9 +50,9 @@ export function ShareLinkButton({ url }: { url: string }) {
   return (
     <div className="stack g2">
       <div className="row g2" style={{ alignItems: "center", flexWrap: "wrap" }}>
-        <button type="button" className="btn btn-soft btn-sm" onClick={onClick}
+        <button type="button" className={className} onClick={onClick}
                 title="Anyone with the link can watch this game — no account needed">
-          {state === "copied" ? "Link copied ✓" : "Share this read"}
+          {state === "copied" ? "Link copied ✓" : label}
         </button>
       </div>
       {state === "shown" ? (

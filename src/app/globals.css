@@ -1865,3 +1865,11 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
   background:color-mix(in srgb, var(--court, var(--blue)) 18%, transparent);
   color:var(--court, var(--blue));font-size:12px;
 }
+
+/* Ask for the second game. Quiet, and shaped like the other cards -- it is a
+   suggestion in the flow of the page, not an advertisement stapled to it. */
+.nextgame{border-color:color-mix(in srgb, var(--blue) 30%, var(--line))}
+.nextgame-ic{
+  width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none;
+  background:color-mix(in srgb, var(--blue) 14%, transparent);color:var(--blue);font-size:15px;
+}

@@ -34,8 +34,11 @@ export interface CourtPresetBarProps {
 }
 
 export default function CourtPresetBar({
-  corners, lineColorHex, matchMode, readFrameSize, onApply,
-}: CourtPresetBarProps) {
+  corners, lineColorHex, matchMode, readFrameSize, onApply, compact = false,
+}: CourtPresetBarProps & {
+  /** Just the saved courts, for the front panel. Renders nothing when there are none. */
+  compact?: boolean;
+}) {
   const [presets, setPresets] = useState<CourtPreset[]>([]);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -138,6 +141,28 @@ export default function CourtPresetBar({
   };
 
   const canSave = corners.length === 4;
+
+  /*
+   * THE FRONT-PANEL VERSION: the courts you have already marked, and nothing
+   * else. Somebody who films at the same court every week should not have to
+   * open a tools panel to answer a question they answered last week, and
+   * somebody with no saved courts should see nothing at all -- which is why
+   * this returns null rather than an empty row.
+   */
+  if (compact) {
+    if (presets.length === 0) return null;
+    return (
+      <div className="row g2" style={{ flexWrap: "wrap", alignItems: "center" }}>
+        <span className="sm" style={{ color: "var(--ink-2)" }}>Courts you have marked before:</span>
+        {presets.slice(0, 4).map((p) => (
+          <button key={p.id} type="button" className="btn btn-sm btn-soft" onClick={() => apply(p)}>
+            {p.name}
+          </button>
+        ))}
+        {note && <span className="sm muted">{note}</span>}
+      </div>
+    );
+  }
 
   return (
     <div className="stack g2" style={{ marginTop: 8 }}>
