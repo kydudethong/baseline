@@ -529,7 +529,11 @@ export function VideoUploader({
       setPhase("error");
       setError(err instanceof Error ? err.message : "Upload failed.");
     }
-  }, [file, validationError]);
+    // `trim` IS A DEPENDENCY, and leaving it out was a real bug rather than a
+    // lint complaint: the callback would have closed over whatever the trim
+    // was when the file was chosen, so a range set afterwards -- which is
+    // every range -- would have been ignored and the whole clip uploaded.
+  }, [file, validationError, trim]);
 
   const busy = phase !== "idle" && phase !== "error";
 
