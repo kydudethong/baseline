@@ -8,6 +8,7 @@ import {
   MIN_TARGET_BITRATE,
   MAX_TARGET_BITRATE,
 } from "./transcode-plan";
+import { normaliseTrim } from "./transcode";
 
 /** Ky's actual footage, from ffprobe: 1080p30 HEVC straight off an iPhone. */
 const IPHONE_1080P = {
@@ -141,4 +142,33 @@ test("unknown dimensions decline instead of guessing", () => {
   assert.equal(result.transcode, false);
   if (result.transcode) return;
   assert.match(result.reason, /dimensions/);
+});
+
+// ---------------------------------------------------------------------------
+// Trimming. See TranscodeOptions.trim: the free allowance is ten minutes and a
+// game is sixteen to nineteen, so the first thing a new player meets is a
+// refusal unless they can cut the clip before it is uploaded.
+// ---------------------------------------------------------------------------
+
+test("a trim shorter than the clip is worth doing", () => {
+  const got = normaliseTrim({ startSeconds: 120, endSeconds: 720 }, 1140);
+  assert.deepEqual(got, { startSeconds: 120, endSeconds: 720 });
+});
+
+test("a trim that cuts nothing off is not a trim", () => {
+  // Re-encoding a whole game to remove none of it is minutes of a phone's
+  // battery for no bytes saved.
+  assert.equal(normaliseTrim({ startSeconds: 0, endSeconds: 1140 }, 1140), null);
+  assert.equal(normaliseTrim({ startSeconds: 0, endSeconds: 1139.98 }, 1140), null);
+});
+
+test("nonsense ranges are refused rather than passed to the encoder", () => {
+  assert.equal(normaliseTrim({ startSeconds: 60, endSeconds: 60.5 }, 1140), null, "half a second is not a clip");
+  assert.equal(normaliseTrim({ startSeconds: 600, endSeconds: 60 }, 1140), null, "backwards");
+  assert.equal(normaliseTrim({ startSeconds: NaN, endSeconds: 60 }, 1140), null);
+  assert.equal(normaliseTrim(null, 1140), null);
+});
+
+test("a negative start is clamped, not refused", () => {
+  assert.deepEqual(normaliseTrim({ startSeconds: -3, endSeconds: 600 }, 1140), { startSeconds: 0, endSeconds: 600 });
 });

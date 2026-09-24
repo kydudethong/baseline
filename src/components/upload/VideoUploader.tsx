@@ -9,6 +9,7 @@ import { formatBytes, validateVideoFile, UPLOAD_PART_SIZE_BYTES, partCountFor } 
 import { mapWithConcurrency } from "@/lib/coaching/concurrency";
 import { transcodeForUpload } from "@/lib/video/transcode";
 import { opfsNameFor, readBack, remove as removeOpfs, sweep as sweepOpfs } from "@/lib/video/opfs";
+import { TrimPicker } from "./TrimPicker";
 import {
   clearRecord,
   completedParts,
@@ -132,7 +133,20 @@ async function uploadPartWithRetry(
  *   5. Hand off to the setup page, where the court is fitted and the players
  *      located before any analysis is paid for. Processing starts from there.
  */
-export function VideoUploader({ linkFetchWorks = true }: { linkFetchWorks?: boolean }) {
+export function VideoUploader({
+  linkFetchWorks = true,
+  remainingSeconds = null,
+}: {
+  linkFetchWorks?: boolean;
+  /**
+   * What is left of this month's allowance, when the page knows.
+   *
+   * Passed in so the trim panel can open itself on a clip that will not fit
+   * and offer a cut of exactly the right length -- the difference between
+   * being refused after a five-minute upload and being told before it starts.
+   */
+  remainingSeconds?: number | null;
+}) {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -153,6 +167,10 @@ export function VideoUploader({ linkFetchWorks = true }: { linkFetchWorks?: bool
   // compression step is a minutes-long wait with no obvious purpose, and this
   // is the sentence that explains what it bought.
   const [shrunkTo, setShrunkTo] = useState<string | null>(null);
+  /** The stretch to keep, when the user chose one. See TrimPicker. */
+  const [trim, setTrim] = useState<{ startSeconds: number; endSeconds: number } | null>(null);
+  /** An object URL for the chosen file, so the trim panel can show the frames. */
+  const [pickUrl, setPickUrl] = useState<string | null>(null);
 
   useEffect(() => {
     // A blob URL holds the whole file in memory until it is revoked.
@@ -198,6 +216,8 @@ export function VideoUploader({ linkFetchWorks = true }: { linkFetchWorks?: bool
     setPhase("idle");
     setProgress(0);
     setShrunkTo(null);
+    setTrim(null);
+    setPickUrl((old) => { if (old) URL.revokeObjectURL(old); return null; });
     if (!selected) {
       setFile(null);
       setValidationError(null);
@@ -206,6 +226,7 @@ export function VideoUploader({ linkFetchWorks = true }: { linkFetchWorks?: bool
     const result = validateVideoFile(selected);
     setFile(selected);
     setValidationError(result.valid ? null : result.error);
+    if (result.valid) setPickUrl(URL.createObjectURL(selected));
   }, []);
 
   const cancel = useCallback(() => {
@@ -287,9 +308,20 @@ export function VideoUploader({ linkFetchWorks = true }: { linkFetchWorks?: bool
         const outcome = await transcodeForUpload(file, {
           opfsName,
           signal: abort.signal,
+          trim,
           onProgress: (fraction) => setProgress(Math.round(fraction * 100)),
           onSkip: (reason) => console.info(`[upload] uploading the original: ${reason}`),
         });
+        // A REFUSED TRIM IS NOT A SILENT ONE. Everything else here degrades to
+        // "upload the original", which is right for a compression that was
+        // not worth it and wrong for a cut the user asked for: they would be
+        // charged for the minutes they just told us to throw away.
+        if (trim && !outcome) {
+          throw new Error(
+            "This browser could not cut the clip — it cannot re-encode this file. Upload the whole "
+            + "clip, or trim it in your phone's Photos app first."
+          );
+        }
         if (cancelledRef.current) throw new UploadCancelledError();
         if (outcome) {
           payload = outcome.file;
@@ -617,6 +649,16 @@ export function VideoUploader({ linkFetchWorks = true }: { linkFetchWorks?: bool
           onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}
         />
       </label>
+
+      {file && pickUrl && !validationError ? (
+        <TrimPicker
+          src={pickUrl}
+          suggestedSeconds={remainingSeconds}
+          value={trim}
+          onChange={setTrim}
+          disabled={busy}
+        />
+      ) : null}
 
       {file ? (
         <div className="filecard">

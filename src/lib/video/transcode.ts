@@ -27,7 +27,7 @@
  */
 
 import type { Conversion as ConversionInstance, StreamTargetChunk } from "mediabunny";
-import { planTranscode, type SourceProbe } from "./transcode-plan";
+import { planTranscode, targetBitrate, type SourceProbe } from "./transcode-plan";
 import { openForWrite, readBack, remove } from "./opfs";
 
 /**
@@ -57,6 +57,39 @@ export interface TranscodeOptions {
   opfsName: string;
   /** Told the reason whenever this declines, so the caller can log it. */
   onSkip?: (reason: string) => void;
+  /**
+   * Cut the clip to these seconds before uploading.
+   *
+   * WHY IT LIVES HERE. The free allowance is ten minutes and a game is
+   * sixteen to nineteen, so a new player's first action is being refused.
+   * Cutting server-side would mean uploading the whole game first, which is
+   * the slow part; the encoder is already running in the browser and trimming
+   * costs it nothing extra.
+   *
+   * A TRIM IS ITS OWN REASON TO RE-ENCODE. Everything below normally declines
+   * on a clip that is already small enough -- the saving would not pay for the
+   * battery. When there is a range to cut, the cut IS the point, so the plan's
+   * "no need" answer is overridden and the source's own dimensions are kept.
+   */
+  trim?: { startSeconds: number; endSeconds: number } | null;
+}
+
+/**
+ * A trim that is worth doing and can be done, or null.
+ *
+ * Refused when it is not shorter than the clip: re-encoding a whole game to
+ * cut nothing off it is minutes of a phone's battery for no bytes saved.
+ */
+export function normaliseTrim(
+  trim: { startSeconds: number; endSeconds: number } | null | undefined,
+  durationSeconds: number | null,
+): { startSeconds: number; endSeconds: number } | null {
+  if (!trim) return null;
+  const start = Math.max(0, trim.startSeconds);
+  const end = trim.endSeconds;
+  if (!(Number.isFinite(start) && Number.isFinite(end)) || end - start < 1) return null;
+  if (durationSeconds && start <= 0.05 && end >= durationSeconds - 0.05) return null;
+  return { startSeconds: start, endSeconds: end };
 }
 
 /** Cheap enough to call before deciding anything: no decoding happens. */
@@ -133,9 +166,15 @@ export async function transcodeForUpload(
   // difference between uploading the original and a failed upload.
   if (!canDecode) return skip("this browser cannot decode that codec");
 
+  const trim = normaliseTrim(opts.trim, probe.durationSeconds);
   const decision = planTranscode(probe);
-  if (!decision.transcode) return skip(decision.reason);
-  const { width, height, bitrate } = decision.plan;
+  if (!decision.transcode && !trim) return skip(decision.reason);
+  // With a trim and no downscale to do, the source's own size is the target:
+  // the job is to cut, not to shrink, and re-sizing on top would be a second
+  // lossy generation nobody asked for.
+  const { width, height, bitrate } = decision.transcode
+    ? decision.plan
+    : { width: probe.width, height: probe.height, bitrate: targetBitrate(probe.width, probe.height, probe.fps) };
 
   const quality = new Quality({ bitrate });
   try {
@@ -195,6 +234,7 @@ export async function transcodeForUpload(
       // and makeCvProxy drops it server-side for the same reason. It is a
       // tenth of the bytes and all of the AAC decoding, for nothing.
       audio: { discard: true },
+      ...(trim ? { trim: { start: trim.startSeconds, end: trim.endSeconds } } : {}),
     });
   } catch {
     await remove(opts.opfsName);
