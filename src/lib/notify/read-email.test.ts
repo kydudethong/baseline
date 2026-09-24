@@ -46,3 +46,29 @@ test("a long headline is clipped to fit an inbox subject line", () => {
 test("escapeHtml handles every character that matters in an attribute", () => {
   assert.equal(escapeHtml(`a&b<c>"d'`), "a&amp;b&lt;c&gt;&quot;d&#39;");
 });
+
+test("the ready email carries the still, and says what to do if the ring is wrong", () => {
+  // The picture is what makes this not look like every other notification: it
+  // is the reader, on their own court, circled — and it is checkable in a
+  // glance before they open anything.
+  const withImage = readEmail({
+    kind: "ready", title: "Tuesday night", headline: "Bend more on dinks",
+    url: "https://baseline.test/dashboard/abc", imageUrl: "https://r2.test/ref.jpg?sig=1",
+  });
+  assert.match(withImage.html, /<img src="https:\/\/r2\.test\/ref\.jpg\?sig=1"/);
+  assert.match(withImage.html, /re-tag yourself/);
+  // And without one it is the email it always was, with no broken image.
+  const plain = readEmail({
+    kind: "ready", title: "Tuesday night", headline: "Bend more on dinks",
+    url: "https://baseline.test/dashboard/abc",
+  });
+  assert.doesNotMatch(plain.html, /<img/);
+});
+
+test("a failed read never carries a picture", () => {
+  const failed = readEmail({
+    kind: "failed", title: "Tuesday night", headline: null,
+    url: "https://baseline.test/dashboard/abc", imageUrl: "https://r2.test/ref.jpg",
+  });
+  assert.doesNotMatch(failed.html, /<img/);
+});

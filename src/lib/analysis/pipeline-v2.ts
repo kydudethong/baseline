@@ -7,7 +7,7 @@ import { getSetup } from "@/lib/db/setup";
 import { getAnalysisForUser, updateAnalysisStatus, updateVideoMetadata } from "@/lib/db/analyses";
 import { VideoProcessor } from "@/lib/video/processor";
 import { runVisionPipeline } from "@/lib/vision/run-vision-pipeline";
-import { downloadToFile, uploadFileFromDisk } from "@/lib/storage/r2";
+import { downloadToFile, uploadFileFromDisk, getSignedDownloadUrl } from "@/lib/storage/r2";
 import { describeError } from "./describe-error";
 import { StageTimer } from "./stage-timer";
 import { runFinished, runStarted } from "./idle-sleep";
@@ -23,6 +23,7 @@ import { sendEmail } from "@/lib/notify/send";
 import { env } from "@/lib/env";
 import { startHeartbeat } from "./heartbeat";
 import { withRunSignal } from "./run-registry";
+import { referenceFramePath } from "@/lib/coaching/reference-frame-image";
 
 const VISION_FPS = Number(process.env.VISION_FPS ?? "5");
 
@@ -746,11 +747,19 @@ async function notifyRead(
       supabase.from("analyses").select("title").eq("id", analysisId).maybeSingle(),
       supabase.from("coaching_reads").select("headline").eq("analysis_id", analysisId).maybeSingle(),
     ]);
+    // The marked still, signed for a week. Best-effort in every direction:
+    // an unsigned or missing frame costs the picture, not the email.
+    let imageUrl: string | null = null;
+    if (kind === "ready") {
+      imageUrl = await getSignedDownloadUrl(referenceFramePath(userId, analysisId), 7 * 24 * 3600)
+        .catch(() => null);
+    }
     const content = readEmail({
       kind,
       title: (analysis as { title?: string } | null)?.title ?? "your game",
       headline: kind === "ready" ? ((read as { headline?: string | null } | null)?.headline ?? null) : null,
       url: `${env.siteUrl.replace(/\/+$/, "")}/dashboard/${analysisId}`,
+      imageUrl,
     });
     const sent = await sendEmail(to, content);
     if (sent) console.log(`[email] read-${kind} sent for ${analysisId}`);

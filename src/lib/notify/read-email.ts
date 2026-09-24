@@ -17,6 +17,20 @@ export interface ReadEmailInput {
   /** The read's own headline, e.g. "Bend more on dinks". Null on failure. */
   headline: string | null;
   url: string;
+  /**
+   * A link to the still with the player ringed on it, when there is one.
+   *
+   * WHY A PICTURE. This email competes with every other notification on a
+   * phone, and the thing that makes it obviously not spam is that it contains
+   * the reader, on their own court, circled. It is also the one part of the
+   * read that can be checked in a glance: if the ring is round the wrong
+   * person, they know before they open anything.
+   *
+   * A SIGNED URL WITH A LIFETIME. Inboxes are read days later, so this is
+   * expected to expire; the email is written so that a broken image costs a
+   * picture and nothing else.
+   */
+  imageUrl?: string | null;
 }
 
 export interface EmailContent {
@@ -73,6 +87,14 @@ export function readEmail(input: ReadEmailInput): EmailContent {
   ].join("\n");
   const html = `<p>Your coaching read of <strong>${escapeHtml(title)}</strong> is ready.</p>`
     + (input.headline ? `<p style="font-size:18px"><strong>${escapeHtml(input.headline)}</strong></p>` : "")
+    + (input.imageUrl
+      ? `<p><a href="${escapeHtml(input.url)}">`
+        + `<img src="${escapeHtml(input.imageUrl)}" width="480" `
+        + `alt="The player this read is about, circled on the court" `
+        + `style="max-width:100%;border-radius:8px;display:block" /></a></p>`
+        + `<p style="font-size:13px;color:#64748B">That is who the read is about. If the ring is `
+        + `round the wrong player, open it and re-tag yourself — re-running costs no minutes.</p>`
+      : "")
     + `<p><a href="${escapeHtml(input.url)}">See the clips, what to fix first, and the drills for it</a></p>`;
   return { subject, html, text };
 }
