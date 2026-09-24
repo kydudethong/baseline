@@ -5,6 +5,7 @@ import { Check, Paddle } from "@/components/motifs/Motifs";
 import { CoachingInsight } from "@/components/analysis/CoachingInsight";
 import type { Evidence } from "@/lib/db/evidence";
 import { timesInProse } from "@/lib/format/duration";
+import { checkedSentence, parseChecked } from "@/lib/coaching/checked";
 
 /**
  * The coaching read, with every point said ONCE.
@@ -79,6 +80,12 @@ export function CoachingReadPanel({
   drillNames?: Record<string, string>;
   feedback?: Map<string, "right" | "wrong" | "unsure">;
 }) {
+  // WHAT THE SECOND LOOK MADE OF THIS READ, at the top of it. Every criticism
+  // was re-watched at full detail and the ones the footage contradicted were
+  // deleted -- which is invisible on a page that simply has fewer points.
+  const checked = parseChecked(read.coaching_json);
+  const checkedLine = checkedSentence(checked);
+  const unconfirmed = new Set(checked?.unconfirmedTitles ?? []);
   const coaching = parseCoaching(read.coaching_json);
 
   // The narrative blob is the ONLY coaching on the fallback path. Anywhere else
@@ -95,10 +102,23 @@ export function CoachingReadPanel({
 
   return (
     <div className="stack g6">
+      {checkedLine ? (
+        <p className="checked-line">
+          <span className="ic" aria-hidden="true">&#10003;</span>
+          <span>
+            {checkedLine}{" "}
+            <span style={{ color: "var(--ink-3)" }}>
+              Every criticism here is re-watched on its own, at full detail, before you see it.
+            </span>
+          </span>
+        </p>
+      ) : null}
+
       {hero ? (
         <CoachingInsight
           observation={hero}
           hero
+          unconfirmed={unconfirmed.has(hero.title)}
           eyebrow="The one thing to work on first"
           clipUrl={heroEvidence?.clipUrl ?? null}
           fallbackUrl={heroEvidence?.fallbackUrl ?? null}
@@ -129,6 +149,7 @@ export function CoachingReadPanel({
             <CoachingInsight
               key={o.id}
               observation={o}
+              unconfirmed={unconfirmed.has(o.title)}
               clipUrl={evidence?.get(o.id)?.clipUrl ?? null}
               fallbackUrl={evidence?.get(o.id)?.fallbackUrl ?? null}
               startSeconds={evidence?.get(o.id)?.startSeconds ?? null}

@@ -21,6 +21,7 @@ import { timesInProse } from "@/lib/format/duration";
 export function CoachingInsight({
   observation, drillName, hero = false, action, eyebrow, analysisId, initialVerdict,
   clipUrl, fallbackUrl, startSeconds, windowStartSeconds, windowEndSeconds, technique,
+  unconfirmed = false,
 }: {
   observation: CoachingObservationRow;
   /** Resolved from the drill catalogue; the row only stores a slug. */
@@ -45,6 +46,16 @@ export function CoachingInsight({
   windowEndSeconds?: number | null;
   /** What the technique pass saw at that moment, when it was one of the shots read. */
   technique?: CoachingShotTechniqueRow | null;
+  /**
+   * The second look could not settle this one from the footage.
+   *
+   * SAID, NOT HIDDEN. Every criticism is re-watched at full detail and the
+   * ones the footage contradicts are deleted; this is the third answer, where
+   * the window did not show enough to say either way. A reader who knows
+   * which points are shaky can weigh them; one who is told nothing has to
+   * treat the whole page as equally certain, which it is not.
+   */
+  unconfirmed?: boolean;
 }) {
   const o = observation;
   const isStrength = o.valence === "strength";
@@ -63,8 +74,15 @@ export function CoachingInsight({
     <article className={`insight${hero ? " insight-hero" : ""}`}>
       <div className="insight-top">
         <h3 className="insight-title">{timesInProse(o.title)}</h3>
-        <span className={`pill ${isStrength ? "p-good" : o.severity >= 4 ? "p-bad" : "p-warn"}`}>
-          {eyebrow ?? (isStrength ? "Strength" : o.severity >= 4 ? "Priority" : "Worth fixing")}
+        <span className="row g1" style={{ alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {unconfirmed ? (
+            <span className="pill p-muted" title="Re-watched at full detail, but the footage did not settle it either way">
+              Not confirmed on the footage
+            </span>
+          ) : null}
+          <span className={`pill ${isStrength ? "p-good" : o.severity >= 4 ? "p-bad" : "p-warn"}`}>
+            {eyebrow ?? (isStrength ? "Strength" : o.severity >= 4 ? "Priority" : "Worth fixing")}
+          </span>
         </span>
       </div>
 

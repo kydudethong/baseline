@@ -53,6 +53,7 @@ import { downloadToFile } from "@/lib/storage/r2";
 import { getSetup, matchTracksToSetup, PARTNER_SEED_LABEL } from "@/lib/db/setup";
 import { momentFor } from "./evidence-moment";
 import { verifyObservations } from "./verify-observations";
+import type { CheckedCounts } from "./checked";
 import { cutEvidenceClips } from "./evidence-clips";
 import { OVERLAY_LEGEND } from "./overlay-legend";
 import { buildReferenceFrameImage } from "./reference-frame-image";
@@ -364,6 +365,8 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
 
 
   let analyst;
+  /** What the second look made of the criticisms. Shown to the reader. */
+  let checked: CheckedCounts | null = null;
   try {
     const overlay = await readOverlayBytes(
       analysisId, analysis.debug_video_bucket ?? null, analysis.debug_video_path ?? null
@@ -462,6 +465,11 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
     });
     // EVERY CRITICISM CHECKED AGAINST THE FOOTAGE BEFORE IT IS WRITTEN DOWN.
     //
+    // The counts are kept and shown to the reader. See CheckedNote: a product
+    // that deletes its own wrong sentences should say so, because the reader
+    // has just been given four wrong ones and has no other way to tell that
+    // anything changed.
+    //
     // The scan watches the whole game at low media resolution, which is what
     // makes a twenty-minute clip affordable and is not enough to tell a dink
     // from a speed-up or a hinge from a slouch. Four reported cases in one
@@ -483,6 +491,15 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
         onLog: (line) => console.error(`[coaching] ${line}`),
       });
       analyst.output.observations = verified.kept;
+      checked = {
+        confirmed: verified.kept.filter((o) => o.valence !== "strength").length - verified.unclear,
+        unclear: verified.unclear,
+        dropped: verified.dropped.length,
+        droppedTitles: verified.dropped.map((d) => d.observation.title).slice(0, 8),
+        unconfirmedTitles: verified.kept
+          .filter((o) => (o as { unconfirmed?: boolean }).unconfirmed)
+          .map((o) => o.title),
+      };
     } catch (err) {
       console.error(`[coaching] verify pass skipped: ${describeError(err)}`);
     }
@@ -519,6 +536,7 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
   await persistCoachingOutput({
     supabase, analysisId,
     analysis,
+    checked,
     out: analyst.output,
     model: analyst.model,
     problems: analyst.problems,
@@ -548,6 +566,8 @@ export async function runCoachingPipeline(supabase: Client, userId: string, anal
  * re-fetch here would be a second set of rows that can disagree with the first.
  */
 export async function persistCoachingOutput(opts: {
+  /** What the verification pass confirmed, could not settle, and deleted. */
+  checked?: CheckedCounts | null;
   supabase: Client;
   analysisId: string;
   analysis: AnalysisWithVideo;
@@ -793,6 +813,10 @@ export async function persistCoachingOutput(opts: {
           //
           // Stored in this existing blob rather than a new table, so the
           // feature needs no migration.
+          // WHAT THE SECOND LOOK MADE OF THIS READ. See CheckedNote and
+          // verify-observations.ts. In the blob for the same reason as the
+          // partnership: one analysis, read once, nothing aggregates it.
+          ...(opts.checked ? { checked: opts.checked } : {}),
           playstyle_match: matchPlaystyles(
             Object.fromEntries(out.skills.map((s) => [s.skill_key, s.rating]))
           ),

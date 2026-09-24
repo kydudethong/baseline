@@ -42,13 +42,16 @@ test("a point the footage contradicts is deleted; one it cannot settle is kept",
   // is evidence against the claim. "I could not tell from this window" is not
   // — and deleting on that would quietly empty the read of everything at the
   // far baseline, where this camera sees least.
-  const got = applyVerdicts([
-    { o: "at the kitchen, not the baseline", out: { seen: "he is at the kitchen line", verdict: "wrong" as const, correction: "smash from the kitchen" } },
-    { o: "too far away to tell", out: { seen: "the far player is a few pixels", verdict: "unclear" as const } },
-    { o: "really did stand up", out: { seen: "legs straight through contact", verdict: "confirmed" as const } },
+  const got = applyVerdicts<{ title: string; unconfirmed?: boolean }>([
+    { o: { title: "at the kitchen, not the baseline" }, out: { seen: "he is at the kitchen line", verdict: "wrong" as const, correction: "smash from the kitchen" } },
+    { o: { title: "too far away to tell" }, out: { seen: "the far player is a few pixels", verdict: "unclear" as const } },
+    { o: { title: "really did stand up" }, out: { seen: "legs straight through contact", verdict: "confirmed" as const } },
   ]);
-  assert.deepEqual(got.kept, ["too far away to tell", "really did stand up"]);
+  assert.deepEqual(got.kept.map((k) => k.title), ["too far away to tell", "really did stand up"]);
+  assert.equal(got.kept[0].unconfirmed, true, "the one it could not settle is marked, not silently kept");
+  assert.equal(got.kept[1].unconfirmed, undefined);
   assert.equal(got.dropped.length, 1);
   assert.equal(got.dropped[0].correction, "smash from the kitchen");
+  assert.equal(got.dropped[0].observation.title, "at the kitchen, not the baseline");
   assert.equal(got.unclear, 1);
 });

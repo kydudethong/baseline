@@ -47,6 +47,16 @@ export interface VerifiableObservation {
   valence: "strength" | "weakness";
   shot_t?: number | null;
   rally_idx?: number | null;
+  /**
+   * Set when the second look could not settle this one.
+   *
+   * KEPT AND LABELLED rather than deleted: the window genuinely did not show
+   * enough -- the player was out of frame, the ball was not visible, it was
+   * too far away. Deleting on that would quietly empty a read of everything
+   * that happens at the far baseline, where this camera sees least. Saying it
+   * lets the reader weigh the point instead of taking it on faith.
+   */
+  unconfirmed?: boolean;
 }
 
 export interface VerifyWindow {
@@ -143,7 +153,7 @@ const SCHEMA = {
  * absence would quietly empty the read of everything that happens at the far
  * baseline, where this camera can see least.
  */
-export function applyVerdicts<T>(
+export function applyVerdicts<T extends { unconfirmed?: boolean }>(
   results: Array<{ o: T; out: { seen: string; verdict: Verdict; correction?: string | null } }>,
 ): { kept: T[]; dropped: Array<{ observation: T; seen: string; correction: string | null }>; unclear: number } {
   const kept: T[] = [];
@@ -154,7 +164,11 @@ export function applyVerdicts<T>(
       dropped.push({ observation: r.o, seen: r.out.seen, correction: r.out.correction ?? null });
       continue;
     }
-    if (r.out.verdict === "unclear") unclear += 1;
+    if (r.out.verdict === "unclear") {
+      unclear += 1;
+      kept.push({ ...r.o, unconfirmed: true });
+      continue;
+    }
     kept.push(r.o);
   }
   return { kept, dropped, unclear };

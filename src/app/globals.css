@@ -1843,3 +1843,25 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;letter-spacing:-.02em;tex
   width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none;
   background:color-mix(in srgb, var(--blue) 14%, transparent);color:var(--blue);font-size:17px;
 }
+
+/* "Not confirmed on the footage": quieter than a severity pill on purpose.
+   It is a caveat on a point, not a point of its own. */
+.pill.p-muted{
+  background:color-mix(in srgb, var(--ink-3) 12%, transparent);
+  color:var(--ink-3);font-weight:600;
+}
+
+/* What the second look made of the read. A thin line above the coaching, in
+   the colour of a fact rather than a warning. */
+.checked-line{
+  display:flex;gap:10px;align-items:flex-start;
+  padding:10px 12px;border-radius:var(--r2);
+  background:color-mix(in srgb, var(--court, var(--blue)) 8%, transparent);
+  border:1px solid color-mix(in srgb, var(--court, var(--blue)) 22%, transparent);
+  color:var(--ink-2);font-size:12.5px;line-height:1.45;
+}
+.checked-line .ic{
+  flex:none;width:20px;height:20px;border-radius:6px;display:grid;place-items:center;
+  background:color-mix(in srgb, var(--court, var(--blue)) 18%, transparent);
+  color:var(--court, var(--blue));font-size:12px;
+}
